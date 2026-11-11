@@ -227,6 +227,8 @@ static const Builtin builtins[] = {
     { "realPath", 2, builtin_realPath },
     { "temporaryFile", 2, builtin_temporaryFile },
     { "runProcess", 7, builtin_runProcess },
+    { "sleepMicroseconds", 2, builtin_sleepMicroseconds },
+    { "monotonicNanoseconds", 1, builtin_monotonicNanoseconds },
     { "deepForce", 2, builtin_deepForce },
     { "numAdd", 3, builtin_numAdd },
     { "numSub", 3, builtin_numSub },
