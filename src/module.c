@@ -27,11 +27,11 @@ Constructor cons_constructor =
     { ":", &list_type_constructor, NULL, 1, 2, 0, 0, NULL, NULL, NULL, NULL, NULL, 0, NULL };
 
 static Entity unit_entity =
-    { NS_CONSTRUCTOR, "()", "()", NULL, &unit_constructor, NULL, NULL, NULL };
+    { NS_CONSTRUCTOR, "()", "()", NULL, &unit_constructor, NULL, NULL, NULL, NULL };
 static Entity nil_entity =
-    { NS_CONSTRUCTOR, "[]", "[]", NULL, &nil_constructor, NULL, NULL, NULL };
+    { NS_CONSTRUCTOR, "[]", "[]", NULL, &nil_constructor, NULL, NULL, NULL, NULL };
 static Entity cons_entity =
-    { NS_CONSTRUCTOR, ":", "[]", NULL, &cons_constructor, NULL, NULL, NULL };
+    { NS_CONSTRUCTOR, ":", "[]", NULL, &cons_constructor, NULL, NULL, NULL, NULL };
 
 static TypeCon tuple_types[MAX_TUPLE + 1];
 static Constructor tuple_constructors[MAX_TUPLE + 1];
@@ -179,6 +179,10 @@ static Entity *find_exported_within(Module *module, enum Namespace namespace,
     Import *import;
     int i;
 
+    if (entity != NULL && module->exports != NULL && !module->exports_itself
+        && !import_allows(module->exports, name, entity->parent)) {
+        entity = NULL; /* defined here, and not in the export list */
+    }
     if (entity != NULL || module->searched == current_search) {
         return entity;
     }
@@ -475,8 +479,9 @@ static int signature_colon(const Token *tokens, int start, int end)
     }
 }
 
-/* If [start, end) is a clause `name parameters = body` or
-   `(+) parameters = body`, the name. Otherwise NULL. */
+/* If [start, end) is a clause `name parameters = body`,
+   `(+) parameters = body` or `parameter + parameter = body`, the name.
+   Otherwise NULL. */
 static const char *clause_name(const Token *tokens, int start, int end)
 {
     const Token *after; /* the token after the name */
@@ -491,10 +496,20 @@ static const char *clause_name(const Token *tokens, int start, int end)
         name = tokens[start + 1].text;
         after = &tokens[start + 3];
     } else {
-        return NULL;
+        after = NULL;
     }
-    if (after->kind == T_VARSYM || token_is(after, T_SPECIAL, "`")) {
-        return NULL; /* an operator defined infix: x + y = ... */
+    if (after == NULL
+        || (after->kind == T_VARSYM && !token_is_bang(after - 1, after))
+        || token_is(after, T_SPECIAL, "`")) {
+        /* Perhaps an operator defined between its parameters:
+           x + y = ... */
+        int operator = infix_clause_operator(tokens, start, end);
+
+        if (operator < 0) {
+            return NULL;
+        }
+        return tokens[operator].kind == T_VARSYM ? tokens[operator].text
+                                                 : tokens[operator + 1].text;
     }
     return name;
 }
@@ -582,6 +597,7 @@ static ImportItem *add_import_item(Import *import, const char *name)
     ImportItem *item = xmalloc(sizeof(ImportItem));
 
     item->name = name;
+    item->parent = NULL;
     item->all_children = 0;
     item->next = import->items;
     import->items = item;
@@ -619,12 +635,12 @@ static void add_import_items(Import *import, const Token *tokens, int start,
         } else if (token_is(token, T_VARID, "pattern")
                    && tokens[i + 1].kind == T_CONID) {
             /* `pattern P`: the keyword adds nothing. */
-        } else if (token->kind == T_VARID) {
-            add_import_item(import, token->text);
-        } else if (token->kind == T_CONID) {
+        } else if (token->kind == T_VARID || token->kind == T_CONID) {
             ImportItem *item = add_import_item(import, token->text);
 
-            if (!in_sublist) {
+            if (in_sublist && parent_item != NULL) {
+                item->parent = parent_item->name;
+            } else if (token->kind == T_CONID) {
                 parent_item = item;
             }
         }
@@ -1297,6 +1313,99 @@ static int add_instance_declaration(Module *module, int start, int end)
     return 1;
 }
 
+/* The T that the export list names the name inside, as in T (name), or
+   NULL. */
+static const char *export_parent(const Module *module, const char *name)
+{
+    const ImportItem *item;
+
+    if (module->exports == NULL) {
+        return NULL;
+    }
+    for (item = module->exports->items; item != NULL; item = item->next) {
+        if (item->parent != NULL && strcmp(item->name, name) == 0) {
+            return item->parent;
+        }
+    }
+    return NULL;
+}
+
+/* pattern P x y <- pattern [where P x y = expression]
+   pattern P {f, g} <- pattern
+   pattern x :+ y <- pattern
+   pattern P x y = pattern
+   pattern P, Q :: type                  (not looked at)
+
+   See PatternSynonym in syntax.h. */
+static int add_pattern_synonym(Module *module, int start, int end)
+{
+    const Token *tokens = module->tokens;
+    int arrow = find_reserved(tokens, start, end, "<-");
+    int equals = find_reserved(tokens, start, end, "=");
+    int colons = find_reserved(tokens, start, end, "::");
+    int where;
+    PatternSynonym *synonym;
+    Entity *entity;
+    int is_record = 0;
+    int i;
+
+    if (arrow == end || equals < arrow) {
+        arrow = equals; /* pattern P x = pattern */
+    }
+    if (colons < arrow) {
+        return 1; /* a type signature */
+    }
+    if (arrow == end) {
+        return 0;
+    }
+    where = find_reserved(tokens, arrow, end, "where");
+    synonym = xmalloc(sizeof(PatternSynonym));
+    memset(synonym, 0, sizeof(PatternSynonym));
+    synonym->module = module;
+    synonym->rhs_start = arrow + 1;
+    synonym->rhs_end = where;
+    synonym->parameters = xmalloc((size_t)(arrow - start) * sizeof(char *));
+    for (i = start + 1; i < arrow; i++) {
+        if (tokens[i].kind == T_CONID || tokens[i].kind == T_VARSYM) {
+            synonym->name = tokens[i].text;
+        } else if (tokens[i].kind == T_VARID) {
+            synonym->parameters[synonym->parameter_count++] = tokens[i].text;
+        } else if (token_is(&tokens[i], T_SPECIAL, "{")) {
+            is_record = 1;
+        } else if (tokens[i].kind != T_SPECIAL) {
+            return 0;
+        }
+    }
+    if (synonym->name == NULL) {
+        return 0;
+    }
+    if (where < end) {
+        /* The clause after `where` says what P is in an expression. */
+        synonym->builder = new_global(module, synonym->name);
+        add_clause(synonym->builder, where + 1, end);
+    } else if (arrow == equals && tokens[start + 1].kind == T_CONID
+               && !is_record) {
+        /* P x y = pattern, which is also the clause P x y = expression. */
+        synonym->builder = new_global(module, synonym->name);
+        add_clause(synonym->builder, start + 1, end);
+    }
+    /* An export list can make the synonym part of a type:
+       T (.., P) or T (P, field). Then importing T (..) brings it. */
+    entity = add_entity(module, NS_CONSTRUCTOR, synonym->name,
+                        export_parent(module, synonym->name));
+    entity->synonym = synonym;
+    if (is_record) {
+        for (i = 0; i < synonym->parameter_count; i++) {
+            Entity *field =
+                find_or_add_variable(module, synonym->parameters[i]);
+
+            field->parent = export_parent(module, synonym->parameters[i]);
+            field->global->synonym = synonym;
+        }
+    }
+    return 1;
+}
+
 /* Records one top-level declaration without parsing its body. A declaration
    we cannot handle is only remembered: it is not an error until a name it
    defines is needed (see note_unsupported). */
@@ -1320,6 +1429,11 @@ static void add_declaration(Module *module, int start, int end)
         supported = add_class_declaration(module, start, end);
     } else if (token_is(first, T_RESERVED, "instance")) {
         supported = add_instance_declaration(module, start, end);
+    } else if (token_is(first, T_VARID, "pattern") && end - start > 2
+               && (first[1].kind == T_CONID
+                   || (first[1].kind == T_VARID && first[2].kind == T_VARSYM
+                       && first[2].text[0] == ':'))) {
+        supported = add_pattern_synonym(module, start, end);
     } else {
         supported = add_variable_declaration(module, start, end);
     }
@@ -1405,7 +1519,10 @@ static Module *parse_module(const char *file, const char *source,
                 die("%s: module header without where", file);
             }
             if (position > 1 && token_is(&tokens[position], T_RESERVED, "module")
-                && strcmp(tokens[position + 1].text, module->name) != 0) {
+                && strcmp(tokens[position + 1].text, module->name) == 0) {
+                module->exports_itself = 1;
+            } else if (position > 1
+                       && token_is(&tokens[position], T_RESERVED, "module")) {
                 /* module A in the export list */
                 module->reexports = xrealloc(
                     module->reexports,

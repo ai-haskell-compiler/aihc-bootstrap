@@ -1,4 +1,4 @@
-module Data.List (module Prelude) where
+module Data.List (module Data.List, module Prelude) where
 
 -- The list functions that GHC's Prelude does not export. Where the order of
 -- a result is not obvious (nubBy, sortBy, maximumBy, ...) the definition

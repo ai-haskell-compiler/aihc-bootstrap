@@ -270,3 +270,24 @@ words (Text string) = P.map Text (P.words string)
 
 unwords :: [Text] -> Text
 unwords texts = Text (P.unwords (P.map unpack texts))
+
+-- ---- Patterns ----
+
+pattern Empty :: Text
+pattern Empty <- (null -> True)
+  where
+    Empty = empty
+
+pattern (:<) :: Char -> Text -> Text
+pattern c :< rest <- (uncons -> Just (c, rest))
+  where
+    (:<) c rest = cons c rest
+
+pattern (:>) :: Text -> Char -> Text
+pattern start :> c <- (unsnoc -> Just (start, c))
+  where
+    (:>) start c = snoc start c
+
+infixr 5 :<
+
+infixl 5 :>

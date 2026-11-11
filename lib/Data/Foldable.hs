@@ -1,4 +1,4 @@
-module Data.Foldable (module Prelude) where
+module Data.Foldable (module Data.Foldable, module Prelude) where
 
 import Data.List (find)
 

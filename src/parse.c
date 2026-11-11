@@ -1,5 +1,6 @@
 #include "syntax.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* Parses the clauses of one top-level variable. This is a plain recursive
@@ -292,6 +293,8 @@ static int starts_pattern_atom(const Parser *parser)
 }
 
 static Pattern *parse_pattern(Parser *parser);
+static const char *operator_constructor_name(const Token *token);
+static Expr *parse_expression(Parser *parser);
 
 static Pattern *new_cons_pattern(const Token *token, Pattern *head,
                                  Pattern *tail)
@@ -378,6 +381,52 @@ static void parse_record_pattern(Parser *parser, Pattern *pattern)
 }
 
 /* A pattern that can be an argument without parentheses around it. */
+/* Whether what follows, inside parentheses, is `function -> pattern`:
+   there is a -> before the next comma or the closing parenthesis, outside
+   any brackets. A
+   function written as a lambda or a case would have a -> of its own; that
+   is not expected here. */
+static int is_view_pattern(const Parser *parser)
+{
+    int depth = 0;
+    int i;
+
+    for (i = parser->position; i < parser->end; i++) {
+        const Token *token = &parser->tokens[i];
+
+        if (token->kind == T_SPECIAL) {
+            if (strchr("([{", token->text[0]) != NULL) {
+                depth++;
+            } else if (strchr(")]}", token->text[0]) != NULL) {
+                depth--;
+                if (depth < 0) {
+                    return 0;
+                }
+            } else if (token->text[0] == ',' && depth == 0) {
+                return 0;
+            }
+        } else if (depth == 0 && token_is(token, T_RESERVED, "->")) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* A pattern inside parentheses: a pattern, or function -> pattern. */
+static Pattern *parse_view_or_pattern(Parser *parser)
+{
+    Pattern *pattern;
+
+    if (!is_view_pattern(parser)) {
+        return parse_pattern(parser);
+    }
+    pattern = new_pattern(P_VIEW, peek(parser));
+    pattern->literal = parse_expression(parser);
+    expect(parser, T_RESERVED, "->", "view pattern");
+    pattern->inner = parse_pattern(parser);
+    return pattern;
+}
+
 static Pattern *parse_pattern_atom(Parser *parser)
 {
     const Token *token = peek(parser);
@@ -417,7 +466,7 @@ static Pattern *parse_pattern_atom(Parser *parser)
             pattern = new_pattern(P_CONSTRUCTOR, token);
             pattern->name = "()";
         } else {
-            pattern = parse_pattern(parser);
+            pattern = parse_view_or_pattern(parser);
             if (next_is(parser, T_SPECIAL, ",")) {
                 Pattern **elements = xmalloc(MAX_TUPLE * sizeof(Pattern *));
                 int count = 1;
@@ -428,7 +477,7 @@ static Pattern *parse_pattern_atom(Parser *parser)
                     if (count == MAX_TUPLE) {
                         TODO_AT(token, "tuple with more elements than MAX_TUPLE");
                     }
-                    elements[count++] = parse_pattern(parser);
+                    elements[count++] = parse_view_or_pattern(parser);
                 }
                 pattern = new_tuple_pattern(token, elements, count);
             }
@@ -503,7 +552,7 @@ static Pattern *parse_pattern(Parser *parser)
            taken to group to the right. */
         Pattern *infix = new_pattern(P_CONSTRUCTOR, peek(parser));
 
-        infix->name = peek(parser)->text;
+        infix->name = operator_constructor_name(peek(parser));
         parser->position++;
         infix->argument_count = 2;
         infix->arguments = xmalloc(2 * sizeof(Pattern *));
@@ -528,15 +577,72 @@ static int starts_atom(const Parser *parser)
 }
 
 /* An operator name is a constructor if it starts with a colon. */
+/* The name of a constructor that is an operator, with its qualifier:
+   NE.:| */
+static const char *operator_constructor_name(const Token *token)
+{
+    char *name;
+
+    if (token->qualifier == NULL) {
+        return token->text;
+    }
+    name = xmalloc(strlen(token->qualifier) + strlen(token->text) + 2);
+    sprintf(name, "%s.%s", token->qualifier, token->text);
+    return name;
+}
+
 static Expr *new_operator(const Token *token)
 {
     Expr *expr;
 
     if (token->text[0] == ':') {
-        return new_constructor(token, token->text);
+        return new_constructor(token, operator_constructor_name(token));
     }
     expr = new_name(token, token->text);
     expr->qualifier = token->qualifier;
+    return expr;
+}
+
+/* The rest of a tuple, from the comma after its first element. `first` is
+   NULL if that element is left out. A tuple with elements left out is a
+   function of them (a tuple section):
+
+       (a, , c)  is  \v -> (a, v, c) */
+static Expr *parse_tuple_rest(Parser *parser, const Token *open, Expr *first)
+{
+    Expr **elements = xmalloc(MAX_TUPLE * sizeof(Expr *));
+    Binding *missing[MAX_TUPLE];
+    int missing_count = 0;
+    int count = 0;
+    Expr *expr;
+
+    for (;;) {
+        if (count == MAX_TUPLE) {
+            TODO_AT(open, "tuple with more elements than MAX_TUPLE");
+        }
+        if (count == 0 && first != NULL) {
+            elements[count++] = first;
+        } else if (next_is(parser, T_SPECIAL, ",")
+                   || next_is(parser, T_SPECIAL, ")")) {
+            missing[missing_count] = new_binding("");
+            elements[count++] = new_local(open, missing[missing_count++]);
+        } else {
+            elements[count++] = parse_expression(parser);
+        }
+        if (!next_is(parser, T_SPECIAL, ",")) {
+            break;
+        }
+        parser->position++;
+    }
+    expect(parser, T_SPECIAL, ")", "tuple syntax");
+    expr = new_tuple(open, elements, count);
+    while (missing_count > 0) {
+        Expr *lambda = new_expr(E_LAMBDA, open);
+
+        lambda->local = missing[--missing_count];
+        lambda->body = expr;
+        expr = lambda;
+    }
     return expr;
 }
 
@@ -551,14 +657,19 @@ static Expr *parse_parenthesised(Parser *parser, const Token *open)
     }
     if (next_is(parser, T_SPECIAL, ",")) {
         /* (,) and (,,): the tuple constructors as functions. */
+        int start = parser->position;
         int count = 1;
 
         while (next_is(parser, T_SPECIAL, ",")) {
             parser->position++;
             count++;
         }
-        expect(parser, T_SPECIAL, ")", "tuple constructor syntax");
-        return new_constructor(open, tuple_name(count));
+        if (next_is(parser, T_SPECIAL, ")")) {
+            parser->position++;
+            return new_constructor(open, tuple_name(count));
+        }
+        parser->position = start;
+        return parse_tuple_rest(parser, open, NULL);
     }
     if ((next_is_kind(parser, T_VARSYM) || next_is(parser, T_RESERVED, ":"))
         && token_is(&parser->tokens[parser->position + 1], T_SPECIAL, ")")) {
@@ -581,18 +692,7 @@ static Expr *parse_parenthesised(Parser *parser, const Token *open)
     }
     expr = parse_expression(parser);
     if (next_is(parser, T_SPECIAL, ",")) {
-        Expr **elements = xmalloc(MAX_TUPLE * sizeof(Expr *));
-        int count = 1;
-
-        elements[0] = expr;
-        while (next_is(parser, T_SPECIAL, ",")) {
-            parser->position++;
-            if (count == MAX_TUPLE) {
-                TODO_AT(open, "tuple with more elements than MAX_TUPLE");
-            }
-            elements[count++] = parse_expression(parser);
-        }
-        expr = new_tuple(open, elements, count);
+        return parse_tuple_rest(parser, open, expr);
     }
     expect(parser, T_SPECIAL, ")", "parenthesised form other than (expression)");
     return expr;
@@ -847,11 +947,25 @@ static Expr *parse_application(Parser *parser)
 }
 
 /* The part of a lambda after the backslash: x y -> body */
+static void parse_alternatives(Parser *parser, Expr *match);
+
 static Expr *parse_lambda_rest(Parser *parser)
 {
     const Token *token = peek(parser);
     Pattern *pattern;
 
+    if (next_is(parser, T_RESERVED, "case")) {
+        /* \case alternatives  is  \v -> case v of alternatives */
+        Expr *lambda = new_expr(E_LAMBDA, token);
+        Expr *match = new_expr(E_CASE, token);
+
+        lambda->local = new_binding("");
+        match->scrutinee = new_local(token, lambda->local);
+        parser->position++;
+        parse_alternatives(parser, match);
+        lambda->body = match;
+        return lambda;
+    }
     if (next_is(parser, T_RESERVED, "->")) {
         parser->position++;
         return parse_expression(parser);
@@ -881,12 +995,20 @@ static Expr *parse_body(Parser *parser)
 static Expr *parse_case(Parser *parser)
 {
     Expr *expr = new_expr(E_CASE, peek(parser));
-    Alternative **last = &expr->alternatives;
-    Block block;
 
     parser->position++;
     expr->scrutinee = parse_expression(parser);
     expect(parser, T_RESERVED, "of", "case without of");
+    parse_alternatives(parser, expr);
+    return expr;
+}
+
+/* The block of alternatives of a case: pattern -> body */
+static void parse_alternatives(Parser *parser, Expr *match)
+{
+    Alternative **last = &match->alternatives;
+    Block block;
+
     open_block(parser, &block);
     while (next_item(parser, &block)) {
         Pattern *pattern = parse_pattern(parser);
@@ -895,7 +1017,6 @@ static Expr *parse_case(Parser *parser)
         parse_rhs(parser, "->", *last);
         last = &(*last)->next;
     }
-    return expr;
 }
 
 /* Whether the statement or guard qualifier at the current position is
@@ -919,9 +1040,11 @@ static int statement_is_bind(const Parser *parser)
             return 0; /* the next statement */
         }
         if (token->kind == T_SPECIAL) {
-            if (token->text[0] == '(' || token->text[0] == '[') {
+            if (token->text[0] == '(' || token->text[0] == '['
+                || token->text[0] == '{') {
                 depth++;
-            } else if (token->text[0] == ')' || token->text[0] == ']') {
+            } else if (token->text[0] == ')' || token->text[0] == ']'
+                       || token->text[0] == '}') {
                 depth--;
                 if (depth < 0) {
                     return 0; /* the end of what we are inside */
@@ -1217,9 +1340,13 @@ static void parse_rhs(Parser *parser, const char *separator,
             parser->position++; /* the | or the comma */
             memset(qualifier, 0, sizeof(Qualifier));
             if (next_is(parser, T_RESERVED, "let")) {
-                TODO_AT(peek(parser), "let in a guard");
-            }
-            if (statement_is_bind(parser)) {
+                /* let pattern = expression: as pattern <- expression, with
+                   a pattern that always matches. */
+                parser->position++;
+                qualifier->pattern = parse_pattern(parser);
+                expect(parser, T_RESERVED, "=",
+                       "let in a guard other than let pattern = expression");
+            } else if (statement_is_bind(parser)) {
                 qualifier->pattern = parse_pattern(parser);
                 expect(parser, T_RESERVED, "<-", "pattern guard");
             }
@@ -1241,11 +1368,25 @@ static void parse_rhs(Parser *parser, const char *separator,
     }
 }
 
-static void parse_clause(Parser *parser, Clause *clause)
+/* A clause, from after its name. If the clause defines an operator between
+   its two parameters, `operator` is the position of the operator and the
+   clause is read from its start; otherwise `operator` is negative. */
+static void parse_clause(Parser *parser, Clause *clause, int operator)
 {
     clause->token = peek(parser);
     clause->count = 0;
     clause->patterns = NULL;
+    if (operator >= 0) {
+        clause->patterns = xmalloc(2 * sizeof(Pattern *));
+        clause->patterns[0] = parse_pattern(parser);
+        if (parser->position != operator) {
+            TODO_AT(peek(parser), "operator defined infix");
+        }
+        /* The operator is one token, or three as `name`. */
+        parser->position += peek(parser)->kind == T_VARSYM ? 1 : 3;
+        clause->patterns[1] = parse_pattern(parser);
+        clause->count = 2;
+    }
     while (!next_is(parser, T_RESERVED, "=")
            && !next_is(parser, T_RESERVED, "|")) {
         clause->patterns = xrealloc(
@@ -1386,6 +1527,17 @@ static void add_pattern_variables(Expr *let, const Pattern *whole,
             (Pattern *)whole, new_local(pattern->token, pattern->variable));
         add_let_binding(let, new_binding(pattern->variable->name), select);
     }
+    if (pattern->kind == P_AS) {
+        Expr *select = new_expr(E_CASE, pattern->token);
+
+        select->scrutinee = new_local(pattern->token, value);
+        select->alternatives = new_alternative(
+            (Pattern *)whole, new_local(pattern->token, pattern->variable));
+        add_let_binding(let, new_binding(pattern->variable->name), select);
+    }
+    if (pattern->inner != NULL) {
+        add_pattern_variables(let, whole, pattern->inner, value);
+    }
     for (i = 0; i < pattern->argument_count; i++) {
         add_pattern_variables(let, whole, pattern->arguments[i], value);
     }
@@ -1424,6 +1576,9 @@ static Expr *parse_local_bindings(Parser *parser, const Token *token)
         const Token *first = peek(parser);
         const Token *second = &parser->tokens[parser->position + 1];
         int colon = local_signature_colon(parser);
+        int infix_operator = colon >= 0 ? -1
+            : infix_clause_operator(parser->tokens, parser->position,
+                                    parser->end);
 
         if (colon >= 0) {
             /* f, g :: type */
@@ -1446,10 +1601,24 @@ static Expr *parse_local_bindings(Parser *parser, const Token *token)
                     locals[i].signature_end = parser->position;
                 }
             }
-        } else if (first->kind == T_VARID
-                   && (second->kind == T_VARSYM
-                       || token_is(second, T_SPECIAL, "`"))) {
-            TODO_AT(first, "operator defined infix");
+        } else if (infix_operator >= 0
+                   && !(first->kind == T_VARID
+                        && (second->kind != T_VARSYM
+                            || token_is_bang(first, second))
+                        && !token_is(second, T_SPECIAL, "`"))) {
+            /* parameter + parameter = body */
+            const Token *name = &parser->tokens[infix_operator];
+            Local *local;
+
+            if (name->kind != T_VARSYM) {
+                name++; /* past the backquote */
+            }
+            local = find_or_add_local(&locals, &count, name, name->text);
+            local->clauses = xrealloc(
+                local->clauses,
+                (size_t)(local->clause_count + 1) * sizeof(Clause));
+            parse_clause(parser, &local->clauses[local->clause_count++],
+                         infix_operator);
         } else if (first->kind == T_VARID
                    && !token_is(second, T_RESERVED, ":")
                    && !token_is(second, T_RESERVED, "@")) {
@@ -1460,7 +1629,7 @@ static Expr *parse_local_bindings(Parser *parser, const Token *token)
             local->clauses = xrealloc(
                 local->clauses,
                 (size_t)(local->clause_count + 1) * sizeof(Clause));
-            parse_clause(parser, &local->clauses[local->clause_count++]);
+            parse_clause(parser, &local->clauses[local->clause_count++], -1);
         } else {
             /* pattern = body */
             Pattern *pattern = parse_pattern(parser);
@@ -1498,6 +1667,45 @@ static void finish_let(Expr *let, Expr *body)
     }
 }
 
+/* ---- Pattern synonyms ---- */
+
+static void start_synonym_parser(Parser *parser, const PatternSynonym *synonym)
+{
+    parser->tokens = synonym->module->tokens;
+    parser->overloaded_strings = synonym->module->overloaded_strings;
+    parser->position = synonym->rhs_start;
+    parser->end = synonym->rhs_end;
+    parser->indent = 0;
+    parser->item_start = synonym->rhs_start;
+}
+
+Pattern *parse_synonym_pattern(const PatternSynonym *synonym)
+{
+    Parser parser;
+    Pattern *pattern;
+
+    start_synonym_parser(&parser, synonym);
+    pattern = parse_pattern(&parser);
+    if (parser.position < parser.end) {
+        TODO_AT(peek(&parser), "pattern syntax");
+    }
+    return pattern;
+}
+
+Expr *parse_synonym_selector(const PatternSynonym *synonym, const char *field)
+{
+    const Token *token = &synonym->module->tokens[synonym->rhs_start];
+    Expr *lambda = new_expr(E_LAMBDA, token);
+    Expr *match = new_expr(E_CASE, token);
+
+    lambda->local = new_binding("");
+    lambda->body = match;
+    match->scrutinee = new_local(token, lambda->local);
+    match->alternatives = new_alternative(parse_synonym_pattern(synonym),
+                                          new_name(token, field));
+    return lambda;
+}
+
 /* ---- Top-level variables ---- */
 
 Expr *parse_global(Global *global)
@@ -1511,6 +1719,9 @@ Expr *parse_global(Global *global)
         die("%s.%s has no definition", global->module->name, global->name);
     }
     for (chunk = global->clauses; chunk != NULL; chunk = chunk->next) {
+        const Token *first = &tokens[chunk->start];
+        const Token *second = first + 1;
+        int operator = -1;
         Parser parser;
 
         parser.tokens = tokens;
@@ -1518,11 +1729,22 @@ Expr *parse_global(Global *global)
         parser.end = chunk->end;
         parser.indent = 0;
         parser.item_start = chunk->start;
-        /* Skip the name: `f` is one token and `(+)` is three. */
         parser.position = chunk->start;
-        parser.position += tokens[chunk->start].kind == T_VARID ? 1 : 3;
+        if (first->kind == T_VARID
+            && (second->kind != T_VARSYM || token_is_bang(first, second))
+            && !token_is(second, T_SPECIAL, "`")) {
+            parser.position += 1; /* skip the name: f */
+        } else if (first->kind == T_CONID
+                   && strcmp(first->text, global->name) == 0) {
+            parser.position += 1; /* a pattern synonym as a function: P */
+        } else if (token_is(first, T_SPECIAL, "(") && second->kind == T_VARSYM
+                   && token_is(second + 1, T_SPECIAL, ")")) {
+            parser.position += 3; /* skip the name: (+) */
+        } else {
+            operator = infix_clause_operator(tokens, chunk->start, chunk->end);
+        }
         clauses = xrealloc(clauses, (size_t)(count + 1) * sizeof(Clause));
-        parse_clause(&parser, &clauses[count++]);
+        parse_clause(&parser, &clauses[count++], operator);
         if (parser.position < parser.end) {
             TODO_AT(&tokens[parser.position], "expression syntax");
         }

@@ -1,4 +1,4 @@
-module Data.Ord (module Prelude) where
+module Data.Ord (module Data.Ord, module Prelude) where
 
 comparing :: Ord b => (a -> b) -> a -> a -> Ordering
 comparing f a b = compare (f a) (f b)

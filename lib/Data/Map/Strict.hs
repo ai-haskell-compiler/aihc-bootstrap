@@ -1,4 +1,4 @@
-module Data.Map.Strict (module Data.Map.Base) where
+module Data.Map.Strict (module Data.Map.Strict, module Data.Map.Base) where
 
 -- The same map as Data.Map.Base. The functions that store values are
 -- defined again here, to evaluate each value before it goes into the map.

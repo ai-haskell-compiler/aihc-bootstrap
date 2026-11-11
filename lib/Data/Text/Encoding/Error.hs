@@ -1,4 +1,4 @@
-module Data.Text.Encoding.Error (module Data.Text.Encoding) where
+module Data.Text.Encoding.Error (module Data.Text.Encoding.Error, module Data.Text.Encoding) where
 
 import Data.Text.Encoding (UnicodeException (..))
 

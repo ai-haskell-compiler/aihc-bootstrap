@@ -1,4 +1,4 @@
-module Data.Function (module Prelude) where
+module Data.Function (module Data.Function, module Prelude) where
 
 infixl 0 `on`
 

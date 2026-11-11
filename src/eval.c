@@ -278,6 +278,9 @@ static int matches(const Pattern *pattern, Value *value, Env **env)
         return matches(pattern->inner, value, env);
     case P_BANG:
         return matches(pattern->inner, force(value), env);
+    case P_VIEW:
+        return matches(pattern->inner,
+                       apply(make_thunk(pattern->literal, *env), value), env);
     case P_RECORD:
         break;
     }

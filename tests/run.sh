@@ -13,7 +13,7 @@ for source in tests/*.hs; do
 	fi
 	# The arguments are meant to be split into words.
 	# shellcheck disable=SC2086
-	if ./build/aihc-bootstrap -i lib "$source" $arguments | cmp -s - "$expected"; then
+	if ./build/aihc-bootstrap -i lib -i tests/lib "$source" $arguments | cmp -s - "$expected"; then
 		echo "ok   $source"
 	else
 		echo "FAIL $source"

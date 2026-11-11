@@ -22,6 +22,7 @@ typedef struct Global Global;
 typedef struct Constructor Constructor;
 typedef struct Fixity Fixity;
 typedef struct Entity Entity;
+typedef struct PatternSynonym PatternSynonym;
 typedef struct ImportItem ImportItem;
 typedef struct Import Import;
 typedef struct Module Module;
@@ -149,6 +150,14 @@ struct Binding {
     int state;           /* of type inference: see infer.c */
     Expr **uses;         /* uses seen while its own type is being inferred */
     int use_count;
+    /* Local functions that call each other are generalised together: see
+       infer_binding. */
+    Binding *outer;      /* the function whose definition was being inferred
+                            when this one's was started, or NULL */
+    Binding *leader;     /* a function further out that this one has to be
+                            generalised with, or NULL */
+    Binding **members;   /* the functions to generalise with this one */
+    int member_count;
 };
 
 /* A data constructor. */
@@ -243,14 +252,16 @@ enum PatternKind {
                   value that is == to it */
     P_RECORD,  /* C { f = p, g, .. }; the resolver makes it a P_CONSTRUCTOR */
     P_AS,      /* variable@pattern */
-    P_BANG     /* !pattern: evaluates the value before matching */
+    P_BANG,    /* !pattern: evaluates the value before matching */
+    P_VIEW     /* (function -> pattern): matches if the function applied to
+                  the value matches the pattern */
 };
 
 struct Pattern {
     enum PatternKind kind;
     const Token *token;
     Binding *variable;        /* P_VARIABLE, P_AS */
-    Pattern *inner;           /* P_AS, P_BANG */
+    Pattern *inner;           /* P_AS, P_BANG, P_VIEW */
     const char *qualifier;    /* P_CONSTRUCTOR: PRELUDE_NAME or NULL */
     const char *name;         /* P_CONSTRUCTOR, P_RECORD */
     Constructor *constructor; /* P_CONSTRUCTOR: NULL until resolved */
@@ -263,7 +274,7 @@ struct Pattern {
     const char **field_names; /* P_RECORD */
     Pattern **field_patterns; /* P_RECORD: NULL for a field given as { f } */
     int field_wildcard;       /* P_RECORD: { .. } */
-    Expr *literal;            /* P_LITERAL */
+    Expr *literal;            /* P_LITERAL; P_VIEW: the function */
     Expr *equals;             /* P_LITERAL: == at the type of the literal;
                                  set by the type pass */
 };
@@ -324,6 +335,7 @@ struct Global {
     Class *class;         /* for a class method, else NULL */
     TypeCon *selector;    /* for a record field: its type, else NULL. The
                              definition is made by elaborate.c */
+    PatternSynonym *synonym; /* for a field of a pattern synonym */
     Instance *instance;   /* for a definition in an instance, else NULL */
     Scheme *scheme;       /* NULL until first needed */
     Expr *expr;           /* the elaborated definition; NULL until needed */
@@ -357,6 +369,31 @@ enum Namespace {
 
 /* Something a module defines under a name. Exactly one of the four pointers
    is set. */
+/* A pattern synonym:
+
+       pattern P x y <- pattern          only a pattern
+       pattern P x y = pattern           also an expression, if the pattern
+                                         reads as one
+       pattern P x y <- pattern where    an expression as the clause says
+         P x y = expression
+       pattern P {f, g} <- pattern       the parameters are also fields:
+                                         P {f = p} is a pattern, and f and g
+                                         are functions
+
+   A use of P in a pattern is replaced by the right-hand side, with the
+   arguments of the use in place of the parameters (resolve.c). The
+   right-hand side is read again for each use, in the module of the
+   synonym. A use of P in an expression is the function `builder`. */
+struct PatternSynonym {
+    const char *name;
+    Module *module;
+    int parameter_count;
+    const char **parameters;
+    int rhs_start; /* the tokens of the right-hand side */
+    int rhs_end;
+    Global *builder; /* NULL if P cannot be used in an expression */
+};
+
 struct Entity {
     enum Namespace namespace;
     const char *name;
@@ -365,6 +402,7 @@ struct Entity {
                            class of a method; else NULL */
     Global *global;
     Constructor *constructor;
+    PatternSynonym *synonym; /* in place of `constructor` */
     TypeCon *type;
     Class *class;
     Entity *next;
@@ -373,6 +411,7 @@ struct Entity {
 /* One name in an import list. */
 struct ImportItem {
     const char *name;
+    const char *parent; /* the T, for a name inside T (...); else NULL */
     int all_children; /* T (..) */
     ImportItem *next;
 };
@@ -400,6 +439,8 @@ struct Module {
     const char **reexports; /* the A and B: module names or import aliases */
     Import *exports;        /* the names of the export list, kept like an
                                import list; NULL if there is no list */
+    int exports_itself;     /* the export list has `module M`: everything
+                               the module defines */
     Chunk *unsupported; /* declarations we skip */
     int overloaded_strings; /* the OverloadedStrings extension is on */
     unsigned long searched; /* the last search of exports that came here */
@@ -465,6 +506,12 @@ Expr *parse_global(Global *global);
 /* resolve.c: replaces every name in place by what it refers to, and gives
    operators their precedence. */
 void resolve(Module *module, Expr *expr);
+
+/* parse.c: the right-hand side of the pattern synonym, as a new pattern. */
+Pattern *parse_synonym_pattern(const PatternSynonym *synonym);
+/* parse.c: the definition of a field of the pattern synonym as a function:
+   \v -> case v of right-hand side -> field. Not resolved. */
+Expr *parse_synonym_selector(const PatternSynonym *synonym, const char *field);
 
 /* types.c */
 Binding *new_binding(const char *name);
