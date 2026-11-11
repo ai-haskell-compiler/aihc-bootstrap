@@ -105,3 +105,19 @@ instance Show ArithException where
   show Overflow = "arithmetic overflow"
 
 instance Exception ArithException
+
+-- What a thread gets when it waits for something that no thread can give
+-- it. With one thread, that is every wait.
+data BlockedIndefinitelyOnMVar = BlockedIndefinitelyOnMVar
+
+instance Show BlockedIndefinitelyOnMVar where
+  show _ = "thread blocked indefinitely in an MVar operation"
+
+instance Exception BlockedIndefinitelyOnMVar
+
+data BlockedIndefinitelyOnSTM = BlockedIndefinitelyOnSTM
+
+instance Show BlockedIndefinitelyOnSTM where
+  show _ = "thread blocked indefinitely in an STM transaction"
+
+instance Exception BlockedIndefinitelyOnSTM

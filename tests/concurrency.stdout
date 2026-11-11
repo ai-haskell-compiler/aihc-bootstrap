@@ -1,0 +1,40 @@
+1
+1
+True
+Nothing
+Nothing
+False
+2
+"40"
+141
+41
+Left inside
+41
+Nothing
+Left thread blocked indefinitely in an MVar operation
+inside the semaphore
+1
+2
+3
+10
+"10"
+20
+(7,8)
+[("be",2),("not",1),("or",1),("to",2)]
+True
+Nothing
+"filled"
+False
+"filled"
+Nothing
+'x'
+'y'
+1
+"second"
+'b'
+Left thread blocked indefinitely in an STM transaction
+Left from stm
+[1,2,3,4,11,12]
+([],0)
+True
+True

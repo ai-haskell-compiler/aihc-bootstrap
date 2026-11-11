@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 /* pathKind :: String -> IO Int
@@ -212,4 +213,30 @@ Value *builtin_runProcess(Value **arguments)
         return make_io_result(make_int(-(long)WTERMSIG(status)));
     }
     return make_io_result(make_int(WEXITSTATUS(status)));
+}
+
+/* sleepMicroseconds :: Int -> IO () */
+Value *builtin_sleepMicroseconds(Value **arguments)
+{
+    long microseconds = force(arguments[0])->number;
+    struct timespec duration;
+
+    if (microseconds > 0) {
+        duration.tv_sec = (time_t)(microseconds / 1000000);
+        duration.tv_nsec = (microseconds % 1000000) * 1000;
+        nanosleep(&duration, NULL);
+    }
+    return make_io_result(make_con(TAG_UNIT, 0));
+}
+
+/* monotonicNanoseconds :: IO Word64
+   The time since some fixed moment, on a clock that never goes back. */
+Value *builtin_monotonicNanoseconds(Value **arguments)
+{
+    struct timespec now;
+
+    (void)arguments;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return make_io_result(
+        make_int((long)now.tv_sec * 1000000000l + (long)now.tv_nsec));
 }

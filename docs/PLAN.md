@@ -52,7 +52,8 @@ replacing those packages instead of running them.
 | `Data.MonoidMap`, `Data.ByteString.Builder`, `Data.Binary.Get`/`Put` | done | 9,146 of 11,737 |
 | `Data.Text.Unsafe` | done | |
 | 4 The system | done, except as listed below | 9,459 of 11,833 |
-| 5 Concurrency | next | |
+| 5 Concurrency | done | 9,605 of 11,901 |
+| 6 Parsing and printing | next | |
 
 Left over from phase 1, each stopping with a `TODO` when reached:
 
@@ -70,7 +71,7 @@ Left over from phase 4:
   runs alongside the interpreter. Programs that are run and waited for
   (`readProcessWithExitCode` and its relatives) work.
 - Running a program with another environment (`env`).
-- `getModificationTime` (it needs `Data.Time`), `GHC.Clock`, `timeout`.
+- `getModificationTime` (it needs `Data.Time`), `timeout`.
 - File handles: `withFile`, `openTempFile`, `hClose`, `hGetLine`,
   `hGetContents`, `hSetBuffering`.
 - `getEnvironment`, `getExecutablePath`.
@@ -87,9 +88,9 @@ Left over from phase 2:
   written.
 - `Data.Text.Encoding.decodeUtf8With` on bytes that are not UTF-8.
 - File handles other than stdout and stderr; `hGetContents`, `hGet`.
-- `tests/monoidmap.hs` has no output from GHC to compare with, because GHC
-  does not ship the package `monoidmap`. Its expected output was checked by
-  hand.
+- `tests/monoidmap.hs` and `tests/async.hs` have no output from GHC to
+  compare with, because GHC does not ship the packages `monoidmap` and
+  `async`. Their expected output was checked by hand.
 - The unboxed and mutable arrays (`Data.Array.Unboxed`, `Data.Array.ST`),
   which the register allocator uses. `Data.Array` is a map from index to
   element, with `Int`-like indices only.
@@ -103,8 +104,7 @@ infix constructors, and about twenty small modules of `base`
 
 The larger blocks the survey still shows, by definitions stopped:
 `Text.Megaparsec` 742, `Prettyprinter` 322, `GHC.Generics` 76, `Data.Data`
-62, `Control.Concurrent.STM` 60, `Data.Vector.Unboxed.Mutable` 43,
-`Data.Array.Unboxed` 41.
+62, `Data.Vector.Unboxed.Mutable` 43, `Data.Array.Unboxed` 41.
 
 ## Phase 0: survey mode
 
@@ -169,17 +169,23 @@ capture the output of a process. See "Decisions".
 ## Phase 5: concurrency
 
 AIHC uses `MVar`, `STM`, `async` and a worker pool sized by
-`getNumCapabilities`. The plan is to stay single-threaded:
+`getNumCapabilities`. The interpreter stays single-threaded:
 
 - `getNumCapabilities` is 1.
-- `MVar` and `TVar` are mutable cells; `atomically` just runs.
-- `async` does not start anything; `wait` runs the action. `withAsync` on a
-  ticker that is never waited for therefore never runs it.
+- `MVar`, `TVar` and `TMVar` are mutable cells; `atomically` just runs.
+- An operation that would wait for another thread (`takeMVar` on an empty
+  `MVar`, `retry`) throws the exception GHC throws for a thread that can
+  never continue. AIHC's task graph only retries when no task is ready
+  and some remain, which one worker never sees: a task is only added with
+  dependencies that are in the graph.
+- `async` does not start anything; the first `wait` runs the action.
+  `withAsync` on a ticker that is never waited for therefore never runs
+  it.
+- A transaction that ends with an exception keeps what it wrote.
 
-If AIHC's scheduler cannot work that way, the fallback is cooperative
+If some part of AIHC cannot work that way, the fallback is cooperative
 threads inside the interpreter. The explicit stack makes that possible: a
-thread is a stack, and a blocked `takeMVar` switches stacks. This is decided
-after reading the scheduler, not before.
+thread is a stack, and a blocked `takeMVar` switches stacks.
 
 ## Phase 6: parsing and printing
 

@@ -154,6 +154,8 @@ Value *builtin_currentDirectory(Value **arguments);
 Value *builtin_realPath(Value **arguments);
 Value *builtin_temporaryFile(Value **arguments);
 Value *builtin_runProcess(Value **arguments);
+Value *builtin_sleepMicroseconds(Value **arguments);
+Value *builtin_monotonicNanoseconds(Value **arguments);
 
 /* survey.c */
 void run_survey(const char *file);
