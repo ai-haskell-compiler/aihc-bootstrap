@@ -59,13 +59,13 @@ replacing those packages instead of running them.
 | Type applications; arrays and vectors | done | 12,025 of 12,404 |
 | `forall` in types, `Data`, `Read`, `Numeric` | done | 12,273 of 12,499 |
 | `Integer` of any size, `Rational`, `Double`, `Float` | done | 12,965 of 13,143 |
+| Handles, Unicode, SHA-256, times | done | 13,125 of 13,211 |
 | 7 Data formats | next | |
 
 Left over from phase 1, each stopping with a `TODO` when reached:
 
 - Division by zero as an exception.
 - Derived `Read`, `Functor`, `Foldable`, `Traversable`; `deriving via`.
-- Character classification beyond ASCII; `generalCategory`.
 
 Numbers, as they are now:
 
@@ -90,10 +90,18 @@ Left over from phase 4:
   runs alongside the interpreter. Programs that are run and waited for
   (`readProcessWithExitCode` and its relatives) work.
 - Running a program with another environment (`env`).
-- `getModificationTime` (it needs `Data.Time`), `timeout`.
-- File handles: `withFile`, `openTempFile`, `hClose`, `hGetLine`,
-  `hGetContents`, `hSetBuffering`.
-- `getEnvironment`, `getExecutablePath`.
+- `timeout`.
+- File locks (`GHC.IO.Handle.Lock`) do nothing: two runs at the same time
+  must not share a build directory.
+
+Done since: file handles (`tests/handles.hs`), modification times and the
+environment (`tests/time.hs`), SHA-256 in C (`tests/sha256.hs`, checked
+against `shasum`), and Unicode: what `Data.Char` says about a character
+comes from a table made with GHC by `scripts/gen-unicode.hs`
+(`tests/unicode.hs`).
+
+The interpreter runs on a stack of 4 GB of address space (`src/posix.c`),
+because evaluating a value inside a value is a C call inside a C call.
 
 Known to be slow: `Data.Text.Unsafe.lengthWord8` walks the whole text, and
 the lexer of `aihc-parser` asks for the length of the remaining input at
@@ -120,10 +128,9 @@ infix constructors, and about twenty small modules of `base`
 (`Control.Applicative`, `Data.Monoid`, `Data.Bits`, `Data.List.NonEmpty`,
 ...).
 
-The larger blocks the survey still shows, by definitions stopped:
-`Crypto.Hash.SHA256` 34, `Data.Aeson` 25, a type mismatch in
-`Aihc.Native.Emit` 18, an ambiguous `TyCon` in two modules 25,
-`generalCategory` 11.
+What the survey still shows, by definitions stopped: `Data.Aeson` 29, a
+type mismatch in `Aihc.Native.Emit` 18, `eqT` 6, `GHC.Fingerprint` (MD5)
+6, and about twenty kinds of failure that stop five definitions or fewer.
 
 Arrays: `Data.Array`, `Data.Array.ST`, the vectors (`Data.Vector` and its
 mutable and unboxed variants) and the primitive arrays are all one array

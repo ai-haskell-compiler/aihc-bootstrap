@@ -33,8 +33,8 @@ lists what is unsupported, most frequent first. Its first lines are the
 measure of progress:
 
 ```text
-modules loaded:        360
-definitions prepared:  12965 of 13143
+modules loaded:        366
+definitions prepared:  13125 of 13211
 ```
 
 The order of the library work is in [docs/PLAN.md](docs/PLAN.md).
@@ -75,6 +75,9 @@ are therefore never looked at.
 | `src/numbers.c` | Arithmetic for every built-in number type |
 | `src/integer.c` | `Integer` beyond a C `long` |
 | `src/bytes.c` | `ByteString`, and reading and writing files |
+| `src/files.c` | File handles |
+| `src/sha256.c` | SHA-256 |
+| `src/unicode.c` | What `Data.Char` knows, from a table made with GHC |
 | `src/posix.c` | Everything that needs POSIX: directories, running programs |
 | `src/elaborate.c` | The pipeline for one declaration; new passes are added here |
 | `src/eval.c` | The evaluator: a machine with an explicit stack |
@@ -104,7 +107,7 @@ A test of a package that GHC does not ship says at its top how its expected
 output was made. `tests/megaparsec.hs` and `tests/prettyprinter.hs` run
 against the source of those packages;
 `tests/monoidmap.hs`, `tests/async.hs` and `tests/vectors.hs` were checked
-by hand.
+by hand, and `tests/sha256.hs` against `shasum`.
 
 ## Licence
 
