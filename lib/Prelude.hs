@@ -548,7 +548,7 @@ showLitChar c rest
   | c == '\r' = "\\r" ++ rest
   | c == '\t' = "\\t" ++ rest
   | c == '\v' = "\\v" ++ rest
-  | c == '\SO' = protectEscape (== 'H') "SO" rest
+  | c == '\SO' = '\\' : protectEscape (== 'H') "SO" rest
   | otherwise = '\\' : (controlNames !! fromEnum c ++ rest)
 
 protectEscape :: (Char -> Bool) -> String -> ShowS

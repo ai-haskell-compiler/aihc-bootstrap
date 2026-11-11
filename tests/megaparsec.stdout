@@ -1,0 +1,860 @@
+single on "abc"
+  ok: 'a'
+single on "xbc"
+  error: TrivialError 0 (Just (Tokens ('x' :| ""))) (fromList [Tokens ('a' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | xbc
+  |   | ^
+  | unexpected 'x'
+  | expecting 'a'
+single on ""
+  error: TrivialError 0 (Just EndOfInput) (fromList [Tokens ('a' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | <empty line>
+  |   | ^
+  | unexpected end of input
+  | expecting 'a'
+satisfy on "z"
+  ok: 'z'
+satisfy on "a"
+  error: TrivialError 0 (Just (Tokens ('a' :| ""))) (fromList [])
+  | test:1:1:
+  |   |
+  | 1 | a
+  |   | ^
+  | unexpected 'a'
+anySingle on ""
+  error: TrivialError 0 (Just EndOfInput) (fromList [])
+  | test:1:1:
+  |   |
+  | 1 | <empty line>
+  |   | ^
+  | unexpected end of input
+anySingleBut on "ab"
+  error: TrivialError 0 (Just (Tokens ('a' :| ""))) (fromList [])
+  | test:1:1:
+  |   |
+  | 1 | ab
+  |   | ^
+  | unexpected 'a'
+oneOf on "d"
+  error: TrivialError 0 (Just (Tokens ('d' :| ""))) (fromList [])
+  | test:1:1:
+  |   |
+  | 1 | d
+  |   | ^
+  | unexpected 'd'
+noneOf on "d"
+  ok: 'd'
+chunk on "letter"
+  ok: ("let","ter")
+chunk on "lex"
+  error: TrivialError 0 (Just (Tokens ('l' :| "ex"))) (fromList [Tokens ('l' :| "et")])
+  | test:1:1:
+  |   |
+  | 1 | lex
+  |   | ^^^
+  | unexpected "lex"
+  | expecting "let"
+chunk on "le"
+  error: TrivialError 0 (Just (Tokens ('l' :| "e"))) (fromList [Tokens ('l' :| "et")])
+  | test:1:1:
+  |   |
+  | 1 | le
+  |   | ^^
+  | unexpected "le"
+  | expecting "let"
+chunk on "x"
+  ok: ""
+eof on ""
+  ok: ()
+eof on "x"
+  error: TrivialError 0 (Just (Tokens ('x' :| ""))) (fromList [EndOfInput])
+  | test:1:1:
+  |   |
+  | 1 | x
+  |   | ^
+  | unexpected 'x'
+  | expecting end of input
+takeWhileP on "123abc"
+  ok: ("123","abc")
+takeWhileP on "abc"
+  ok: ("","abc")
+takeWhileP then on "12y"
+  error: TrivialError 2 (Just (Tokens ('y' :| ""))) (fromList [Tokens ('x' :| ""),Label ('d' :| "igit")])
+  | test:1:3:
+  |   |
+  | 1 | 12y
+  |   |   ^
+  | unexpected 'y'
+  | expecting 'x' or digit
+takeWhile1P on "abc"
+  error: TrivialError 0 (Just (Tokens ('a' :| ""))) (fromList [Label ('d' :| "igit")])
+  | test:1:1:
+  |   |
+  | 1 | abc
+  |   | ^
+  | unexpected 'a'
+  | expecting digit
+takeWhile1P on ""
+  error: TrivialError 0 (Just EndOfInput) (fromList [])
+  | test:1:1:
+  |   |
+  | 1 | <empty line>
+  |   | ^
+  | unexpected end of input
+takeP on "abc"
+  ok: ("ab","c")
+takeP on "abc"
+  error: TrivialError 3 (Just EndOfInput) (fromList [Label ('l' :| "etter")])
+  | test:1:4:
+  |   |
+  | 1 | abc
+  |   |    ^
+  | unexpected end of input
+  | expecting letter
+takeP on ""
+  ok: ""
+choice on "d"
+  error: TrivialError 0 (Just (Tokens ('d' :| ""))) (fromList [Tokens ('a' :| ""),Tokens ('b' :| ""),Tokens ('c' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | d
+  |   | ^
+  | unexpected 'd'
+  | expecting 'a', 'b', or 'c'
+choice on "ac"
+  ok: "ac"
+no try on "ac"
+  error: TrivialError 1 (Just (Tokens ('c' :| ""))) (fromList [Tokens ('b' :| "")])
+  | test:1:2:
+  |   |
+  | 1 | ac
+  |   |  ^
+  | unexpected 'c'
+  | expecting 'b'
+try on "ac"
+  ok: 'c'
+try on "ad"
+  error: TrivialError 1 (Just (Tokens ('d' :| ""))) (fromList [Tokens ('b' :| ""),Tokens ('c' :| "")])
+  | test:1:2:
+  |   |
+  | 1 | ad
+  |   |  ^
+  | unexpected 'd'
+  | expecting 'b' or 'c'
+longer error wins on "abc"
+  error: TrivialError 0 (Just (Tokens ('a' :| ""))) (fromList [Tokens ('q' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | abc
+  |   | ^
+  | unexpected 'a'
+  | expecting 'q'
+empty on "a"
+  error: TrivialError 0 Nothing (fromList [])
+  | test:1:1:
+  |   |
+  | 1 | a
+  |   | ^
+  | unknown parse error
+empty or on "b"
+  error: TrivialError 0 (Just (Tokens ('b' :| ""))) (fromList [Tokens ('a' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | b
+  |   | ^
+  | unexpected 'b'
+  | expecting 'a'
+choice of none on "a"
+  error: TrivialError 0 Nothing (fromList [])
+  | test:1:1:
+  |   |
+  | 1 | a
+  |   | ^
+  | unknown parse error
+option on "b"
+  ok: 'z'
+optional on "c"
+  error: TrivialError 0 (Just (Tokens ('c' :| ""))) (fromList [Tokens ('a' :| ""),Tokens ('b' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | c
+  |   | ^
+  | unexpected 'c'
+  | expecting 'a' or 'b'
+hints after optional on "d"
+  error: TrivialError 0 (Just (Tokens ('d' :| ""))) (fromList [Tokens ('a' :| ""),Tokens ('b' :| ""),Tokens ('c' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | d
+  |   | ^
+  | unexpected 'd'
+  | expecting 'a', 'b', or 'c'
+hints dropped by progress on "xd"
+  error: TrivialError 1 (Just (Tokens ('d' :| ""))) (fromList [Tokens ('c' :| "")])
+  | test:1:2:
+  |   |
+  | 1 | xd
+  |   |  ^
+  | unexpected 'd'
+  | expecting 'c'
+label on "b"
+  error: TrivialError 0 (Just (Tokens ('b' :| ""))) (fromList [Label ('t' :| "he first letter")])
+  | test:1:1:
+  |   |
+  | 1 | b
+  |   | ^
+  | unexpected 'b'
+  | expecting the first letter
+label on "c"
+  error: TrivialError 0 (Just (Tokens ('c' :| ""))) (fromList [Label ('a' :| " or b")])
+  | test:1:1:
+  |   |
+  | 1 | c
+  |   | ^
+  | unexpected 'c'
+  | expecting a or b
+label after input on "ac"
+  error: TrivialError 1 (Just (Tokens ('c' :| ""))) (fromList [Tokens ('b' :| "")])
+  | test:1:2:
+  |   |
+  | 1 | ac
+  |   |  ^
+  | unexpected 'c'
+  | expecting 'b'
+hidden on "c"
+  error: TrivialError 0 (Just (Tokens ('c' :| ""))) (fromList [Tokens ('b' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | c
+  |   | ^
+  | unexpected 'c'
+  | expecting 'b'
+hidden only on "c"
+  error: TrivialError 0 (Just (Tokens ('c' :| ""))) (fromList [])
+  | test:1:1:
+  |   |
+  | 1 | c
+  |   | ^
+  | unexpected 'c'
+label on success on "aac"
+  error: TrivialError 2 (Just (Tokens ('c' :| ""))) (fromList [Tokens ('b' :| ""),Label ('a' :| "n a")])
+  | test:1:3:
+  |   |
+  | 1 | aac
+  |   |   ^
+  | unexpected 'c'
+  | expecting 'b' or an a
+label of many on "c"
+  error: TrivialError 0 (Just (Tokens ('c' :| ""))) (fromList [Tokens ('b' :| ""),Label ('s' :| "ome a")])
+  | test:1:1:
+  |   |
+  | 1 | c
+  |   | ^
+  | unexpected 'c'
+  | expecting 'b' or some a
+many on "aaab"
+  ok: ("aaa","b")
+many then on "aac"
+  error: TrivialError 2 (Just (Tokens ('c' :| ""))) (fromList [Tokens ('a' :| ""),Tokens ('b' :| "")])
+  | test:1:3:
+  |   |
+  | 1 | aac
+  |   |   ^
+  | unexpected 'c'
+  | expecting 'a' or 'b'
+many of consuming failure on "ababa"
+  ok: ["ab","ab"]
+some on "b"
+  error: TrivialError 0 (Just (Tokens ('b' :| ""))) (fromList [Tokens ('a' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | b
+  |   | ^
+  | unexpected 'b'
+  | expecting 'a'
+some on "aab"
+  ok: ("aa","b")
+count on "abc"
+  ok: ("ab","c")
+count on "aab"
+  error: TrivialError 2 (Just (Tokens ('b' :| ""))) (fromList [Tokens ('a' :| "")])
+  | test:1:3:
+  |   |
+  | 1 | aab
+  |   |   ^
+  | unexpected 'b'
+  | expecting 'a'
+count' on "aaaaa"
+  ok: ("aaa","aa")
+count' on "ab"
+  error: TrivialError 1 (Just (Tokens ('b' :| ""))) (fromList [Tokens ('a' :| "")])
+  | test:1:2:
+  |   |
+  | 1 | ab
+  |   |  ^
+  | unexpected 'b'
+  | expecting 'a'
+sepBy on "a,a,ab"
+  ok: ("aaa","b")
+sepBy on "b"
+  ok: ("","b")
+sepBy on "a,b"
+  error: TrivialError 2 (Just (Tokens ('b' :| ""))) (fromList [Tokens ('a' :| "")])
+  | test:1:3:
+  |   |
+  | 1 | a,b
+  |   |   ^
+  | unexpected 'b'
+  | expecting 'a'
+sepBy1 on "b"
+  error: TrivialError 0 (Just (Tokens ('b' :| ""))) (fromList [Tokens ('a' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | b
+  |   | ^
+  | unexpected 'b'
+  | expecting 'a'
+sepEndBy on "a;a;b"
+  ok: ("aa","b")
+sepEndBy1 on "a;a"
+  ok: ("aa","")
+endBy on "a;a;b"
+  ok: ("aa","b")
+manyTill on "abc.def"
+  ok: ("abc","def")
+manyTill on "aab"
+  error: TrivialError 2 (Just (Tokens ('b' :| ""))) (fromList [Tokens ('.' :| ""),Tokens ('a' :| "")])
+  | test:1:3:
+  |   |
+  | 1 | aab
+  |   |   ^
+  | unexpected 'b'
+  | expecting '.' or 'a'
+someTill on ".a.b"
+  ok: (".a","b")
+skipMany on "   x"
+  ok: ((),"x")
+skipSome on "x"
+  error: TrivialError 0 (Just (Tokens ('x' :| ""))) (fromList [Tokens (' ' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | x
+  |   | ^
+  | unexpected 'x'
+  | expecting space
+skipManyTill on "abc!d"
+  ok: ('!',"d")
+between on "(aa"
+  error: TrivialError 3 (Just EndOfInput) (fromList [Tokens (')' :| ""),Tokens ('a' :| "")])
+  | test:1:4:
+  |   |
+  | 1 | (aa
+  |   |    ^
+  | unexpected end of input
+  | expecting ')' or 'a'
+lookAhead on "abc"
+  ok: ("ab","abc")
+lookAhead on "abc"
+  error: TrivialError 0 (Just (Tokens ('a' :| ""))) (fromList [Tokens ('x' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | abc
+  |   | ^
+  | unexpected 'a'
+  | expecting 'x'
+lookAhead fails on "ac"
+  error: TrivialError 1 (Just (Tokens ('c' :| ""))) (fromList [Tokens ('b' :| "")])
+  | test:1:2:
+  |   |
+  | 1 | ac
+  |   |  ^
+  | unexpected 'c'
+  | expecting 'b'
+notFollowedBy on "ac"
+  ok: ('a',"c")
+notFollowedBy on "ab"
+  error: TrivialError 1 (Just (Tokens ('b' :| ""))) (fromList [])
+  | test:1:2:
+  |   |
+  | 1 | ab
+  |   |  ^
+  | unexpected 'b'
+notFollowedBy at end on ""
+  error: TrivialError 0 (Just EndOfInput) (fromList [])
+  | test:1:1:
+  |   |
+  | 1 | <empty line>
+  |   | ^
+  | unexpected end of input
+atEnd on "a"
+  ok: (False,True)
+fail on "ab"
+  error: FancyError 1 (fromList [ErrorFail "no good"])
+  | test:1:2:
+  |   |
+  | 1 | ab
+  |   |  ^
+  | no good
+fail or on "ab"
+  error: FancyError 0 (fromList [ErrorFail "first",ErrorFail "second"])
+  | test:1:1:
+  |   |
+  | 1 | ab
+  |   | ^
+  | first
+  | second
+fail or token on "ab"
+  error: FancyError 0 (fromList [ErrorFail "first"])
+  | test:1:1:
+  |   |
+  | 1 | ab
+  |   | ^
+  | first
+customFailure on "ab"
+  error: FancyError 1 (fromList [ErrorCustom (Custom "bad" 7)])
+  | test:1:2:
+  |   |
+  | 1 | ab
+  |   |  ^
+  | bad (7)
+two custom failures on ""
+  error: FancyError 0 (fromList [ErrorCustom (Custom "one" 1),ErrorCustom (Custom "two" 2)])
+  | test:1:1:
+  |   |
+  | 1 | <empty line>
+  |   | ^
+  | one (1)
+  | two (2)
+unexpected on "ab"
+  error: TrivialError 0 (Just (Label ('a' :| " surprise"))) (fromList [])
+  | test:1:1:
+  |   |
+  | 1 | ab
+  |   | ^
+  | unexpected a surprise
+failure on "ab"
+  error: TrivialError 0 (Just EndOfInput) (fromList [Tokens ('x' :| ""),Label ('y' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | ab
+  |   | ^
+  | unexpected end of input
+  | expecting 'x' or y
+failure with nothing on "ab"
+  error: TrivialError 0 Nothing (fromList [])
+  | test:1:1:
+  |   |
+  | 1 | ab
+  |   | ^
+  | unknown parse error
+observing on "b"
+  ok: Left (TrivialError 0 (Just (Tokens ('b' :| ""))) (fromList [Tokens ('a' :| "")]))
+observing after input on "acd"
+  ok: (Left (TrivialError 1 (Just (Tokens ('c' :| ""))) (fromList [Tokens ('b' :| "")])),"cd")
+observing then on "b"
+  error: TrivialError 0 (Just (Tokens ('b' :| ""))) (fromList [Tokens ('a' :| ""),Tokens ('c' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | b
+  |   | ^
+  | unexpected 'b'
+  | expecting 'a' or 'c'
+withRecovery on "bc"
+  ok: ('?',"c")
+withRecovery after input on "abx;y"
+  ok: (0,";y")
+withRecovery fails too on "b"
+  error: TrivialError 0 (Just (Tokens ('b' :| ""))) (fromList [Tokens ('a' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | b
+  |   | ^
+  | unexpected 'b'
+  | expecting 'a'
+registerParseError on "abaca"
+  error: FancyError 2 (fromList [ErrorFail "not a: b"])
+  error: FancyError 4 (fromList [ErrorFail "not a: c"])
+  | test:1:3:
+  |   |
+  | 1 | abaca
+  |   |   ^
+  | not a: b
+  | 
+  | test:1:5:
+  |   |
+  | 1 | abaca
+  |   |     ^
+  | not a: c
+registered and failed on "ab"
+  error: TrivialError 0 Nothing (fromList [EndOfInput])
+  error: TrivialError 1 (Just (Tokens ('b' :| ""))) (fromList [Tokens ('x' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | ab
+  |   | ^
+  | expecting end of input
+  | 
+  | test:1:2:
+  |   |
+  | 1 | ab
+  |   |  ^
+  | unexpected 'b'
+  | expecting 'x'
+region on "abc"
+  error: TrivialError 0 (Just (Tokens ('c' :| ""))) (fromList [Tokens ('x' :| "")])
+  | test:1:1:
+  |   |
+  | 1 | abc
+  |   | ^
+  | unexpected 'c'
+  | expecting 'x'
+region with registered on "abc"
+  error: FancyError 1 (fromList [ErrorCustom (Custom "in region" 1)])
+  error: FancyError 2 (fromList [ErrorCustom (Custom "in region" 2)])
+  | test:1:2:
+  |   |
+  | 1 | abc
+  |   |  ^
+  | in region (1)
+  | 
+  | test:1:3:
+  |   |
+  | 1 | abc
+  |   |   ^
+  | in region (2)
+getOffset on "abcd"
+  ok: ((2,3),"d")
+getInput on "abc"
+  ok: "bc"
+setInput on "abc"
+  ok: "xyz"
+setOffset on "abc"
+  error: TrivialError 10 (Just (Tokens ('a' :| ""))) (fromList [Tokens ('q' :| "")])
+  | test:1:4:
+  |   |
+  | 1 | abc
+  |   |    ^
+  | unexpected 'a'
+  | expecting 'q'
+getSourcePos on "ab\n\tcd\nefxg"
+  ok: (SourcePos {sourceName = "test", sourceLine = Pos 1, sourceColumn = Pos 1},SourcePos {sourceName = "test", sourceLine = Pos 3, sourceColumn = Pos 3},SourcePos {sourceName = "test", sourceLine = Pos 3, sourceColumn = Pos 4})
+match on "aabc"
+  ok: ("aab",'b')
+match on "abc"
+  ok: ("",())
+(Just "aaa",Nothing)
+Just 2
+char on "ab"
+  ok: ('a',"b")
+string on "abc"
+  ok: ("ab","c")
+space on " \t\n x"
+  ok: ((),"x")
+space1 on "x"
+  error: TrivialError 0 (Just (Tokens ('x' :| ""))) (fromList [Label ('w' :| "hite space")])
+  | test:1:1:
+  |   |
+  | 1 | x
+  |   | ^
+  | unexpected 'x'
+  | expecting white space
+hspace on " \t\n x"
+  ok: ((),"\n x")
+eol on "\nx"
+  ok: ("\n","x")
+eol on "\r\nx"
+  ok: ("\r\n","x")
+eol on "\rx"
+  error: TrivialError 0 (Just (Tokens ('\r' :| "x"))) (fromList [Label ('e' :| "nd of line")])
+  | test:1:1:
+  |   |
+  | 1 | x
+  |   | ^
+  | unexpected "<carriage return>x"
+  | expecting end of line
+newline, tab on "\n\tx"
+  ok: (('\n','\t'),"x")
+digitChar on "x"
+  error: TrivialError 0 (Just (Tokens ('x' :| ""))) (fromList [Label ('d' :| "igit")])
+  | test:1:1:
+  |   |
+  | 1 | x
+  |   | ^
+  | unexpected 'x'
+  | expecting digit
+letterChar on "1"
+  error: TrivialError 0 (Just (Tokens ('1' :| ""))) (fromList [Label ('l' :| "etter")])
+  | test:1:1:
+  |   |
+  | 1 | 1
+  |   | ^
+  | unexpected '1'
+  | expecting letter
+upperChar on "a"
+  error: TrivialError 0 (Just (Tokens ('a' :| ""))) (fromList [Label ('u' :| "ppercase letter")])
+  | test:1:1:
+  |   |
+  | 1 | a
+  |   | ^
+  | unexpected 'a'
+  | expecting uppercase letter
+lowerChar on "A"
+  error: TrivialError 0 (Just (Tokens ('A' :| ""))) (fromList [Label ('l' :| "owercase letter")])
+  | test:1:1:
+  |   |
+  | 1 | A
+  |   | ^
+  | unexpected 'A'
+  | expecting lowercase letter
+alphaNumChar on "-"
+  error: TrivialError 0 (Just (Tokens ('-' :| ""))) (fromList [Label ('a' :| "lphanumeric character")])
+  | test:1:1:
+  |   |
+  | 1 | -
+  |   | ^
+  | unexpected '-'
+  | expecting alphanumeric character
+spaceChar on "x"
+  error: TrivialError 0 (Just (Tokens ('x' :| ""))) (fromList [Label ('w' :| "hite space")])
+  | test:1:1:
+  |   |
+  | 1 | x
+  |   | ^
+  | unexpected 'x'
+  | expecting white space
+hexDigitChar on "1aFg"
+  error: TrivialError 3 (Just (Tokens ('g' :| ""))) (fromList [Label ('h' :| "exadecimal digit"),EndOfInput])
+  | test:1:4:
+  |   |
+  | 1 | 1aFg
+  |   |    ^
+  | unexpected 'g'
+  | expecting end of input or hexadecimal digit
+octDigitChar on "178"
+  error: TrivialError 2 (Just (Tokens ('8' :| ""))) (fromList [Label ('o' :| "ctal digit"),EndOfInput])
+  | test:1:3:
+  |   |
+  | 1 | 178
+  |   |   ^
+  | unexpected '8'
+  | expecting end of input or octal digit
+binDigitChar on "102"
+  error: TrivialError 2 (Just (Tokens ('2' :| ""))) (fromList [Label ('b' :| "inary digit"),EndOfInput])
+  | test:1:3:
+  |   |
+  | 1 | 102
+  |   |   ^
+  | unexpected '2'
+  | expecting binary digit or end of input
+printChar on "\n"
+  error: TrivialError 0 (Just (Tokens ('\n' :| ""))) (fromList [Label ('p' :| "rintable character")])
+  | test:1:1:
+  |   |
+  | 1 | <empty line>
+  |   | ^
+  | unexpected newline
+  | expecting printable character
+asciiChar on "a"
+  ok: 'a'
+decimal on "123abc"
+  ok: (123,"abc")
+decimal on "abc"
+  error: TrivialError 0 (Just (Tokens ('a' :| ""))) (fromList [Label ('i' :| "nteger")])
+  | test:1:1:
+  |   |
+  | 1 | abc
+  |   | ^
+  | unexpected 'a'
+  | expecting integer
+decimal on "9007199254740993"
+  ok: 9007199254740993
+hexadecimal on "fFg"
+  ok: (255,"g")
+hexadecimal on "g"
+  error: TrivialError 0 (Just (Tokens ('g' :| ""))) (fromList [Label ('h' :| "exadecimal integer")])
+  | test:1:1:
+  |   |
+  | 1 | g
+  |   | ^
+  | unexpected 'g'
+  | expecting hexadecimal integer
+octal on "178"
+  ok: (15,"8")
+binary on "1012"
+  ok: (5,"2")
+signed on "- 12"
+  ok: -12
+signed on "+12"
+  ok: 12
+signed on "- 12"
+  error: TrivialError 1 (Just (Tokens (' ' :| ""))) (fromList [Label ('i' :| "nteger")])
+  | test:1:2:
+  |   |
+  | 1 | - 12
+  |   |  ^
+  | unexpected space
+  | expecting integer
+charLiteral on "a\\n\\t\\\\\\'\\\"\\65\\x41\\o101\\SOH\\SO\\^A\\DELz"
+  ok: "a\n\t\\'\"AAA\SOH\SO\SOH\DELz"
+charLiteral on "\\q"
+  error: TrivialError 0 (Just (Tokens ('\\' :| ""))) (fromList [Label ('l' :| "iteral character")])
+  | test:1:1:
+  |   |
+  | 1 | \q
+  |   | ^
+  | unexpected '\'
+  | expecting literal character
+charLiteral on ""
+  error: TrivialError 0 (Just EndOfInput) (fromList [Label ('l' :| "iteral character")])
+  | test:1:1:
+  |   |
+  | 1 | <empty line>
+  |   | ^
+  | unexpected end of input
+  | expecting literal character
+skipLineComment on "// a comment\nnext"
+  ok: ((),"\nnext")
+skipBlockComment on "/* a /* b */ c */"
+  ok: (()," c */")
+skipBlockCommentNested on "/* a /* b */ c */ d"
+  ok: (()," d")
+skipBlockComment on "/* never closed"
+  error: TrivialError 15 (Just EndOfInput) (fromList [Tokens ('*' :| "/")])
+  | test:1:16:
+  |   |
+  | 1 | /* never closed
+  |   |                ^
+  | unexpected end of input
+  | expecting "*/"
+symbol on "let  {- c -} -- d\n  x"
+  ok: ("let","x")
+symbol on "lex"
+  error: TrivialError 0 (Just (Tokens ('l' :| "ex"))) (fromList [Tokens ('l' :| "et")])
+  | test:1:1:
+  |   |
+  | 1 | lex
+  |   | ^^^
+  | unexpected "lex"
+  | expecting "let"
+program on "1 + 2 * 3"
+  ok: [Add (Number 1) (Multiply (Number 2) (Number 3))]
+program on "  f(x, 2) * (y + 1); let a = 3 in a * a ; -- done\n"
+  ok: [Multiply (Call "f" [Variable "x",Number 2]) (Add (Variable "y") (Number 1)),Let "a" (Number 3) (Multiply (Variable "a") (Variable "a"))]
+program on "letter + lets"
+  ok: [Add (Variable "letter") (Variable "lets")]
+program on "1 + "
+  error: TrivialError 4 (Just EndOfInput) (fromList [Tokens ('(' :| ""),Tokens ('l' :| "et"),Label ('i' :| "dentifier"),Label ('i' :| "nteger")])
+  | test:1:5:
+  |   |
+  | 1 | 1 + 
+  |   |     ^
+  | unexpected end of input
+  | expecting "let", '(', identifier, or integer
+program on "1 + * 2"
+  error: TrivialError 4 (Just (Tokens ('*' :| " 2"))) (fromList [Tokens ('(' :| ""),Tokens ('l' :| "et"),Label ('i' :| "dentifier"),Label ('i' :| "nteger")])
+  | test:1:5:
+  |   |
+  | 1 | 1 + * 2
+  |   |     ^^^
+  | unexpected "* 2"
+  | expecting "let", '(', identifier, or integer
+program on "f(1, 2"
+  error: TrivialError 1 (Just (Tokens ('(' :| ""))) (fromList [Tokens ('*' :| ""),Tokens ('+' :| ""),Tokens (';' :| ""),Label ('a' :| "lphanumeric character"),EndOfInput])
+  | test:1:2:
+  |   |
+  | 1 | f(1, 2
+  |   |  ^
+  | unexpected '('
+  | expecting '*', '+', ';', alphanumeric character, or end of input
+program on "let x 3 in x"
+  error: TrivialError 6 (Just (Tokens ('3' :| ""))) (fromList [Tokens ('=' :| "")])
+  | test:1:7:
+  |   |
+  | 1 | let x 3 in x
+  |   |       ^
+  | unexpected '3'
+  | expecting '='
+program on "let x = 3 on x"
+  error: TrivialError 10 (Just (Tokens ('o' :| "n"))) (fromList [Tokens ('*' :| ""),Tokens ('+' :| ""),Tokens ('i' :| "n")])
+  | test:1:11:
+  |   |
+  | 1 | let x = 3 on x
+  |   |           ^^
+  | unexpected "on"
+  | expecting "in", '*', or '+'
+program on "(1 + 2))"
+  error: TrivialError 7 (Just (Tokens (')' :| ""))) (fromList [Tokens ('*' :| ""),Tokens ('+' :| ""),Tokens (';' :| ""),EndOfInput])
+  | test:1:8:
+  |   |
+  | 1 | (1 + 2))
+  |   |        ^
+  | unexpected ')'
+  | expecting '*', '+', ';', or end of input
+program on "1 {- open"
+  error: TrivialError 9 (Just EndOfInput) (fromList [Tokens ('-' :| "}")])
+  | test:1:10:
+  |   |
+  | 1 | 1 {- open
+  |   |          ^
+  | unexpected end of input
+  | expecting "-}"
+program on "a;\n  b +\n  {- note -} c d"
+  error: TrivialError 24 (Just (Tokens ('d' :| ""))) (fromList [Tokens ('*' :| ""),Tokens ('+' :| ""),Tokens (';' :| ""),EndOfInput])
+  | test:3:16:
+  |   |
+  | 3 |   {- note -} c d
+  |   |                ^
+  | unexpected 'd'
+  | expecting '*', '+', ';', or end of input
+program on ""
+  ok: []
+text on text "abc  "
+  ok: "abc"
+text on text "abc"
+  error: TrivialError 2 (Just (Tokens ('c' :| ""))) (fromList [Tokens ('x' :| "")])
+  | text:1:3:
+  |   |
+  | 1 | abc
+  |   |   ^
+  | unexpected 'c'
+  | expecting 'x'
+text on text "12a"
+  error: TrivialError 2 (Just (Tokens ('a' :| ""))) (fromList [Label ('d' :| "igit"),EndOfInput])
+  | text:1:3:
+  |   |
+  | 1 | 12a
+  |   |   ^
+  | unexpected 'a'
+  | expecting digit or end of input
+text on text "42 rest"
+  ok: (42," rest")
+text on text "\r\nx"
+  ok: SourcePos {sourceName = "text", sourceLine = Pos 2, sourceColumn = Pos 1}
+text on text "a12b"
+  ok: ("a12","12")
+text on text "\233\233y"
+  error: TrivialError 2 (Just (Tokens ('y' :| ""))) (fromList [Tokens ('x' :| ""),Tokens ('\233' :| "")])
+  | text:1:3:
+  |   |
+  | 1 | ééy
+  |   |   ^
+  | unexpected 'y'
+  | expecting 'x' or 'é'
+tree on [TInt 1]
+  ok: Leaf 1
+tree on [TName "f",TOpen,TInt 1,TComma,TName "g",TOpen,TClose,TComma,TName "h",TClose]
+  ok: Node "f" [Leaf 1,Node "g" [],Node "h" []]
+tree on [TName "f",TOpen,TInt 1,TComma,TClose]
+  error: FancyError 4 (fromList [ErrorCustom (Custom "a tree" 4)])
+tree on [TName "f",TOpen,TInt 1,TInt 2]
+  error: TrivialError 3 (Just (Tokens (TInt 2 :| []))) (fromList [Tokens (TClose :| []),Tokens (TComma :| [])])
+tree on [TComma]
+  error: FancyError 0 (fromList [ErrorCustom (Custom "a tree" 0)])
+tree on []
+  error: FancyError 0 (fromList [ErrorCustom (Custom "a tree" 0)])
+tree on [TInt 1,TInt 2]
+  error: TrivialError 1 (Just (Tokens (TInt 2 :| []))) (fromList [EndOfInput])
