@@ -314,6 +314,7 @@ static const Builtin builtins[] = {
     { "bytesFromString", 1, builtin_bytesFromString },
     { "bytesNew", 2, builtin_bytesNew },
     { "sha256", 1, builtin_sha256 },
+    { "md5", 1, builtin_md5 },
     { "handleOpen", 3, builtin_handleOpen },
     { "handleClose", 2, builtin_handleClose },
     { "handleWrite", 3, builtin_handleWrite },
