@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -239,4 +240,93 @@ Value *builtin_monotonicNanoseconds(Value **arguments)
     clock_gettime(CLOCK_MONOTONIC, &now);
     return make_io_result(
         make_int((long)now.tv_sec * 1000000000l + (long)now.tv_nsec));
+}
+
+/* processId :: IO Int
+   A number that no other running program has: for the names of temporary
+   files. */
+Value *builtin_processId(Value **arguments)
+{
+    (void)arguments;
+    return make_io_result(make_int((long)getpid()));
+}
+
+/* environment :: IO [String]
+   Every variable of the environment, as NAME=value. */
+extern char **environ;
+
+Value *builtin_environment(Value **arguments)
+{
+    Value *list = make_con(TAG_NIL, 0);
+    int count = 0;
+    int i;
+
+    (void)arguments;
+    while (environ[count] != NULL) {
+        count++;
+    }
+    for (i = count - 1; i >= 0; i--) {
+        Value *cell = make_con(TAG_CONS, 2);
+
+        cell->fields[0] = make_string(environ[i]);
+        cell->fields[1] = list;
+        list = cell;
+    }
+    return make_io_result(list);
+}
+
+/* fileModified :: String -> IO Int
+   When the file was last changed, in nanoseconds since 1970, or -1 if it
+   is not there. */
+Value *builtin_fileModified(Value **arguments)
+{
+    struct stat status;
+    long nanoseconds;
+
+    if (stat(c_string(arguments[0], NULL), &status) != 0) {
+        return make_io_result(make_int(-1));
+    }
+#ifdef __APPLE__
+    nanoseconds = (long)status.st_mtimensec;
+#else
+    nanoseconds = (long)status.st_mtim.tv_nsec;
+#endif
+    return make_io_result(
+        make_int((long)status.st_mtime * 1000000000l + nanoseconds));
+}
+
+/* ---- A large stack ---- */
+
+static int (*stack_function)(int, char **);
+static int stack_argc;
+static char **stack_argv;
+static int stack_result;
+
+static void *on_big_stack(void *unused)
+{
+    (void)unused;
+    stack_result = stack_function(stack_argc, stack_argv);
+    return NULL;
+}
+
+/* The stack is address space, not memory: only the part that is used is
+   ever given to the program. */
+#define BIG_STACK_BYTES (4ul * 1024 * 1024 * 1024)
+
+int run_with_big_stack(int (*function)(int, char **), int argc, char **argv)
+{
+    pthread_attr_t attributes;
+    pthread_t thread;
+
+    stack_function = function;
+    stack_argc = argc;
+    stack_argv = argv;
+    if (pthread_attr_init(&attributes) != 0
+        || pthread_attr_setstacksize(&attributes, BIG_STACK_BYTES) != 0
+        || pthread_create(&thread, &attributes, on_big_stack, NULL) != 0) {
+        /* No such stack to be had: the ordinary one has to do. */
+        return function(argc, argv);
+    }
+    pthread_join(thread, NULL);
+    return stack_result;
 }

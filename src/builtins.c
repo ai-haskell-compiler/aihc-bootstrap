@@ -14,6 +14,21 @@
 static int program_argument_count = 0;
 static char **program_arguments = NULL;
 
+static const char *program_path = "aihc-bootstrap";
+
+void set_program_path(const char *path)
+{
+    program_path = path;
+}
+
+/* programPath :: IO String
+   How the interpreter was started: its argv[0]. */
+static Value *builtin_programPath(Value **arguments)
+{
+    (void)arguments;
+    return make_io_result(make_string(program_path));
+}
+
 void set_program_arguments(int count, char **arguments)
 {
     program_argument_count = count;
@@ -215,13 +230,9 @@ static Value *builtin_unsafeCoerce(Value **arguments)
    The Int is a file descriptor: 1 for stdout, 2 for stderr. */
 static Value *builtin_hPutStr(Value **arguments)
 {
-    long descriptor = force(arguments[0])->number;
-    FILE *file = descriptor == 2 ? stderr : stdout;
+    FILE *file = handle_stream(force(arguments[0])->number);
     Value *list = force(arguments[1]);
 
-    if (descriptor != 1 && descriptor != 2) {
-        TODO("output to a file");
-    }
     while (list->tag == TAG_CONS) {
         char bytes[4];
         int count = utf8_encode_exact(force(list->fields[0])->number, bytes);
@@ -302,6 +313,18 @@ static const Builtin builtins[] = {
     { "bytesFind", 2, builtin_bytesFind },
     { "bytesFromString", 1, builtin_bytesFromString },
     { "bytesNew", 2, builtin_bytesNew },
+    { "sha256", 1, builtin_sha256 },
+    { "handleOpen", 3, builtin_handleOpen },
+    { "handleClose", 2, builtin_handleClose },
+    { "handleWrite", 3, builtin_handleWrite },
+    { "handleFlush", 2, builtin_handleFlush },
+    { "handleIsEOF", 2, builtin_handleIsEOF },
+    { "handleRead", 3, builtin_handleRead },
+    { "processId", 1, builtin_processId },
+    { "environment", 1, builtin_environment },
+    { "fileModified", 2, builtin_fileModified },
+    { "programPath", 1, builtin_programPath },
+    { "charInfo", 2, builtin_charInfo },
     { "bytesPoke", 4, builtin_bytesPoke },
     { "bytesBlit", 6, builtin_bytesBlit },
     { "bytesValidUtf8", 1, builtin_bytesValidUtf8 },

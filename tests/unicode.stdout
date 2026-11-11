@@ -1,0 +1,12 @@
+17510
+439765483
+[981,1158,31,183,4143,931,209,10,293,44,233,4,17,50,47,12,10,317,920,49,68,2100,17,1,1,65,39,10,651,4916]
+[1012,1158,6496,6496,7066,10,570,1150]
+[22,65,11827,457,3137,19,128,256]
+(720260759,999915760,921756492,522173249)
+(549896251,725239795,677519988)
+[LowercaseLetter,UppercaseLetter,DecimalNumber,Space,ConnectorPunctuation,DashPunctuation,OpenPunctuation,InitialQuote,FinalQuote,MathSymbol,CurrencySymbol,Control,Format,LowercaseLetter,UppercaseLetter,OtherLetter,TitlecaseLetter,DecimalNumber,LetterNumber,LineSeparator,PrivateUse,NotAssigned]
+("STRA\223E \923\908\915\927\931 \452 \376 I","\224\233\238 \963\945\963 \454 i","\453 \223 A")
+(True,[9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8239,8287,12288])
+(["a","b","c","d"],True,False,False,True,True,True,True)
+[UppercaseLetter,LowercaseLetter,TitlecaseLetter,ModifierLetter,OtherLetter,NonSpacingMark,SpacingCombiningMark,EnclosingMark,DecimalNumber,LetterNumber,OtherNumber,ConnectorPunctuation,DashPunctuation,OpenPunctuation,ClosePunctuation,InitialQuote,FinalQuote,OtherPunctuation,MathSymbol,CurrencySymbol,ModifierSymbol,OtherSymbol,Space,LineSeparator,ParagraphSeparator,Control,Format,Surrogate,PrivateUse,NotAssigned]

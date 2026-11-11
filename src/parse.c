@@ -1499,6 +1499,13 @@ static Expr *clauses_to_expr(const Clause *clauses, int count)
     Expr *expr;
     int i;
 
+    for (i = 1; i < count; i++) {
+        if (clauses[i].count != clauses[0].count) {
+            die("%s:%d: the clauses of one function have different numbers "
+                "of parameters (or it is defined twice)",
+                clauses[i].token->file, clauses[i].token->line);
+        }
+    }
     if (count > 1 || clauses[0].rhs->guards != NULL) {
         return combine_clauses(clauses, count);
     }

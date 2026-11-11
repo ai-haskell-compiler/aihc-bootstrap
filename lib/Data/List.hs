@@ -204,3 +204,11 @@ genericLength (_ : rest) = 1 + genericLength rest
 zip4 :: [a] -> [b] -> [c] -> [d] -> [(a, b, c, d)]
 zip4 (a : as) (b : bs) (c : cs) (d : ds) = (a, b, c, d) : zip4 as bs cs ds
 zip4 _ _ _ _ = []
+
+zipWith4 :: (a -> b -> c -> d -> e) -> [a] -> [b] -> [c] -> [d] -> [e]
+zipWith4 f (a : as) (b : bs) (c : cs) (d : ds) = f a b c d : zipWith4 f as bs cs ds
+zipWith4 _ _ _ _ _ = []
+
+zipWith5 :: (a -> b -> c -> d -> e -> f) -> [a] -> [b] -> [c] -> [d] -> [e] -> [f]
+zipWith5 f (a : as) (b : bs) (c : cs) (d : ds) (e : es) = f a b c d e : zipWith5 f as bs cs ds es
+zipWith5 _ _ _ _ _ _ = []

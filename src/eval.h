@@ -1,6 +1,7 @@
 #ifndef EVAL_H
 #define EVAL_H
 
+#include <stdio.h>
 #include "syntax.h"
 
 typedef struct Value Value;
@@ -162,6 +163,23 @@ Value *builtin_bytesCompare(Value **arguments);
 Value *builtin_bytesFind(Value **arguments);
 Value *builtin_bytesFromString(Value **arguments);
 Value *builtin_bytesNew(Value **arguments);
+Value *builtin_sha256(Value **arguments);
+
+/* files.c: file handles. handle_stream gives the C stream of a handle. */
+FILE *handle_stream(long handle);
+Value *builtin_handleOpen(Value **arguments);
+Value *builtin_handleClose(Value **arguments);
+Value *builtin_handleWrite(Value **arguments);
+Value *builtin_handleFlush(Value **arguments);
+Value *builtin_handleIsEOF(Value **arguments);
+Value *builtin_handleRead(Value **arguments);
+Value *builtin_processId(Value **arguments);
+Value *builtin_environment(Value **arguments);
+Value *builtin_fileModified(Value **arguments);
+/* posix.c: runs the function on a stack of its own, large enough for deep
+   recursion, and returns what it returns. */
+int run_with_big_stack(int (*function)(int, char **), int argc, char **argv);
+Value *builtin_charInfo(Value **arguments);
 Value *builtin_bytesPoke(Value **arguments);
 Value *builtin_bytesBlit(Value **arguments);
 Value *builtin_bytesValidUtf8(Value **arguments);
@@ -194,6 +212,7 @@ void run_survey(const char *file);
 /* builtins.c */
 /* The command line of the Haskell program, for getArgs. */
 void set_program_arguments(int count, char **arguments);
+void set_program_path(const char *path);
 const Builtin *find_builtin(const char *name);
 
 /* instances.c: the definition of the class method for the type the class is

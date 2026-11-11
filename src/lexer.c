@@ -405,6 +405,18 @@ static void lex_operator(Lexer *lexer, Token *token)
     }
 }
 
+static int has_extension(const Lexer *lexer, const char *name)
+{
+    int i;
+
+    for (i = 0; lexer->extensions[i] != NULL; i++) {
+        if (strcmp(lexer->extensions[i], name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void lex_identifier(Lexer *lexer, Token *token)
 {
     const char *start = lexer->p;
@@ -438,6 +450,10 @@ static void lex_identifier(Lexer *lexer, Token *token)
         advance(lexer);
         lex_operator(lexer, token);
         return;
+    }
+    /* With MagicHash, a name may end in #: isTrue# */
+    while (*lexer->p == '#' && has_extension(lexer, "MagicHash")) {
+        advance(lexer);
     }
     token->text = copy_string(start, (size_t)(lexer->p - start));
     if (upper) {

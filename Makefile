@@ -2,12 +2,12 @@ CC = cc
 CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror -g
 
 SOURCES = src/util.c src/lexer.c src/module.c src/parse.c src/resolve.c \
-          src/types.c src/infer.c src/instances.c src/derive.c src/eval.c src/numbers.c src/integer.c src/bytes.c src/posix.c src/builtins.c src/elaborate.c src/survey.c src/main.c
-HEADERS = src/util.h src/lexer.h src/syntax.h src/eval.h
+          src/types.c src/infer.c src/instances.c src/derive.c src/eval.c src/numbers.c src/integer.c src/bytes.c src/files.c src/sha256.c src/unicode.c src/posix.c src/builtins.c src/elaborate.c src/survey.c src/main.c
+HEADERS = src/util.h src/lexer.h src/syntax.h src/eval.h src/unicode_table.h
 
 build/aihc-bootstrap: $(SOURCES) $(HEADERS)
 	mkdir -p build
-	$(CC) $(CFLAGS) -o $@ $(SOURCES) -lm
+	$(CC) $(CFLAGS) -o $@ $(SOURCES) -lm -lpthread
 
 .PHONY: test survey clean
 

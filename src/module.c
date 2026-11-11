@@ -123,8 +123,8 @@ Entity *find_entity(Module *module, enum Namespace namespace, const char *name)
 }
 
 static Module *imported_module(Import *import);
-static int import_allows(const Import *import, const char *name,
-                         const char *parent);
+static int import_allows(const Import *import, enum Namespace namespace,
+                         const char *name, const char *parent);
 static int import_might_provide(const Import *import,
                                 enum Namespace namespace, const char *name,
                                 int associated_types_too);
@@ -158,8 +158,10 @@ static Entity *find_listed_export(Module *module, enum Namespace namespace,
             }
             found = find_exported_within(imported_module(import), namespace,
                                          name);
-            if (found != NULL && import_allows(import, name, found->parent)
-                && import_allows(module->exports, name, found->parent)) {
+            if (found != NULL
+                && import_allows(import, namespace, name, found->parent)
+                && import_allows(module->exports, namespace, name,
+                                 found->parent)) {
                 return found;
             }
         }
@@ -180,7 +182,7 @@ static Entity *find_exported_within(Module *module, enum Namespace namespace,
     int i;
 
     if (entity != NULL && module->exports != NULL && !module->exports_itself
-        && !import_allows(module->exports, name, entity->parent)) {
+        && !import_allows(module->exports, namespace, name, entity->parent)) {
         entity = NULL; /* defined here, and not in the export list */
     }
     if (entity != NULL || module->searched == current_search) {
@@ -238,8 +240,8 @@ static int import_matches_qualifier(const Import *import, const char *qualifier)
 
    The import list does not say which kind of name it means: `import M (T)`
    also lets a constructor called T through. */
-static int import_allows(const Import *import, const char *name,
-                         const char *parent)
+static int import_allows(const Import *import, enum Namespace namespace,
+                         const char *name, const char *parent)
 {
     const ImportItem *item;
     int listed = 0;
@@ -248,7 +250,13 @@ static int import_allows(const Import *import, const char *name,
         return 1;
     }
     for (item = import->items; item != NULL; item = item->next) {
-        if (strcmp(item->name, name) == 0) {
+        /* A name on its own is a type or a class, not the constructor of
+           that name: a constructor is listed inside T (...), or after the
+           word `pattern`. A `hiding` list hides both. */
+        int names_it = namespace != NS_CONSTRUCTOR || import->hiding
+            || item->parent != NULL || item->is_pattern;
+
+        if (names_it && strcmp(item->name, name) == 0) {
             listed = 1;
         }
         if (parent != NULL && item->all_children
@@ -331,7 +339,8 @@ static Entity *lookup(Module *module, enum Namespace namespace,
             continue;
         }
         entity = find_exported_entity(imported_module(import), namespace, name);
-        if (entity == NULL || !import_allows(import, name, entity->parent)) {
+        if (entity == NULL
+            || !import_allows(import, namespace, name, entity->parent)) {
             continue;
         }
         if (found != NULL && entity != found) {
@@ -598,6 +607,7 @@ static ImportItem *add_import_item(Import *import, const char *name)
 
     item->name = name;
     item->parent = NULL;
+    item->is_pattern = 0;
     item->all_children = 0;
     item->next = import->items;
     import->items = item;
@@ -612,6 +622,7 @@ static void add_import_items(Import *import, const Token *tokens, int start,
 {
     ImportItem *parent_item = NULL; /* the T of the T (...) we are next to */
     int in_sublist = 0;
+    int after_pattern = 0; /* the word `pattern` was just read */
     int i;
 
     for (i = start + 1; i < end; i++) {
@@ -621,7 +632,16 @@ static void add_import_items(Import *import, const Token *tokens, int start,
             if (i + 2 < end && token_is(&tokens[i + 2], T_SPECIAL, ")")
                 && (tokens[i + 1].kind == T_VARSYM
                     || token_is(&tokens[i + 1], T_RESERVED, ":"))) {
-                add_import_item(import, tokens[i + 1].text); /* (+) */
+                ImportItem *item =
+                    add_import_item(import, tokens[i + 1].text); /* (+) */
+
+                /* An operator that is a constructor is one wherever it is
+                   listed. */
+                item->is_pattern = 1;
+                if (in_sublist && parent_item != NULL) {
+                    item->parent = parent_item->name;
+                }
+                after_pattern = 0;
                 i += 2;
             } else {
                 in_sublist = 1;
@@ -633,10 +653,15 @@ static void add_import_items(Import *import, const Token *tokens, int start,
                 parent_item->all_children = 1;
             }
         } else if (token_is(token, T_VARID, "pattern")
-                   && tokens[i + 1].kind == T_CONID) {
-            /* `pattern P`: the keyword adds nothing. */
+                   && (tokens[i + 1].kind == T_CONID
+                       || token_is(&tokens[i + 1], T_SPECIAL, "("))) {
+            /* `pattern P`: the next name is a pattern synonym. */
+            after_pattern = 1;
         } else if (token->kind == T_VARID || token->kind == T_CONID) {
             ImportItem *item = add_import_item(import, token->text);
+
+            item->is_pattern = after_pattern;
+            after_pattern = 0;
 
             if (in_sublist && parent_item != NULL) {
                 item->parent = parent_item->name;
