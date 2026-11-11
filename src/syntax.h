@@ -243,14 +243,16 @@ enum PatternKind {
                   value that is == to it */
     P_RECORD,  /* C { f = p, g, .. }; the resolver makes it a P_CONSTRUCTOR */
     P_AS,      /* variable@pattern */
-    P_BANG     /* !pattern: evaluates the value before matching */
+    P_BANG,    /* !pattern: evaluates the value before matching */
+    P_VIEW     /* (function -> pattern): matches if the function applied to
+                  the value matches the pattern */
 };
 
 struct Pattern {
     enum PatternKind kind;
     const Token *token;
     Binding *variable;        /* P_VARIABLE, P_AS */
-    Pattern *inner;           /* P_AS, P_BANG */
+    Pattern *inner;           /* P_AS, P_BANG, P_VIEW */
     const char *qualifier;    /* P_CONSTRUCTOR: PRELUDE_NAME or NULL */
     const char *name;         /* P_CONSTRUCTOR, P_RECORD */
     Constructor *constructor; /* P_CONSTRUCTOR: NULL until resolved */
@@ -263,7 +265,7 @@ struct Pattern {
     const char **field_names; /* P_RECORD */
     Pattern **field_patterns; /* P_RECORD: NULL for a field given as { f } */
     int field_wildcard;       /* P_RECORD: { .. } */
-    Expr *literal;            /* P_LITERAL */
+    Expr *literal;            /* P_LITERAL; P_VIEW: the function */
     Expr *equals;             /* P_LITERAL: == at the type of the literal;
                                  set by the type pass */
 };

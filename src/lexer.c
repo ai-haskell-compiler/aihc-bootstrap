@@ -493,3 +493,44 @@ int token_is(const Token *token, enum TokenKind kind, const char *text)
 {
     return token->kind == kind && strcmp(token->text, text) == 0;
 }
+
+int token_is_bang(const Token *previous, const Token *token)
+{
+    const Token *next = token + 1;
+
+    return token_is(token, T_VARSYM, "!")
+        && next->line == token->line && next->col == token->col + 1
+        && (previous->line != token->line
+            || previous->col + (int)strlen(previous->text) < token->col);
+}
+
+int infix_clause_operator(const Token *tokens, int start, int end)
+{
+    int depth = 0;
+    int i;
+
+    for (i = start; i < end; i++) {
+        const Token *token = &tokens[i];
+
+        if (token->kind == T_SPECIAL) {
+            if (strchr("([{", token->text[0]) != NULL) {
+                depth++;
+            } else if (strchr(")]}", token->text[0]) != NULL) {
+                depth--;
+            } else if (token->text[0] == '`' && depth == 0) {
+                return i > start ? i : -1;
+            }
+        } else if (depth == 0 && token->kind == T_RESERVED
+                   && (strcmp(token->text, "=") == 0
+                       || strcmp(token->text, "|") == 0)) {
+            return -1; /* the parameters ended without an operator */
+        } else if (depth == 0 && token->kind == T_VARSYM && i > start
+                   && token->text[0] != ':'
+                   && !token_is_bang(token - 1, token)
+                   && !(strcmp(token->text, "-") == 0
+                        && (token + 1)->kind == T_INT)) {
+            return i;
+        }
+    }
+    return -1;
+}

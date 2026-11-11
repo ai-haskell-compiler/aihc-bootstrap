@@ -34,6 +34,18 @@ typedef struct Token {
 Token *lex(const char *file, const char *source, const char ***extensions);
 
 int token_is(const Token *token, enum TokenKind kind, const char *text);
+/* Whether the token is the ! of a bang pattern and not the operator: it has
+   a space before it and none after it, as in `f !x = ...`. `previous` is
+   the token before it. */
+int token_is_bang(const Token *previous, const Token *token);
+/* If the tokens from `start` are a clause that defines an operator between
+   its two parameters, as in
+
+       x <+> y = ...        or        x `plus` y = ...
+
+   the position of the operator, or of its first backquote. Otherwise -1:
+   for a clause with the name first, and for anything else. */
+int infix_clause_operator(const Token *tokens, int start, int end);
 
 #define TODO_AT(token, what) \
     todo((what), (token)->file, (token)->line, (token)->col, __FILE__, __LINE__)

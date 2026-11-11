@@ -142,6 +142,9 @@ static const Scope *resolve_pattern(Module *module, const Scope *scope,
                                pattern->inner);
     case P_BANG:
         return resolve_pattern(module, scope, pattern->inner);
+    case P_VIEW:
+        resolve_in_scope(module, scope, pattern->literal);
+        return resolve_pattern(module, scope, pattern->inner);
     case P_WILDCARD:
     case P_CHAR:
     case P_RECORD:

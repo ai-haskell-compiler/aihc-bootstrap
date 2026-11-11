@@ -475,8 +475,9 @@ static int signature_colon(const Token *tokens, int start, int end)
     }
 }
 
-/* If [start, end) is a clause `name parameters = body` or
-   `(+) parameters = body`, the name. Otherwise NULL. */
+/* If [start, end) is a clause `name parameters = body`,
+   `(+) parameters = body` or `parameter + parameter = body`, the name.
+   Otherwise NULL. */
 static const char *clause_name(const Token *tokens, int start, int end)
 {
     const Token *after; /* the token after the name */
@@ -491,10 +492,20 @@ static const char *clause_name(const Token *tokens, int start, int end)
         name = tokens[start + 1].text;
         after = &tokens[start + 3];
     } else {
-        return NULL;
+        after = NULL;
     }
-    if (after->kind == T_VARSYM || token_is(after, T_SPECIAL, "`")) {
-        return NULL; /* an operator defined infix: x + y = ... */
+    if (after == NULL
+        || (after->kind == T_VARSYM && !token_is_bang(after - 1, after))
+        || token_is(after, T_SPECIAL, "`")) {
+        /* Perhaps an operator defined between its parameters:
+           x + y = ... */
+        int operator = infix_clause_operator(tokens, start, end);
+
+        if (operator < 0) {
+            return NULL;
+        }
+        return tokens[operator].kind == T_VARSYM ? tokens[operator].text
+                                                 : tokens[operator + 1].text;
     }
     return name;
 }

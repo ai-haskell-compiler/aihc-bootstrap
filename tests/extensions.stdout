@@ -1,0 +1,21 @@
+["nothing","zero","negative","positive"]
+["text a","number 1"]
+[1,2,0]
+["hello","(none)","one"]
+["adding x","removing y","helping","unknown: other"]
+(Just 3,Nothing)
+6
+["dc2","fe4"]
+[303,-3,100]
+(7,6)
+(Just "b5",Nothing)
+[("tag",1),("tag",2),("tag",3)]
+[(1,'x',True),(2,'x',False)]
+Just (1,"second")
+[('a',True),('b',True)]
+(5050,5,'b')
+([1,2,3],True,False,Just 3,Nothing,[41,12,-2])
+["no scores","uneven: 80","pass at 65","fail"]
+[Just (10,1),Just (20,1),Nothing,Just (30,1),Nothing]
+(9,[0,1])
+[3,2,1]

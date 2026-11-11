@@ -292,6 +292,16 @@ static Type *infer_pattern(Inference *inference, Pattern *pattern)
         return pattern->variable->type;
     case P_BANG:
         return infer_pattern(inference, pattern->inner);
+    case P_VIEW: {
+        /* The function goes from the type of the value to the type of the
+           inner pattern. */
+        Type *argument = fresh(inference);
+        Type *result = infer_pattern(inference, pattern->inner);
+
+        unify(infer(inference, pattern->literal),
+              function_type(argument, result), pattern->token);
+        return argument;
+    }
     case P_RECORD:
         break;
     }
