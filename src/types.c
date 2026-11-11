@@ -529,15 +529,31 @@ Type *parse_type(Module *module, int start, int end, Binding ***variables,
 
         for (i = parser.position; parser.open && i < after_context; i++) {
             const Token *token = &parser.tokens[i];
-            int known = 0;
+            Binding *variable = NULL;
             int k;
 
-            for (k = 0; k < *parser.count; k++) {
-                known = known
-                    || strcmp((*parser.variables)[k]->name, token->text) == 0;
+            if (token->kind != T_VARID) {
+                continue;
             }
-            if (token->kind == T_VARID && !known) {
-                add_type_variable(&parser, token->text);
+            for (k = 0; k < *parser.count; k++) {
+                if (strcmp((*parser.variables)[k]->name, token->text) == 0) {
+                    variable = (*parser.variables)[k];
+                }
+            }
+            if (variable == NULL) {
+                variable = add_type_variable(&parser, token->text);
+            }
+            /* Fractional a, RealFloat a, ...: what defaulting needs to
+               know about the context. */
+            if (i > parser.position && (token - 1)->kind == T_CONID) {
+                const char *class = (token - 1)->text;
+
+                if (strcmp(class, "Fractional") == 0
+                    || strcmp(class, "Floating") == 0
+                    || strcmp(class, "RealFrac") == 0
+                    || strcmp(class, "RealFloat") == 0) {
+                    variable->is_fractional = 1;
+                }
             }
         }
         parser.position = after_context;

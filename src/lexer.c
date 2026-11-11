@@ -337,6 +337,7 @@ static void lex_number(Lexer *lexer, Token *token)
     const char *start = lexer->p;
     unsigned long value = 0;
     int base = 10;
+    int too_big = 0; /* for an unsigned long */
 
     if (lexer->p[0] == '0' && lexer->p[1] != '\0'
         && strchr("xXoObB", lexer->p[1]) != NULL) {
@@ -351,7 +352,7 @@ static void lex_number(Lexer *lexer, Token *token)
             unsigned long digit = (unsigned long)digit_value(*lexer->p);
 
             if (value > (ULONG_MAX - digit) / (unsigned long)base) {
-                LEX_TODO(lexer, "integer literal of 2^64 or more");
+                too_big = 1;
             }
             value = value * (unsigned long)base + digit;
         }
@@ -383,6 +384,10 @@ static void lex_number(Lexer *lexer, Token *token)
     token->kind = T_INT;
     token->number = (long)value;
     token->big = value > (unsigned long)LONG_MAX;
+    if (too_big) {
+        token->big = 2;
+        token->text = copy_string(start, (size_t)(lexer->p - start));
+    }
 }
 
 static void lex_operator(Lexer *lexer, Token *token)

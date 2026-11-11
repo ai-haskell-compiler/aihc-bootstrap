@@ -142,6 +142,38 @@ static void unify(Type *a, Type *b, const Token *token)
     }
 }
 
+/* Notes that the type is `fallback` if nothing else decides it. */
+static void add_default(Inference *inference, Type *type, const char *fallback)
+{
+    inference->literals = xrealloc(
+        inference->literals,
+        (size_t)(inference->literal_count + 1) * sizeof(Type *));
+    inference->literal_fallbacks = xrealloc(
+        inference->literal_fallbacks,
+        (size_t)(inference->literal_count + 1) * sizeof(const char *));
+    inference->literals[inference->literal_count] = type;
+    inference->literal_fallbacks[inference->literal_count] = fallback;
+    inference->literal_count++;
+}
+
+/* Whether the class is one that only fractional number types are in. A
+   type that is used at such a class, and that nothing else decides, is
+   Double: that is Haskell's defaulting rule, for the classes there are. */
+static int is_fractional_class(const Class *class)
+{
+    static const char *names[] = {
+        "Fractional", "Floating", "RealFrac", "RealFloat", NULL
+    };
+    int i;
+
+    for (i = 0; names[i] != NULL; i++) {
+        if (strcmp(class->name, names[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* The type of the scheme with a fresh TY_META for each of its variables.
    `*metas` receives those. */
 static Type *instantiate(Inference *inference, const Scheme *scheme,
@@ -152,6 +184,11 @@ static Type *instantiate(Inference *inference, const Scheme *scheme,
     *metas = xmalloc((size_t)scheme->variable_count * sizeof(Type *) + 1);
     for (i = 0; i < scheme->variable_count; i++) {
         (*metas)[i] = fresh(inference);
+    }
+    for (i = 0; i < scheme->variable_count; i++) {
+        if (scheme->variables[i]->is_fractional) {
+            add_default(inference, (*metas)[i], "Double");
+        }
     }
     /* For `name @type`: see E_VISIBLE. */
     inference->instantiated = *metas;
@@ -254,15 +291,7 @@ static Type *infer_overloaded_literal(Inference *inference, Expr *expr,
     expr->kind = E_APP;
     expr->function = method;
     expr->argument = literal;
-    inference->literals = xrealloc(
-        inference->literals,
-        (size_t)(inference->literal_count + 1) * sizeof(Type *));
-    inference->literal_fallbacks = xrealloc(
-        inference->literal_fallbacks,
-        (size_t)(inference->literal_count + 1) * sizeof(const char *));
-    inference->literals[inference->literal_count] = type;
-    inference->literal_fallbacks[inference->literal_count] = fallback;
-    inference->literal_count++;
+    add_default(inference, type, fallback);
     return type;
 }
 
@@ -692,6 +721,9 @@ static Type *infer(Inference *inference, Expr *expr)
             /* The class variable is the first variable of a method. */
             expr->kind = E_METHOD;
             expr->type = metas[0];
+            if (is_fractional_class(expr->global->class)) {
+                add_default(inference, metas[0], "Double");
+            }
             add_type_arguments(expr, metas, 1, scheme->variable_count);
         } else {
             add_type_arguments(expr, metas, 0, scheme->variable_count);
@@ -711,7 +743,7 @@ static Type *infer(Inference *inference, Expr *expr)
     case E_CHAR:
         return prelude_type("Char");
     case E_STRING:
-        if (inference->module->overloaded_strings) {
+        if (inference->module->overloaded_strings && !expr->is_plain_string) {
             return infer_overloaded_literal(
                 inference, expr,
                 library_entity("Data.String", NS_VARIABLE, "fromString")->global,
@@ -837,8 +869,18 @@ Expr *infer_global(Global *global, Expr *expr)
         generalize(type, -1, &scheme->variables, &scheme->variable_count);
         global->scheme = scheme;
     }
-    /* Defaulting: a number whose type nothing decides is an Integer, and
-       such a string is a String. */
+    /* Defaulting: a number whose type nothing decides is a Double if it is
+       used as a fraction and otherwise an Integer, and such a string is a
+       String. The fractions go first, since a literal like 2 in 2 / 3 is
+       noted as a whole number too. */
+    for (i = 0; i < inference.literal_count; i++) {
+        Type *literal = prune(inference.literals[i]);
+
+        if (literal->kind == TY_META
+            && strcmp(inference.literal_fallbacks[i], "Double") == 0) {
+            literal->link = prelude_type("Double");
+        }
+    }
     for (i = 0; i < inference.literal_count; i++) {
         Type *literal = prune(inference.literals[i]);
 

@@ -144,6 +144,8 @@ enum {
 struct Binding {
     const char *name;
     Type *type; /* of a local variable, during type inference */
+    int is_fractional; /* a type variable that a signature says is of a
+                          class of fractional numbers: see infer.c */
 
     /* The rest is for a variable bound by let or where. */
     Expr **definition;   /* where its definition is kept, else NULL */
@@ -221,6 +223,8 @@ struct Expr {
     Constructor *constructor;  /* E_CONSTRUCTOR */
     long number;               /* E_INT, E_CHAR */
     int big;                   /* E_INT: see Token.big */
+    int is_plain_string;       /* E_STRING: a String even where string
+                                  literals are overloaded */
     const char *string;        /* E_STRING */
     Expr *function;            /* E_APP; E_RECORD: the C or e before { */
     Expr *argument;            /* E_APP */

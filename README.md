@@ -33,8 +33,8 @@ lists what is unsupported, most frequent first. Its first lines are the
 measure of progress:
 
 ```text
-modules loaded:        357
-definitions prepared:  12273 of 12499
+modules loaded:        360
+definitions prepared:  12965 of 13143
 ```
 
 The order of the library work is in [docs/PLAN.md](docs/PLAN.md).
@@ -73,6 +73,7 @@ are therefore never looked at.
 | `src/instances.c` | Finds the instance for a method call at run time |
 | `src/derive.c` | The methods of instances that come from `deriving` |
 | `src/numbers.c` | Arithmetic for every built-in number type |
+| `src/integer.c` | `Integer` beyond a C `long` |
 | `src/bytes.c` | `ByteString`, and reading and writing files |
 | `src/posix.c` | Everything that needs POSIX: directories, running programs |
 | `src/elaborate.c` | The pipeline for one declaration; new passes are added here |

@@ -14,6 +14,7 @@ module Prelude
     ReadS,
     reads,
     read,
+    rationalLiteral,
   )
 where
 
@@ -24,6 +25,8 @@ import Control.Exception (ErrorCall (..), throw)
 import Data.Char (isSpace)
 import System.IO (appendFile, hPutStr, hPutStrLn, readFile, stdout, writeFile)
 import Data.List (foldl1, foldr1)
+import Data.Ratio (rationalLiteral)
+import GHC.Float ()
 import System.IO.Error (IOError, ioError, userError)
 import Text.Read (Read (..), ReadS, read, reads)
 
@@ -31,9 +34,9 @@ infixr 9 .
 
 infixl 9 !!
 
-infixr 8 ^
+infixr 8 ^, ^^, **
 
-infixl 7 *, `quot`, `rem`, `div`, `mod`
+infixl 7 *, /, :%, `quot`, `rem`, `div`, `mod`
 
 infixl 6 +, -
 
@@ -71,6 +74,18 @@ data Int
 data Integer
 
 data Word
+
+-- The bits of an IEEE number (src/numbers.c). The instances are in
+-- GHC.Float.
+data Double
+
+data Float
+
+-- A fraction: numerator :% denominator, in lowest terms, with a positive
+-- denominator. Data.Ratio makes them and has the instances.
+data Ratio a = a :% a
+
+type Rational = Ratio Integer
 
 -- The interpreter builds these by position: False first, True second.
 data Bool = False | True
@@ -232,7 +247,63 @@ class Num a where
   (-) a b = a + negate b
   negate a = fromInteger 0 - a
 
-class (Num a, Ord a) => Real a
+class (Num a, Ord a) => Real a where
+  toRational :: a -> Rational
+  -- For the built-in whole number types.
+  toRational a = numConvert a :% 1
+
+class Num a => Fractional a where
+  (/) :: a -> a -> a
+  recip :: a -> a
+  fromRational :: Rational -> a
+  recip a = fromInteger 1 / a
+  (/) a b = a * recip b
+
+class Fractional a => Floating a where
+  pi :: a
+  exp, log, sqrt :: a -> a
+  sin, cos, tan, asin, acos, atan, sinh, cosh, tanh :: a -> a
+  (**), logBase :: a -> a -> a
+  (**) a b = exp (log a * b)
+  logBase base a = log a / log base
+
+class (Real a, Fractional a) => RealFrac a where
+  -- The whole part, towards zero, and what is left.
+  properFraction :: Integral b => a -> (b, a)
+  truncate, round, ceiling, floor :: Integral b => a -> b
+  truncate a = fst (properFraction a)
+  -- To the nearest whole number; to the even one if it is in the middle.
+  round a =
+    let (n, r) = properFraction a
+        m = if r < fromInteger 0 then n - 1 else n + 1
+     in case compare (abs r) (fromRational (1 :% 2)) of
+          LT -> n
+          EQ -> if even n then n else m
+          GT -> m
+  ceiling a = let (n, r) = properFraction a in if r > fromInteger 0 then n + 1 else n
+  floor a = let (n, r) = properFraction a in if r < fromInteger 0 then n - 1 else n
+
+class (RealFrac a, Floating a) => RealFloat a where
+  floatRadix :: a -> Integer
+  -- How many bits the mantissa has.
+  floatDigits :: a -> Int
+  floatRange :: a -> (Int, Int)
+  -- The number is mantissa * 2^exponent.
+  decodeFloat :: a -> (Integer, Int)
+  encodeFloat :: Integer -> Int -> a
+  isNaN, isInfinite, isDenormalized, isNegativeZero, isIEEE :: a -> Bool
+  exponent :: a -> Int
+  significand :: a -> a
+  scaleFloat :: Int -> a -> a
+  atan2 :: a -> a -> a
+  floatRadix _ = 2
+  isIEEE _ = True
+  exponent a = case decodeFloat a of
+    (m, n) -> if m == 0 then 0 else n + floatDigits a
+  significand a = case decodeFloat a of
+    (m, _) -> encodeFloat m (negate (floatDigits a))
+  scaleFloat k a = case decodeFloat a of
+    (m, n) -> if m == 0 then a else encodeFloat m (n + k)
 
 class Enum a where
   succ, pred :: a -> a
@@ -462,7 +533,13 @@ lcm a b = if a == 0 || b == 0 then 0 else abs (quot a (gcd a b) * b)
     half = base ^ quot exponent 2
 
 fromIntegral :: (Integral a, Num b) => a -> b
-fromIntegral = numConvert
+fromIntegral a = fromInteger (toInteger a)
+
+realToFrac :: (Real a, Fractional b) => a -> b
+realToFrac a = fromRational (toRational a)
+
+(^^) :: (Fractional a, Integral b) => a -> b -> a
+(^^) base n = if n >= 0 then base ^ n else recip (base ^ negate n)
 
 -- ---- Char ----
 
