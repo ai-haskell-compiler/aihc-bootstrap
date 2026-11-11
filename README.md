@@ -33,8 +33,8 @@ lists what is unsupported, most frequent first. Its first lines are the
 measure of progress:
 
 ```text
-modules loaded:        335
-definitions prepared:  11685 of 12292
+modules loaded:        353
+definitions prepared:  12025 of 12404
 ```
 
 The order of the library work is in [docs/PLAN.md](docs/PLAN.md).
@@ -102,7 +102,8 @@ A test that imports modules of its own keeps them in `tests/lib`, which
 A test of a package that GHC does not ship says at its top how its expected
 output was made. `tests/megaparsec.hs` and `tests/prettyprinter.hs` run
 against the source of those packages;
-`tests/monoidmap.hs` and `tests/async.hs` were checked by hand.
+`tests/monoidmap.hs`, `tests/async.hs` and `tests/vectors.hs` were checked
+by hand.
 
 ## Licence
 
