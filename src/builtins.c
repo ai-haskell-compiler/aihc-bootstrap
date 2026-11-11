@@ -37,28 +37,10 @@ static Value *builtin_getArgs(Value **arguments)
     return make_io_result(list);
 }
 
-/* Turns a Haskell String into a C string. */
-static char *c_string(Value *list)
-{
-    char *text = NULL;
-    size_t length = 0;
-
-    list = force(list);
-    while (list->tag == TAG_CONS) {
-        text = xrealloc(text, length + 5);
-        length += (size_t)utf8_encode(force(list->fields[0])->number,
-                                      text + length);
-        list = force(list->fields[1]);
-    }
-    text = xrealloc(text, length + 1);
-    text[length] = '\0';
-    return text;
-}
-
 /* lookupEnv :: String -> IO (Maybe String) */
 static Value *builtin_lookupEnv(Value **arguments)
 {
-    const char *value = getenv(c_string(arguments[0]));
+    const char *value = getenv(c_string(arguments[0], NULL));
     Value *result;
 
     if (value == NULL) {
@@ -234,6 +216,17 @@ static const Builtin builtins[] = {
     { "bytesHPut", 3, builtin_bytesHPut },
     { "stringReadFile", 2, builtin_stringReadFile },
     { "stringWriteFile", 4, builtin_stringWriteFile },
+    { "pathKind", 2, builtin_pathKind },
+    { "fileSize", 2, builtin_fileSize },
+    { "isExecutable", 2, builtin_isExecutable },
+    { "listDirectory", 2, builtin_listDirectory },
+    { "makeDirectory", 2, builtin_makeDirectory },
+    { "removePath", 2, builtin_removePath },
+    { "renamePath", 3, builtin_renamePath },
+    { "currentDirectory", 1, builtin_currentDirectory },
+    { "realPath", 2, builtin_realPath },
+    { "temporaryFile", 2, builtin_temporaryFile },
+    { "runProcess", 7, builtin_runProcess },
     { "deepForce", 2, builtin_deepForce },
     { "numAdd", 3, builtin_numAdd },
     { "numSub", 3, builtin_numSub },

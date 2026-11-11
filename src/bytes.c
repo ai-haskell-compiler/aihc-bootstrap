@@ -30,12 +30,12 @@ static Value *bytes_argument(Value *value)
     return value;
 }
 
-static Value *make_bool(int condition)
+Value *make_bool(int condition)
 {
     return make_con(condition ? TAG_TRUE : TAG_FALSE, 0);
 }
 
-static Value *make_maybe(Value *value)
+Value *make_maybe(Value *value)
 {
     Value *result;
 
@@ -49,7 +49,7 @@ static Value *make_maybe(Value *value)
 
 /* A Haskell String as a C string, in UTF-8. Sets `*length` if not NULL,
    since the string may contain NUL characters. */
-static char *c_string(Value *list, long *length)
+char *c_string(Value *list, long *length)
 {
     char *text = NULL;
     long used = 0;

@@ -1,0 +1,44 @@
+False
+True
+False
+True
+True
+["a","d"]
+["b"]
+[]
+[".","..","b"]
+True
+True
+False
+12
+True
+first
+[False,True]
+["a","e","one.txt","renamed.txt"]
+True
+True
+["a","one.txt"]
+(True,"aihc-bootstrap-test-system")
+"a/b"
+True
+"some/file"
+"/already/absolute/x"
+True
+(True,True)
+Just "sh"
+Nothing
+(ExitFailure 3,"out\n","err\n")
+(ExitSuccess,"line one\nline two\n","")
+(ExitSuccess,"a b||c'd|\233|","")
+(ExitSuccess,"H\233LLO","")
+(ExitFailure (-9),"","")
+(ExitSuccess,"b\ntwo.txt\n","")
+(ExitFailure 1,"42\n","")
+given
+done
+True
+True
+ExitSuccess
+ExitFailure 2
+(True,False)
+False

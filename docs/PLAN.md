@@ -50,7 +50,9 @@ replacing those packages instead of running them.
 | 3 Monads and state | done | 8,009 of 11,566 |
 | `Data.Graph`, `Data.Array`, `Data.Tree` | done | 8,523 of 11,610 |
 | `Data.MonoidMap`, `Data.ByteString.Builder`, `Data.Binary.Get`/`Put` | done | 9,146 of 11,737 |
-| 4 The system | next | |
+| `Data.Text.Unsafe` | done | |
+| 4 The system | done, except as listed below | 9,459 of 11,833 |
+| 5 Concurrency | next | |
 
 Left over from phase 1, each stopping with a `TODO` when reached:
 
@@ -61,6 +63,22 @@ Left over from phase 1, each stopping with a `TODO` when reached:
   `deriving via`.
 - Data declarations with infix constructors.
 - Character classification beyond ASCII (`Data.Char` is not written yet).
+
+Left over from phase 4:
+
+- `createProcess`, `waitForProcess` and `terminateProcess`: a program that
+  runs alongside the interpreter. Programs that are run and waited for
+  (`readProcessWithExitCode` and its relatives) work.
+- Running a program with another environment (`env`).
+- `getModificationTime` (it needs `Data.Time`), `GHC.Clock`, `timeout`.
+- File handles: `withFile`, `openTempFile`, `hClose`, `hGetLine`,
+  `hGetContents`, `hSetBuffering`.
+- `getEnvironment`, `getExecutablePath`.
+
+Known to be slow: `Data.Text.Unsafe.lengthWord8` walks the whole text, and
+the lexer of `aihc-parser` asks for the length of the remaining input at
+every token. If lexing a large file takes too long, `Text` becomes UTF-8
+bytes in C, as upstream; that also saves most of its memory.
 
 Left over from phase 2:
 
@@ -84,9 +102,9 @@ infix constructors, and about twenty small modules of `base`
 ...).
 
 The larger blocks the survey still shows, by definitions stopped:
-`Data.Text.Unsafe` 407, `Text.Megaparsec` 402, `Prettyprinter` 322,
-`System.FilePath` 90, `GHC.Generics` 76, `System.Directory` 63,
-`Data.Data` 62, `Control.Concurrent.STM` 58, `System.Process` 51.
+`Text.Megaparsec` 742, `Prettyprinter` 322, `GHC.Generics` 76, `Data.Data`
+62, `Control.Concurrent.STM` 60, `Data.Vector.Unboxed.Mutable` 43,
+`Data.Array.Unboxed` 41.
 
 ## Phase 0: survey mode
 

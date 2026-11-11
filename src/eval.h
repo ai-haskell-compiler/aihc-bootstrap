@@ -81,6 +81,12 @@ Value *make_builtin(const Builtin *builtin);
 Value *make_io_result(Value *result);
 Value *make_type(Type *type);
 Value *make_string(const char *string); /* a list of characters */
+Value *make_bool(int condition);
+Value *make_maybe(Value *value); /* Nothing for NULL */
+
+/* A Haskell String as a C string, in UTF-8. Sets `*length` if not NULL,
+   since the string may contain NUL characters. */
+char *c_string(Value *list, long *length);
 
 /* Evaluates to weak head normal form. The result is never a thunk. */
 Value *force(Value *value);
@@ -135,6 +141,19 @@ Value *builtin_bytesHPut(Value **arguments);
 Value *builtin_stringReadFile(Value **arguments);
 Value *builtin_stringWriteFile(Value **arguments);
 Value *builtin_interpreterTodo(Value **arguments);
+
+/* posix.c: directories, file status and running programs. */
+Value *builtin_pathKind(Value **arguments);
+Value *builtin_fileSize(Value **arguments);
+Value *builtin_isExecutable(Value **arguments);
+Value *builtin_listDirectory(Value **arguments);
+Value *builtin_makeDirectory(Value **arguments);
+Value *builtin_removePath(Value **arguments);
+Value *builtin_renamePath(Value **arguments);
+Value *builtin_currentDirectory(Value **arguments);
+Value *builtin_realPath(Value **arguments);
+Value *builtin_temporaryFile(Value **arguments);
+Value *builtin_runProcess(Value **arguments);
 
 /* survey.c */
 void run_survey(const char *file);

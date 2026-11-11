@@ -3,11 +3,7 @@ module System.Exit where
 import Control.Exception (Exception, throwIO)
 
 data ExitCode = ExitSuccess | ExitFailure Int
-
-instance Show ExitCode where
-  show code = case code of
-    ExitSuccess -> "ExitSuccess"
-    ExitFailure _ -> "ExitFailure"
+  deriving (Eq, Ord, Show)
 
 instance Exception ExitCode
 
