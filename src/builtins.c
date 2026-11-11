@@ -302,6 +302,7 @@ static const Builtin builtins[] = {
     { "bytesFind", 2, builtin_bytesFind },
     { "bytesFromString", 1, builtin_bytesFromString },
     { "bytesNew", 2, builtin_bytesNew },
+    { "sha256", 1, builtin_sha256 },
     { "bytesPoke", 4, builtin_bytesPoke },
     { "bytesBlit", 6, builtin_bytesBlit },
     { "bytesValidUtf8", 1, builtin_bytesValidUtf8 },

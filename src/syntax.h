@@ -424,6 +424,7 @@ struct Entity {
 struct ImportItem {
     const char *name;
     const char *parent; /* the T, for a name inside T (...); else NULL */
+    int is_pattern;     /* written after the word `pattern`, or an operator */
     int all_children; /* T (..) */
     ImportItem *next;
 };

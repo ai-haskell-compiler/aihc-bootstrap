@@ -162,6 +162,7 @@ Value *builtin_bytesCompare(Value **arguments);
 Value *builtin_bytesFind(Value **arguments);
 Value *builtin_bytesFromString(Value **arguments);
 Value *builtin_bytesNew(Value **arguments);
+Value *builtin_sha256(Value **arguments);
 Value *builtin_bytesPoke(Value **arguments);
 Value *builtin_bytesBlit(Value **arguments);
 Value *builtin_bytesValidUtf8(Value **arguments);
