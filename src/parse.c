@@ -940,8 +940,35 @@ static Expr *parse_application(Parser *parser)
 {
     Expr *expr = parse_atom(parser);
 
-    while (starts_atom(parser)) {
-        expr = new_application(expr, parse_atom(parser));
+    for (;;) {
+        if (next_is(parser, T_RESERVED, "@")) {
+            /* function @type. The type is one token, or what is between
+               brackets. */
+            Expr *visible = new_expr(E_VISIBLE, peek(parser));
+            int depth = 0;
+
+            parser->position++;
+            visible->function = expr;
+            visible->type_start = parser->position;
+            do {
+                const Token *token = peek(parser);
+
+                if (token->kind == T_SPECIAL
+                    && strchr("([", token->text[0]) != NULL) {
+                    depth++;
+                } else if (token->kind == T_SPECIAL
+                           && strchr(")]", token->text[0]) != NULL) {
+                    depth--;
+                }
+                parser->position++;
+            } while (depth > 0 && parser->position < parser->end);
+            visible->type_end = parser->position;
+            expr = visible;
+        } else if (starts_atom(parser)) {
+            expr = new_application(expr, parse_atom(parser));
+        } else {
+            break;
+        }
     }
     return expr;
 }

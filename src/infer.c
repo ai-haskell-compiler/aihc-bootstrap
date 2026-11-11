@@ -30,6 +30,10 @@ typedef struct Inference {
     Module *module;
     Binding **variables; /* the type variables an annotation may mention */
     int variable_count;
+    Type **instantiated; /* the types the last use of a polymorphic name
+                            was given for its type variables, in order */
+    int instantiated_count;
+    int visible_count;   /* how many of them `@type` has decided */
     Type **literals;     /* the type of each overloaded literal */
     const char **literal_fallbacks; /* "Integer" or "String": its type if
                                        nothing else decides it */
@@ -125,7 +129,7 @@ static void unify(Type *a, Type *b, const Token *token)
 
 /* The type of the scheme with a fresh TY_META for each of its variables.
    `*metas` receives those. */
-static Type *instantiate(const Inference *inference, const Scheme *scheme,
+static Type *instantiate(Inference *inference, const Scheme *scheme,
                          Type ***metas)
 {
     int i;
@@ -134,6 +138,10 @@ static Type *instantiate(const Inference *inference, const Scheme *scheme,
     for (i = 0; i < scheme->variable_count; i++) {
         (*metas)[i] = fresh(inference);
     }
+    /* For `name @type`: see E_VISIBLE. */
+    inference->instantiated = *metas;
+    inference->instantiated_count = scheme->variable_count;
+    inference->visible_count = 0;
     return substitute(scheme->type, scheme->variable_count, scheme->variables,
                       *metas);
 }
@@ -583,6 +591,33 @@ static void infer_alternative(Inference *inference, Alternative *alternative,
     }
 }
 
+/* The type written in an expression: `e :: type` or `f @type`. It may
+   mention the type variables in scope. Any other type variable stands for
+   a type that is still to be found out. */
+static Type *annotation_type(Inference *inference, int start, int end)
+{
+    int known = inference->variable_count;
+    int count = known;
+    Binding **variables = xmalloc((size_t)known * sizeof(Binding *) + 1);
+    Type **unknown;
+    Type *type;
+    int i;
+
+    if (known > 0) {
+        memcpy(variables, inference->variables,
+               (size_t)known * sizeof(Binding *));
+    }
+    type = parse_type(inference->module, start, end, &variables, &count, 1);
+    if (count == known) {
+        return type;
+    }
+    unknown = xmalloc((size_t)(count - known) * sizeof(Type *));
+    for (i = 0; i < count - known; i++) {
+        unknown[i] = fresh(inference);
+    }
+    return substitute(type, count - known, variables + known, unknown);
+}
+
 /* The type of the expression. Rewrites it as described at the top. */
 static Type *infer(Inference *inference, Expr *expr)
 {
@@ -654,10 +689,31 @@ static Type *infer(Inference *inference, Expr *expr)
         }
         return result;
     case E_ANNOTATION:
-        type = parse_type(inference->module, expr->type_start, expr->type_end,
-                          &inference->variables, &inference->variable_count, 0);
+        type = annotation_type(inference, expr->type_start, expr->type_end);
         unify(infer(inference, expr->body), type, expr->token);
         return type;
+    case E_VISIBLE: {
+        /* name @type: the type is what the next type variable of the name
+           stands for here. The variables are in the order of the name's
+           signature. */
+        const Token *first = &inference->module->tokens[expr->type_start];
+        int wildcard = expr->type_end == expr->type_start + 1
+            && token_is(first, T_RESERVED, "_");
+
+        type = infer(inference, expr->function);
+        if (inference->visible_count >= inference->instantiated_count) {
+            TODO_AT(expr->token, "type application to something that is not "
+                                 "a name with type variables left");
+        }
+        if (!wildcard) {
+            unify(inference->instantiated[inference->visible_count],
+                  annotation_type(inference, expr->type_start, expr->type_end),
+                  expr->token);
+        }
+        inference->visible_count++;
+        *expr = *expr->function;
+        return type;
+    }
     case E_NAME:
     case E_OPERATORS:
     case E_RECORD:

@@ -617,6 +617,9 @@ static void resolve_in_scope(Module *module, const Scope *scope, Expr *expr)
     case E_ANNOTATION:
         resolve_in_scope(module, scope, expr->body);
         break;
+    case E_VISIBLE:
+        resolve_in_scope(module, scope, expr->function);
+        break;
     case E_LOCAL:
     case E_GLOBAL:
     case E_INT:

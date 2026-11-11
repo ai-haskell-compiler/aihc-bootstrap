@@ -56,6 +56,7 @@ replacing those packages instead of running them.
 | 6 Parsing: megaparsec | done | 10,625 of 12,140 |
 | 6 Printing: prettyprinter | done | 11,056 of 12,263 |
 | Language backlog, first part | done | 11,685 of 12,292 |
+| Type applications; arrays and vectors | done | 12,025 of 12,404 |
 | 7 Data formats | next | |
 
 Left over from phase 1, each stopping with a `TODO` when reached:
@@ -94,9 +95,8 @@ Left over from phase 2:
 - `tests/monoidmap.hs` and `tests/async.hs` have no output from GHC to
   compare with, because GHC does not ship the packages `monoidmap` and
   `async`. Their expected output was checked by hand.
-- The unboxed and mutable arrays (`Data.Array.Unboxed`, `Data.Array.ST`),
-  which the register allocator uses. `Data.Array` is a map from index to
-  element, with `Int`-like indices only.
+- `Data.Array` only takes indices that can be enumerated (AIHC uses
+  `Int`), where upstream has the class `Ix`.
 - `Data.Text`'s pattern synonyms (`:<`, `Empty`).
 
 Done outside the phases, because the survey asked for them: export lists
@@ -106,9 +106,15 @@ infix constructors, and about twenty small modules of `base`
 ...).
 
 The larger blocks the survey still shows, by definitions stopped:
-`GHC.Generics` 78, `Data.Data` 67, `Data.Vector.Unboxed.Mutable` 43,
-`Data.Array.Unboxed` 41, `Data.Primitive.ByteArray` 35,
-`Crypto.Hash.SHA256` 31, `Numeric` 30, `Data.Aeson` 25.
+`GHC.Generics` 78, `Data.Data` 71, `Crypto.Hash.SHA256` 31, `Numeric` 30,
+`Data.Aeson` 25, `Text.Read` 17.
+
+Arrays: `Data.Array`, `Data.Array.ST`, the vectors (`Data.Vector` and its
+mutable and unboxed variants) and the primitive arrays are all one array
+of the interpreter's (`lib/Interpreter/Array.hs`, six builtins), each with
+its own interface. Nothing is unboxed. Mutable byte arrays are a
+`ByteString` that three builtins overwrite. Only `ST` is supported as the
+monad, and `tests/vectors.hs` was checked by hand.
 
 ## Phase 0: survey mode
 
@@ -244,6 +250,8 @@ Done, each with a test compared against GHC:
 | Local functions that call each other, without signatures | `tests/recursion.hs` |
 | Pattern synonyms: both directions, with a `where` clause, with fields, as operators | `tests/patsyn.hs` |
 | Export lists that hide a module's own definitions; pattern synonyms exported as part of a type | `tests/exports.hs` |
+| Type applications (`f @T`), with the type variables of a signature in scope in its body; type variables of their own in expression annotations | `tests/typeapp.hs` |
+| A pattern that is a variable or `_` does not evaluate what it is matched with | `tests/laziness.hs` |
 
 How the less obvious ones work:
 
@@ -258,8 +266,6 @@ How the less obvious ones work:
 
 Still missing, as the survey shows them:
 
-- `TypeApplications` (`f @T`) and scoped type variables: about 40
-  definitions.
 - `forall` inside a type (`RankNTypes`): 13.
 - `Double`, `Rational` and floating point literals.
 - Derived `Read`, `Generic`, `Data`; `deriving via`.

@@ -260,6 +260,59 @@ Value *builtin_bytesFind(Value **arguments)
     return make_int(-1);
 }
 
+/* Bytes that are changed in place: for building a file in pieces. Once
+   nothing changes them any more they are a ByteString like any other.
+
+   bytesNew :: Int -> IO ByteString        (all zero) */
+Value *builtin_bytesNew(Value **arguments)
+{
+    long length = force(arguments[0])->number;
+    unsigned char *bytes = xmalloc((size_t)(length < 0 ? 0 : length) + 1);
+
+    if (length > 0) {
+        memset(bytes, 0, (size_t)length);
+    }
+    return make_io_result(make_bytes(bytes, length < 0 ? 0 : length));
+}
+
+/* bytesPoke :: ByteString -> Int -> Word8 -> IO () */
+Value *builtin_bytesPoke(Value **arguments)
+{
+    Value *bytes = bytes_argument(arguments[0]);
+    long index = force(arguments[1])->number;
+
+    if (index < 0 || index >= bytes->number) {
+        die("byte index %ld is out of range (length %ld)", index,
+            bytes->number);
+    }
+    ((unsigned char *)bytes->bytes)[index] =
+        (unsigned char)force(arguments[2])->number;
+    return make_io_result(make_con(TAG_UNIT, 0));
+}
+
+/* bytesBlit :: ByteString -> Int -> ByteString -> Int -> Int -> IO ()
+   Copies that many bytes into the first byte string, starting at its
+   index, from the second one, starting at its index. They may be the same
+   one. */
+Value *builtin_bytesBlit(Value **arguments)
+{
+    Value *target = bytes_argument(arguments[0]);
+    long to = force(arguments[1])->number;
+    Value *source = bytes_argument(arguments[2]);
+    long from = force(arguments[3])->number;
+    long count = force(arguments[4])->number;
+
+    if (count > 0) {
+        if (to < 0 || from < 0 || to + count > target->number
+            || from + count > source->number) {
+            die("copying %ld bytes goes out of range", count);
+        }
+        memmove((unsigned char *)target->bytes + to, source->bytes + from,
+                (size_t)count);
+    }
+    return make_io_result(make_con(TAG_UNIT, 0));
+}
+
 /* bytesFromString :: String -> ByteString        (UTF-8) */
 Value *builtin_bytesFromString(Value **arguments)
 {

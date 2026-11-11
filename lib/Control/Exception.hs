@@ -1,5 +1,7 @@
 module Control.Exception where
 
+import Data.Typeable (cast)
+
 -- Any exception, together with its type.
 data SomeException = forall e. Exception e => SomeException e
 
@@ -50,8 +52,6 @@ foreign import prim "raise" raise :: SomeException -> a
 
 foreign import prim "catchAny" catchAny :: IO a -> (SomeException -> IO a) -> IO a
 
--- Just the argument if both types are the same.
-foreign import prim "cast" cast :: a -> Maybe b
 
 -- Evaluates the value now, so that an exception in it is raised here.
 evaluate :: a -> IO a
