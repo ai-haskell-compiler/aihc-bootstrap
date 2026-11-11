@@ -1,0 +1,16 @@
+[Just 42,Just 42,Just (-7),Just (-7),Nothing,Just 31,Just 31,Just 15,Just 7,Just 5,Just (-5),Nothing,Nothing,Nothing,Nothing,Nothing,Nothing,Nothing,Nothing,Nothing,Nothing,Nothing,Nothing,Nothing,Nothing,Just 12345678901]
+[[(42,"")],[(42," ")],[(-7,"")],[(-7,"")],[],[(31,"")],[(31,"")],[(15,"")],[(7,"")],[(5,"")],[(-5,"")],[],[(5,")")],[],[],[],[(4," 2")],[(42,"abc")],[],[],[(1,"e")],[(1,".")],[(0,"x")],[(0,"xg")],[],[(12345678901,"")]]
+(255,0,255,127,12)
+(Right 12,Left "Prelude.read: no parse")
+[[('a',"")],[('b'," rest")],[('\n',"")],[('\'',"")],[('A',"")],[('A',"")],[],[],[],[('c',"")]]
+[[("abc"," rest")],[("","")],[("a\nb\"c\\","")],[("\SOH\SO\&H\1234\&5","")],[("ab","")],[],[("ab","")],[],[("p","")]]
+[Just [1,2,3],Just [],Just [1,-2],Nothing,Nothing,Nothing,Nothing]
+(Just [[1,2],[],[3]],Just ["a","b"])
+[Just True,Just False,Just True,Nothing,Nothing,Just False]
+(Just (),Just (),Just (1,'c'),Just (1,True))
+[Just Nothing,Just (Just 5),Just (Just (-5)),Just (Just (-5)),Just (Just 5),Nothing,Nothing]
+(Just (Just (Just 3)),Just [Just 1,Nothing])
+ff 0 deadbeef! 100
+["1","f","10","fff","10000"]
+([(255," rest")],[(255,"g")],[],[])
+([(15,"8")],[(12,"x")],[(11,"2")])

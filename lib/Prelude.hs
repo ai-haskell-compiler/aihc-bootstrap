@@ -8,6 +8,12 @@ module Prelude
     IOError,
     ioError,
     userError,
+    foldr1,
+    foldl1,
+    Read (..),
+    ReadS,
+    reads,
+    read,
   )
 where
 
@@ -17,7 +23,9 @@ where
 import Control.Exception (ErrorCall (..), throw)
 import Data.Char (isSpace)
 import System.IO (appendFile, hPutStr, hPutStrLn, readFile, stdout, writeFile)
+import Data.List (foldl1, foldr1)
 import System.IO.Error (IOError, ioError, userError)
+import Text.Read (Read (..), ReadS, read, reads)
 
 infixr 9 .
 
