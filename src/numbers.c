@@ -99,11 +99,6 @@ static Value *make_number(enum NumberKind kind, unsigned long bits)
     return make_int(wrap(kind, bits));
 }
 
-static Value *make_bool(int condition)
-{
-    return make_con(condition ? TAG_TRUE : TAG_FALSE, 0);
-}
-
 /* The argument as a number that arithmetic can be done on. */
 static long operand(enum NumberKind kind, Value *value)
 {

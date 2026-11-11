@@ -33,8 +33,8 @@ lists what is unsupported, most frequent first. Its first lines are the
 measure of progress:
 
 ```text
-modules loaded:        310
-definitions prepared:  9146 of 11737
+modules loaded:        314
+definitions prepared:  9459 of 11833
 ```
 
 The order of the library work is in [docs/PLAN.md](docs/PLAN.md).
@@ -74,6 +74,7 @@ are therefore never looked at.
 | `src/derive.c` | The methods of instances that come from `deriving` |
 | `src/numbers.c` | Arithmetic for every built-in number type |
 | `src/bytes.c` | `ByteString`, and reading and writing files |
+| `src/posix.c` | Everything that needs POSIX: directories, running programs |
 | `src/elaborate.c` | The pipeline for one declaration; new passes are added here |
 | `src/eval.c` | The evaluator: a machine with an explicit stack |
 | `src/builtins.c` | C functions reachable through `foreign import prim` |

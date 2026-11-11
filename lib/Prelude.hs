@@ -1,12 +1,23 @@
-module Prelude where
+module Prelude
+  ( module Prelude,
+    -- Defined elsewhere and passed on, so that a module that imports both
+    -- this and the defining module sees one definition.
+    readFile,
+    writeFile,
+    appendFile,
+    IOError,
+    ioError,
+    userError,
+  )
+where
 
 -- The interpreter's own Prelude. It has what GHC's Prelude exports, as far
 -- as AIHC needs it, and the classes and types the interpreter itself knows.
 
 import Control.Exception (ErrorCall (..), throw)
 import Data.Char (isSpace)
-import System.IO (hPutStr, hPutStrLn, stdout)
-import qualified System.IO as IO
+import System.IO (appendFile, hPutStr, hPutStrLn, readFile, stdout, writeFile)
+import System.IO.Error (IOError, ioError, userError)
 
 infixr 9 .
 
@@ -869,15 +880,6 @@ putStrLn = hPutStrLn stdout
 
 print :: Show a => a -> IO ()
 print a = putStrLn (show a)
-
-readFile :: FilePath -> IO String
-readFile = IO.readFile
-
-writeFile :: FilePath -> String -> IO ()
-writeFile = IO.writeFile
-
-appendFile :: FilePath -> String -> IO ()
-appendFile = IO.appendFile
 
 -- ---- Foldable and Traversable ----
 

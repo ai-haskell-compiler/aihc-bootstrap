@@ -1,0 +1,215 @@
+/* The interpreter is C89, but C89 has no directories and cannot run a
+   program with its output captured. Everything that needs POSIX is in this
+   file: directories, file status, the path of a file, and running a
+   program. */
+#define _XOPEN_SOURCE 700
+
+#include "eval.h"
+
+#include <dirent.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+/* pathKind :: String -> IO Int
+   0: there is nothing at the path, 1: a directory, 2: anything else. */
+Value *builtin_pathKind(Value **arguments)
+{
+    struct stat status;
+
+    if (stat(c_string(arguments[0], NULL), &status) != 0) {
+        return make_io_result(make_int(0));
+    }
+    return make_io_result(make_int(S_ISDIR(status.st_mode) ? 1 : 2));
+}
+
+/* fileSize :: String -> IO Int        (-1: no such file) */
+Value *builtin_fileSize(Value **arguments)
+{
+    struct stat status;
+
+    if (stat(c_string(arguments[0], NULL), &status) != 0) {
+        return make_io_result(make_int(-1));
+    }
+    return make_io_result(make_int((long)status.st_size));
+}
+
+/* isExecutable :: String -> IO Bool */
+Value *builtin_isExecutable(Value **arguments)
+{
+    return make_io_result(
+        make_bool(access(c_string(arguments[0], NULL), X_OK) == 0));
+}
+
+/* listDirectory :: String -> IO (Maybe [String])
+   The names in the directory other than "." and "..", in the order the
+   system gives them, which is the order GHC's listDirectory gives too. */
+Value *builtin_listDirectory(Value **arguments)
+{
+    DIR *directory = opendir(c_string(arguments[0], NULL));
+    Value *list = make_con(TAG_NIL, 0);
+    Value **last = &list;
+    struct dirent *entry;
+
+    if (directory == NULL) {
+        return make_io_result(make_maybe(NULL));
+    }
+    while ((entry = readdir(directory)) != NULL) {
+        Value *cell;
+
+        if (strcmp(entry->d_name, ".") == 0
+            || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        cell = make_con(TAG_CONS, 2);
+        cell->fields[0] = make_string(entry->d_name);
+        cell->fields[1] = *last;
+        *last = cell;
+        last = &cell->fields[1];
+    }
+    closedir(directory);
+    return make_io_result(make_maybe(list));
+}
+
+/* makeDirectory :: String -> IO Bool        (False: failed) */
+Value *builtin_makeDirectory(Value **arguments)
+{
+    return make_io_result(
+        make_bool(mkdir(c_string(arguments[0], NULL), 0777) == 0));
+}
+
+/* removePath :: String -> IO Bool
+   Removes a file or an empty directory. False: failed. */
+Value *builtin_removePath(Value **arguments)
+{
+    return make_io_result(
+        make_bool(remove(c_string(arguments[0], NULL)) == 0));
+}
+
+/* renamePath :: String -> String -> IO Bool        (False: failed) */
+Value *builtin_renamePath(Value **arguments)
+{
+    return make_io_result(make_bool(rename(c_string(arguments[0], NULL),
+                                           c_string(arguments[1], NULL)) == 0));
+}
+
+/* currentDirectory :: IO String */
+Value *builtin_currentDirectory(Value **arguments)
+{
+    char path[PATH_MAX];
+
+    (void)arguments;
+    if (getcwd(path, sizeof(path)) == NULL) {
+        die("cannot find the current directory");
+    }
+    return make_io_result(make_string(path));
+}
+
+/* realPath :: String -> IO (Maybe String)
+   The path with every symbolic link, "." and ".." resolved. Nothing if a
+   part of it does not exist. */
+Value *builtin_realPath(Value **arguments)
+{
+    char resolved[PATH_MAX];
+
+    if (realpath(c_string(arguments[0], NULL), resolved) == NULL) {
+        return make_io_result(make_maybe(NULL));
+    }
+    return make_io_result(make_maybe(make_string(resolved)));
+}
+
+/* temporaryFile :: String -> IO String
+   Creates a new, empty file in the directory and returns its path. */
+Value *builtin_temporaryFile(Value **arguments)
+{
+    char *directory = c_string(arguments[0], NULL);
+    char *path = xmalloc(strlen(directory) + 32);
+    int descriptor;
+
+    sprintf(path, "%s/aihc-bootstrap-XXXXXX", directory);
+    descriptor = mkstemp(path);
+    if (descriptor < 0) {
+        die("cannot create a temporary file in %s", directory);
+    }
+    close(descriptor);
+    return make_io_result(make_string(path));
+}
+
+/* A Haskell list of strings as a NULL-terminated array, with `first` in
+   front of it. */
+static char **string_array(char *first, Value *list)
+{
+    char **array = NULL;
+    int count = 0;
+
+    array = xrealloc(array, 2 * sizeof(char *));
+    array[count++] = first;
+    list = force(list);
+    while (list->tag == TAG_CONS) {
+        array = xrealloc(array, ((size_t)count + 2) * sizeof(char *));
+        array[count++] = c_string(list->fields[0], NULL);
+        list = force(list->fields[1]);
+    }
+    array[count] = NULL;
+    return array;
+}
+
+/* Makes the file the standard stream `target` of this process. */
+static void redirect(const char *path, int flags, int target)
+{
+    int descriptor = open(path, flags, 0666);
+
+    if (descriptor < 0 || dup2(descriptor, target) < 0) {
+        _exit(127);
+    }
+    close(descriptor);
+}
+
+/* runProcess :: String -> [String] -> String -> String -> String -> String
+                 -> IO Int
+   Runs the program with the arguments and waits for it. The program is
+   looked up in PATH. The other strings are the directory to run it in
+   ("" for the current one) and the files that are its standard input,
+   output and error; the output files are overwritten. The result is the
+   exit status, or minus the number of the signal that ended the program. */
+Value *builtin_runProcess(Value **arguments)
+{
+    char *program = c_string(arguments[0], NULL);
+    char **argv = string_array(program, arguments[1]);
+    char *directory = c_string(arguments[2], NULL);
+    char *input = c_string(arguments[3], NULL);
+    char *output = c_string(arguments[4], NULL);
+    char *error = c_string(arguments[5], NULL);
+    int status = 0;
+    pid_t child;
+
+    fflush(stdout);
+    fflush(stderr);
+    child = fork();
+    if (child < 0) {
+        die("cannot start %s", program);
+    }
+    if (child == 0) {
+        if (directory[0] != '\0' && chdir(directory) != 0) {
+            _exit(127);
+        }
+        redirect(input, O_RDONLY, 0);
+        redirect(output, O_WRONLY | O_CREAT | O_TRUNC, 1);
+        redirect(error, O_WRONLY | O_CREAT | O_TRUNC, 2);
+        execvp(program, argv);
+        _exit(127);
+    }
+    if (waitpid(child, &status, 0) < 0) {
+        die("cannot wait for %s", program);
+    }
+    if (WIFSIGNALED(status)) {
+        return make_io_result(make_int(-(long)WTERMSIG(status)));
+    }
+    return make_io_result(make_int(WEXITSTATUS(status)));
+}
