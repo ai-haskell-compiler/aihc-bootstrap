@@ -94,3 +94,9 @@ against a real compiler:
 ```sh
 runghc --ghc-arg=-package-env --ghc-arg=- tests/NAME.hs > tests/NAME.stdout
 ```
+
+## Licence
+
+Public domain, under the [Unlicense](LICENSE). One file is an exception:
+`lib/Data/Graph.hs` is derived from the `containers` package and stays under
+[its licence](licenses/containers.txt).
