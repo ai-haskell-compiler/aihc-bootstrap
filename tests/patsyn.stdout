@@ -1,0 +1,23 @@
+int
+list of int
+list of lists of something else
+list of something else
+pair of something else and int
+from something else and an int to list of int
+function of 1
+applied Maybe
+named Unit
+something else
+(Con "Int" [],True,Fun (Con "Int" []) (Fun (Con "Int" []) (Con "Int" [])))
+[Con "Pair" [Var 0,Con "Int" []],Con "Pair" [Con "Int" [],Var 0]]
+blank
+blank
+number 42
+number 42
+number 7 then u
+shout
+ends in c after 2
+("file",12,12,"file12")
+[12,0]
+[1,3]
+(2,3)

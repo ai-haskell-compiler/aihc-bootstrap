@@ -1,8 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Main where
 
-import Data.Text (Text)
+import Data.Text (Text, pattern Empty, pattern (:<), pattern (:>))
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 
@@ -31,3 +32,11 @@ main = do
   TIO.putStrLn (T.unwords ["printed", "as", "text:", "λ"])
   TIO.putStr "no newline"
   TIO.putStrLn ""
+  print (map describe ["", "a", "abc"])
+  print ('x' :< "yz", "xy" :> 'z', Empty == T.empty)
+  where
+    describe :: Text -> String
+    describe text = case text of
+      Empty -> "empty"
+      c :< Empty -> "one: " ++ [c]
+      c :< (middle :> d) -> [c] ++ show (T.length middle) ++ [d]

@@ -35,8 +35,9 @@ static const Scope *extend_scope(const Scope *outer, Binding *binding)
 
 /* `name` is as written: Just, or Map.Bin with a qualifier. `prelude` is
    PRELUDE_NAME for a name that syntax stands for, else NULL. */
-static Constructor *resolve_constructor(Module *module, const Token *token,
-                                        const char *name, const char *prelude)
+/* What the constructor name means: a constructor or a pattern synonym. */
+static Entity *constructor_entity(Module *module, const Token *token,
+                                  const char *name, const char *prelude)
 {
     const char *qualifier;
     const char *base = split_qualified(name, &qualifier);
@@ -45,6 +46,17 @@ static Constructor *resolve_constructor(Module *module, const Token *token,
 
     if (entity == NULL) {
         unresolved(module, token, name);
+    }
+    return entity;
+}
+
+static Constructor *resolve_constructor(Module *module, const Token *token,
+                                        const char *name, const char *prelude)
+{
+    Entity *entity = constructor_entity(module, token, name, prelude);
+
+    if (entity->constructor == NULL) {
+        TODO_AT(token, "pattern synonym where only a constructor can be");
     }
     return entity->constructor;
 }
@@ -77,21 +89,18 @@ static Pattern *new_simple_pattern(enum PatternKind kind, const Token *token)
 /* Rewrites C { f = p, g, .. } in place to the constructor pattern with one
    argument for each field of C: p for f, a variable g for g, and for the
    other fields a variable of the field's name if there is a `..`, else a
-   wildcard. */
-static void record_to_constructor_pattern(Module *module, Pattern *pattern)
+   wildcard. `names` are the fields of C, NULL where a field has no name. */
+static void record_to_constructor_pattern(Pattern *pattern, int count,
+                                          const char **names)
 {
-    Constructor *constructor = resolve_constructor(
-        module, pattern->token, pattern->name, pattern->qualifier);
     int i;
     int j;
 
     pattern->kind = P_CONSTRUCTOR;
-    pattern->argument_count = constructor->arity;
-    pattern->arguments =
-        xmalloc((size_t)constructor->arity * sizeof(Pattern *) + 1);
-    for (i = 0; i < constructor->arity; i++) {
-        const char *name = constructor->field_names != NULL
-            ? constructor->field_names[i] : NULL;
+    pattern->argument_count = count;
+    pattern->arguments = xmalloc((size_t)count * sizeof(Pattern *) + 1);
+    for (i = 0; i < count; i++) {
+        const char *name = names != NULL ? names[i] : NULL;
         Pattern *argument = NULL;
         int named = 0;
 
@@ -113,6 +122,77 @@ static void record_to_constructor_pattern(Module *module, Pattern *pattern)
     }
 }
 
+static const Scope *resolve_pattern(Module *module, const Scope *scope,
+                                    Pattern *pattern);
+
+/* Puts the arguments of a use of a pattern synonym in place of its
+   parameters in (a new copy of) its right-hand side. */
+static void substitute_parameters(Pattern *pattern,
+                                  const PatternSynonym *synonym,
+                                  Pattern **arguments)
+{
+    int i;
+
+    if (pattern->kind == P_VARIABLE) {
+        for (i = 0; i < synonym->parameter_count; i++) {
+            if (strcmp(pattern->variable->name, synonym->parameters[i]) == 0) {
+                *pattern = *arguments[i];
+                return;
+            }
+        }
+    }
+    if (pattern->kind == P_AS) {
+        /* parameter@inner: the argument and `inner` both have to match. */
+        for (i = 0; i < synonym->parameter_count; i++) {
+            if (strcmp(pattern->variable->name, synonym->parameters[i]) == 0) {
+                if (arguments[i]->kind == P_VARIABLE) {
+                    pattern->variable = arguments[i]->variable;
+                } else if (arguments[i]->kind == P_WILDCARD) {
+                    *pattern = *pattern->inner;
+                    substitute_parameters(pattern, synonym, arguments);
+                    return;
+                } else {
+                    TODO_AT(arguments[i]->token,
+                            "pattern for a parameter that the pattern "
+                            "synonym names with @");
+                }
+            }
+        }
+    }
+    if (pattern->inner != NULL) {
+        substitute_parameters(pattern->inner, synonym, arguments);
+    }
+    for (i = 0; i < pattern->argument_count; i++) {
+        substitute_parameters(pattern->arguments[i], synonym, arguments);
+    }
+}
+
+/* Replaces the use of a pattern synonym, in place, by what it stands for. */
+static const Scope *resolve_synonym_pattern(Module *module, const Scope *scope,
+                                            Pattern *pattern,
+                                            const PatternSynonym *synonym)
+{
+    Pattern *rhs;
+    int i;
+
+    if (pattern->kind == P_RECORD) {
+        record_to_constructor_pattern(pattern, synonym->parameter_count,
+                                      synonym->parameters);
+    }
+    if (pattern->argument_count != synonym->parameter_count) {
+        TODO_AT(pattern->token, "pattern synonym without all its arguments");
+    }
+    for (i = 0; i < pattern->argument_count; i++) {
+        scope = resolve_pattern(module, scope, pattern->arguments[i]);
+    }
+    /* The right-hand side means what it means where it was written. */
+    rhs = parse_synonym_pattern(synonym);
+    resolve_pattern(synonym->module, NULL, rhs);
+    substitute_parameters(rhs, synonym, pattern->arguments);
+    *pattern = *rhs;
+    return scope;
+}
+
 /* Resolves the constructors of a pattern and returns the scope extended
    with its variables. */
 static const Scope *resolve_pattern(Module *module, const Scope *scope,
@@ -120,8 +200,18 @@ static const Scope *resolve_pattern(Module *module, const Scope *scope,
 {
     int i;
 
-    if (pattern->kind == P_RECORD) {
-        record_to_constructor_pattern(module, pattern);
+    if (pattern->kind == P_RECORD || pattern->kind == P_CONSTRUCTOR) {
+        Entity *entity = constructor_entity(module, pattern->token,
+                                            pattern->name, pattern->qualifier);
+
+        if (entity->synonym != NULL) {
+            return resolve_synonym_pattern(module, scope, pattern,
+                                           entity->synonym);
+        }
+        if (pattern->kind == P_RECORD) {
+            record_to_constructor_pattern(pattern, entity->constructor->arity,
+                                          entity->constructor->field_names);
+        }
     }
     switch (pattern->kind) {
     case P_VARIABLE:
@@ -478,8 +568,17 @@ static void resolve_in_scope(Module *module, const Scope *scope, Expr *expr)
         expr->kind = E_GLOBAL;
         break;
     case E_CONSTRUCTOR:
-        expr->constructor =
-            resolve_constructor(module, expr->token, expr->name, NULL);
+        entity = constructor_entity(module, expr->token, expr->name, NULL);
+        if (entity->synonym == NULL) {
+            expr->constructor = entity->constructor;
+        } else if (entity->synonym->builder != NULL) {
+            /* A pattern synonym in an expression is a function. */
+            expr->global = entity->synonym->builder;
+            expr->kind = E_GLOBAL;
+        } else {
+            TODO_AT(expr->token,
+                    "pattern synonym that cannot be used in an expression");
+        }
         break;
     case E_APP:
         resolve_in_scope(module, scope, expr->function);

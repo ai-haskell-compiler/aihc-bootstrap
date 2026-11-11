@@ -119,6 +119,9 @@ void elaborate_global(Global *global)
     elaborating[elaborating_count++] = global;
     if (global->selector != NULL) {
         expr = selector_definition(global);
+    } else if (global->synonym != NULL) {
+        expr = parse_synonym_selector(global->synonym, global->name);
+        resolve(global->module, expr);
     } else {
         expr = parse_global(global);
         resolve(global->module, expr);

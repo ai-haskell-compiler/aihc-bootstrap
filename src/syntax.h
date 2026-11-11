@@ -22,6 +22,7 @@ typedef struct Global Global;
 typedef struct Constructor Constructor;
 typedef struct Fixity Fixity;
 typedef struct Entity Entity;
+typedef struct PatternSynonym PatternSynonym;
 typedef struct ImportItem ImportItem;
 typedef struct Import Import;
 typedef struct Module Module;
@@ -334,6 +335,7 @@ struct Global {
     Class *class;         /* for a class method, else NULL */
     TypeCon *selector;    /* for a record field: its type, else NULL. The
                              definition is made by elaborate.c */
+    PatternSynonym *synonym; /* for a field of a pattern synonym */
     Instance *instance;   /* for a definition in an instance, else NULL */
     Scheme *scheme;       /* NULL until first needed */
     Expr *expr;           /* the elaborated definition; NULL until needed */
@@ -367,6 +369,35 @@ enum Namespace {
 
 /* Something a module defines under a name. Exactly one of the four pointers
    is set. */
+/* A pattern synonym:
+
+       pattern P x y <- pattern          only a pattern
+       pattern P x y = pattern           also an expression, if the pattern
+                                         reads as one
+       pattern P x y <- pattern where    an expression as the clause says
+         P x y = expression
+       pattern P {f, g} <- pattern       the parameters are also fields:
+                                         P {f = p} is a pattern, and f and g
+                                         are functions
+
+   A use of P in a pattern is replaced by the right-hand side, with the
+   arguments of the use in place of the parameters (resolve.c). The
+   right-hand side is read again for each use, in the module of the
+   synonym. A use of P in an expression is the function `builder`. */
+struct PatternSynonym {
+    const char *name;
+    Module *module;
+    int parameter_count;
+    const char **parameters;
+    int rhs_start; /* the tokens of the right-hand side */
+    int rhs_end;
+    Global *builder; /* NULL if P cannot be used in an expression */
+};
+
+/* The `parent` of the entity of a pattern synonym or of one of its
+   fields. */
+#define PATTERN_PARENT "(pattern)"
+
 struct Entity {
     enum Namespace namespace;
     const char *name;
@@ -375,6 +406,7 @@ struct Entity {
                            class of a method; else NULL */
     Global *global;
     Constructor *constructor;
+    PatternSynonym *synonym; /* in place of `constructor` */
     TypeCon *type;
     Class *class;
     Entity *next;
@@ -475,6 +507,12 @@ Expr *parse_global(Global *global);
 /* resolve.c: replaces every name in place by what it refers to, and gives
    operators their precedence. */
 void resolve(Module *module, Expr *expr);
+
+/* parse.c: the right-hand side of the pattern synonym, as a new pattern. */
+Pattern *parse_synonym_pattern(const PatternSynonym *synonym);
+/* parse.c: the definition of a field of the pattern synonym as a function:
+   \v -> case v of right-hand side -> field. Not resolved. */
+Expr *parse_synonym_selector(const PatternSynonym *synonym, const char *field);
 
 /* types.c */
 Binding *new_binding(const char *name);

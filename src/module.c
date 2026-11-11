@@ -27,11 +27,11 @@ Constructor cons_constructor =
     { ":", &list_type_constructor, NULL, 1, 2, 0, 0, NULL, NULL, NULL, NULL, NULL, 0, NULL };
 
 static Entity unit_entity =
-    { NS_CONSTRUCTOR, "()", "()", NULL, &unit_constructor, NULL, NULL, NULL };
+    { NS_CONSTRUCTOR, "()", "()", NULL, &unit_constructor, NULL, NULL, NULL, NULL };
 static Entity nil_entity =
-    { NS_CONSTRUCTOR, "[]", "[]", NULL, &nil_constructor, NULL, NULL, NULL };
+    { NS_CONSTRUCTOR, "[]", "[]", NULL, &nil_constructor, NULL, NULL, NULL, NULL };
 static Entity cons_entity =
-    { NS_CONSTRUCTOR, ":", "[]", NULL, &cons_constructor, NULL, NULL, NULL };
+    { NS_CONSTRUCTOR, ":", "[]", NULL, &cons_constructor, NULL, NULL, NULL, NULL };
 
 static TypeCon tuple_types[MAX_TUPLE + 1];
 static Constructor tuple_constructors[MAX_TUPLE + 1];
@@ -249,6 +249,12 @@ static int import_allows(const Import *import, const char *name,
         }
         if (parent != NULL && item->all_children
             && strcmp(item->name, parent) == 0) {
+            listed = 1;
+        }
+        /* A pattern synonym can be exported as part of a type. We do not
+           know which, so any T (..) lets it through. */
+        if (parent != NULL && item->all_children
+            && strcmp(parent, PATTERN_PARENT) == 0) {
             listed = 1;
         }
     }
@@ -1308,6 +1314,79 @@ static int add_instance_declaration(Module *module, int start, int end)
     return 1;
 }
 
+/* pattern P x y <- pattern [where P x y = expression]
+   pattern P {f, g} <- pattern
+   pattern x :+ y <- pattern
+   pattern P x y = pattern
+   pattern P, Q :: type                  (not looked at)
+
+   See PatternSynonym in syntax.h. */
+static int add_pattern_synonym(Module *module, int start, int end)
+{
+    const Token *tokens = module->tokens;
+    int arrow = find_reserved(tokens, start, end, "<-");
+    int equals = find_reserved(tokens, start, end, "=");
+    int colons = find_reserved(tokens, start, end, "::");
+    int where;
+    PatternSynonym *synonym;
+    Entity *entity;
+    int is_record = 0;
+    int i;
+
+    if (arrow == end || equals < arrow) {
+        arrow = equals; /* pattern P x = pattern */
+    }
+    if (colons < arrow) {
+        return 1; /* a type signature */
+    }
+    if (arrow == end) {
+        return 0;
+    }
+    where = find_reserved(tokens, arrow, end, "where");
+    synonym = xmalloc(sizeof(PatternSynonym));
+    memset(synonym, 0, sizeof(PatternSynonym));
+    synonym->module = module;
+    synonym->rhs_start = arrow + 1;
+    synonym->rhs_end = where;
+    synonym->parameters = xmalloc((size_t)(arrow - start) * sizeof(char *));
+    for (i = start + 1; i < arrow; i++) {
+        if (tokens[i].kind == T_CONID || tokens[i].kind == T_VARSYM) {
+            synonym->name = tokens[i].text;
+        } else if (tokens[i].kind == T_VARID) {
+            synonym->parameters[synonym->parameter_count++] = tokens[i].text;
+        } else if (token_is(&tokens[i], T_SPECIAL, "{")) {
+            is_record = 1;
+        } else if (tokens[i].kind != T_SPECIAL) {
+            return 0;
+        }
+    }
+    if (synonym->name == NULL) {
+        return 0;
+    }
+    if (where < end) {
+        /* The clause after `where` says what P is in an expression. */
+        synonym->builder = new_global(module, synonym->name);
+        add_clause(synonym->builder, where + 1, end);
+    } else if (arrow == equals && tokens[start + 1].kind == T_CONID
+               && !is_record) {
+        /* P x y = pattern, which is also the clause P x y = expression. */
+        synonym->builder = new_global(module, synonym->name);
+        add_clause(synonym->builder, start + 1, end);
+    }
+    entity = add_entity(module, NS_CONSTRUCTOR, synonym->name, PATTERN_PARENT);
+    entity->synonym = synonym;
+    if (is_record) {
+        for (i = 0; i < synonym->parameter_count; i++) {
+            Entity *field =
+                find_or_add_variable(module, synonym->parameters[i]);
+
+            field->parent = PATTERN_PARENT;
+            field->global->synonym = synonym;
+        }
+    }
+    return 1;
+}
+
 /* Records one top-level declaration without parsing its body. A declaration
    we cannot handle is only remembered: it is not an error until a name it
    defines is needed (see note_unsupported). */
@@ -1331,6 +1410,11 @@ static void add_declaration(Module *module, int start, int end)
         supported = add_class_declaration(module, start, end);
     } else if (token_is(first, T_RESERVED, "instance")) {
         supported = add_instance_declaration(module, start, end);
+    } else if (token_is(first, T_VARID, "pattern") && end - start > 2
+               && (first[1].kind == T_CONID
+                   || (first[1].kind == T_VARID && first[2].kind == T_VARSYM
+                       && first[2].text[0] == ':'))) {
+        supported = add_pattern_synonym(module, start, end);
     } else {
         supported = add_variable_declaration(module, start, end);
     }

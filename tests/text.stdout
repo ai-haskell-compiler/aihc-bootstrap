@@ -17,3 +17,5 @@
 ("\"quote\\\"d\"","tab\there",3)
 printed as text: λ
 no newline
+["empty","one: a","a1c"]
+("xyz","xyz",True)

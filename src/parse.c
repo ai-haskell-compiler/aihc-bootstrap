@@ -1667,6 +1667,45 @@ static void finish_let(Expr *let, Expr *body)
     }
 }
 
+/* ---- Pattern synonyms ---- */
+
+static void start_synonym_parser(Parser *parser, const PatternSynonym *synonym)
+{
+    parser->tokens = synonym->module->tokens;
+    parser->overloaded_strings = synonym->module->overloaded_strings;
+    parser->position = synonym->rhs_start;
+    parser->end = synonym->rhs_end;
+    parser->indent = 0;
+    parser->item_start = synonym->rhs_start;
+}
+
+Pattern *parse_synonym_pattern(const PatternSynonym *synonym)
+{
+    Parser parser;
+    Pattern *pattern;
+
+    start_synonym_parser(&parser, synonym);
+    pattern = parse_pattern(&parser);
+    if (parser.position < parser.end) {
+        TODO_AT(peek(&parser), "pattern syntax");
+    }
+    return pattern;
+}
+
+Expr *parse_synonym_selector(const PatternSynonym *synonym, const char *field)
+{
+    const Token *token = &synonym->module->tokens[synonym->rhs_start];
+    Expr *lambda = new_expr(E_LAMBDA, token);
+    Expr *match = new_expr(E_CASE, token);
+
+    lambda->local = new_binding("");
+    lambda->body = match;
+    match->scrutinee = new_local(token, lambda->local);
+    match->alternatives = new_alternative(parse_synonym_pattern(synonym),
+                                          new_name(token, field));
+    return lambda;
+}
+
 /* ---- Top-level variables ---- */
 
 Expr *parse_global(Global *global)
@@ -1695,6 +1734,9 @@ Expr *parse_global(Global *global)
             && (second->kind != T_VARSYM || token_is_bang(first, second))
             && !token_is(second, T_SPECIAL, "`")) {
             parser.position += 1; /* skip the name: f */
+        } else if (first->kind == T_CONID
+                   && strcmp(first->text, global->name) == 0) {
+            parser.position += 1; /* a pattern synonym as a function: P */
         } else if (token_is(first, T_SPECIAL, "(") && second->kind == T_VARSYM
                    && token_is(second + 1, T_SPECIAL, ")")) {
             parser.position += 3; /* skip the name: (+) */
