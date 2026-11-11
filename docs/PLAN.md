@@ -54,7 +54,8 @@ replacing those packages instead of running them.
 | 4 The system | done, except as listed below | 9,459 of 11,833 |
 | 5 Concurrency | done | 9,605 of 11,901 |
 | 6 Parsing: megaparsec | done | 10,625 of 12,140 |
-| 6 Printing: prettyprinter | next | |
+| 6 Printing: prettyprinter | done | 11,056 of 12,263 |
+| 7 Data formats | next | |
 
 Left over from phase 1, each stopping with a `TODO` when reached:
 
@@ -104,8 +105,11 @@ infix constructors, and about twenty small modules of `base`
 ...).
 
 The larger blocks the survey still shows, by definitions stopped:
-`Prettyprinter` 324, `Data.Data` 78, `GHC.Generics` 76,
-`Data.Vector.Unboxed.Mutable` 43, `Data.Array.Unboxed` 41.
+`Data.Data` 80, `GHC.Generics` 76, `Data.Vector.Unboxed.Mutable` 43,
+`Data.Array.Unboxed` 41, `Data.Primitive.ByteArray` 34,
+`Crypto.Hash.SHA256` 30, `Numeric` 30. What is left is now mostly the
+language backlog and unresolved names: about 140 kinds of failure, none of
+them large.
 
 ## Phase 0: survey mode
 
@@ -203,7 +207,12 @@ thread is a stack, and a blocked `takeMVar` switches stacks.
     associated types in the interpreter, which megaparsec's `Stream` class
     needs anyway (`tests/families.hs`).
   - `Text.Megaparsec.Char.Lexer.float` waits for `Double`.
-- **`prettyprinter`** is a port of the upstream layout algorithm.
+- **`prettyprinter`** is a port of the upstream document type and layout
+  algorithm (`lib/Prettyprinter/Internal.hs`). AIHC writes files with it,
+  so the same document has to give the same text. `tests/prettyprinter.hs`
+  compares about 1,250 lines with upstream, run from its source, at six
+  page widths. One thing differs: the ribbon fraction of a page width is
+  an `Int`, because there is no `Double` yet. AIHC only uses 1.
 
 ## Phase 7: data formats
 
