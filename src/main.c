@@ -23,6 +23,7 @@ static int interpret(int argc, char **argv)
     int survey = 0;
     int i;
 
+    set_program_path(argv[0]);
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) {
             add_search_directory(argv[++i], overloaded_strings);

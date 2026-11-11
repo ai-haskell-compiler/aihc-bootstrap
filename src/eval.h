@@ -174,6 +174,8 @@ Value *builtin_handleFlush(Value **arguments);
 Value *builtin_handleIsEOF(Value **arguments);
 Value *builtin_handleRead(Value **arguments);
 Value *builtin_processId(Value **arguments);
+Value *builtin_environment(Value **arguments);
+Value *builtin_fileModified(Value **arguments);
 /* posix.c: runs the function on a stack of its own, large enough for deep
    recursion, and returns what it returns. */
 int run_with_big_stack(int (*function)(int, char **), int argc, char **argv);
@@ -210,6 +212,7 @@ void run_survey(const char *file);
 /* builtins.c */
 /* The command line of the Haskell program, for getArgs. */
 void set_program_arguments(int count, char **arguments);
+void set_program_path(const char *path);
 const Builtin *find_builtin(const char *name);
 
 /* instances.c: the definition of the class method for the type the class is

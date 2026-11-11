@@ -6,6 +6,7 @@ module System.Directory where
 import Control.Exception (IOException (..), throwIO)
 import Control.Monad (filterM, unless, when)
 import qualified Data.ByteString as B
+import Data.Time.Clock (UTCTime (..))
 import System.Environment (lookupEnv)
 import System.FilePath
 
@@ -32,6 +33,12 @@ doesPathExist path = fmap (/= 0) (pathKind path)
 getFileSize :: FilePath -> IO Integer
 getFileSize path = fileSize path >>= \size ->
   if size < 0 then failed "cannot find the size of the file" path else pure (toInteger size)
+
+getModificationTime :: FilePath -> IO UTCTime
+getModificationTime path = fileModified path >>= \nanoseconds ->
+  if nanoseconds < 0
+    then failed "cannot find when the file was changed" path
+    else pure (UTCTime (toInteger nanoseconds))
 
 -- The names in the directory, without "." and "..", in no particular order.
 listDirectory :: FilePath -> IO [FilePath]
@@ -164,3 +171,5 @@ foreign import prim "renamePath" renamePath :: String -> String -> IO Bool
 foreign import prim "currentDirectory" currentDirectory :: IO String
 
 foreign import prim "realPath" realPath :: String -> IO (Maybe String)
+
+foreign import prim "fileModified" fileModified :: String -> IO Int

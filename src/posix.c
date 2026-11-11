@@ -251,6 +251,50 @@ Value *builtin_processId(Value **arguments)
     return make_io_result(make_int((long)getpid()));
 }
 
+/* environment :: IO [String]
+   Every variable of the environment, as NAME=value. */
+extern char **environ;
+
+Value *builtin_environment(Value **arguments)
+{
+    Value *list = make_con(TAG_NIL, 0);
+    int count = 0;
+    int i;
+
+    (void)arguments;
+    while (environ[count] != NULL) {
+        count++;
+    }
+    for (i = count - 1; i >= 0; i--) {
+        Value *cell = make_con(TAG_CONS, 2);
+
+        cell->fields[0] = make_string(environ[i]);
+        cell->fields[1] = list;
+        list = cell;
+    }
+    return make_io_result(list);
+}
+
+/* fileModified :: String -> IO Int
+   When the file was last changed, in nanoseconds since 1970, or -1 if it
+   is not there. */
+Value *builtin_fileModified(Value **arguments)
+{
+    struct stat status;
+    long nanoseconds;
+
+    if (stat(c_string(arguments[0], NULL), &status) != 0) {
+        return make_io_result(make_int(-1));
+    }
+#ifdef __APPLE__
+    nanoseconds = (long)status.st_mtimensec;
+#else
+    nanoseconds = (long)status.st_mtim.tv_nsec;
+#endif
+    return make_io_result(
+        make_int((long)status.st_mtime * 1000000000l + nanoseconds));
+}
+
 /* ---- A large stack ---- */
 
 static int (*stack_function)(int, char **);

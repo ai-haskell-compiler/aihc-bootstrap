@@ -14,6 +14,21 @@
 static int program_argument_count = 0;
 static char **program_arguments = NULL;
 
+static const char *program_path = "aihc-bootstrap";
+
+void set_program_path(const char *path)
+{
+    program_path = path;
+}
+
+/* programPath :: IO String
+   How the interpreter was started: its argv[0]. */
+static Value *builtin_programPath(Value **arguments)
+{
+    (void)arguments;
+    return make_io_result(make_string(program_path));
+}
+
 void set_program_arguments(int count, char **arguments)
 {
     program_argument_count = count;
@@ -306,6 +321,9 @@ static const Builtin builtins[] = {
     { "handleIsEOF", 2, builtin_handleIsEOF },
     { "handleRead", 3, builtin_handleRead },
     { "processId", 1, builtin_processId },
+    { "environment", 1, builtin_environment },
+    { "fileModified", 2, builtin_fileModified },
+    { "programPath", 1, builtin_programPath },
     { "charInfo", 2, builtin_charInfo },
     { "bytesPoke", 4, builtin_bytesPoke },
     { "bytesBlit", 6, builtin_bytesBlit },
