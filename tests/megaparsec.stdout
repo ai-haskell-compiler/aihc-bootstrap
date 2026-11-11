@@ -706,6 +706,40 @@ signed on "- 12"
   |   |  ^
   | unexpected space
   | expecting integer
+float on "1.5"
+  ok: 1.5
+float on "2e3x"
+  ok: (2000.0,"x")
+float on "1.5e-3 rest"
+  ok: (1.5e-3," rest")
+float on "0.1e"
+  ok: (0.1,"e")
+float on "12"
+  error: TrivialError 2 (Just EndOfInput) (fromList [Tokens ('.' :| ""),Tokens ('E' :| ""),Tokens ('e' :| ""),Label ('d' :| "igit")])
+  | test:1:3:
+  |   |
+  | 1 | 12
+  |   |   ^
+  | unexpected end of input
+  | expecting '.', 'E', 'e', or digit
+float on "1."
+  error: TrivialError 2 (Just EndOfInput) (fromList [Label ('d' :| "igit")])
+  | test:1:3:
+  |   |
+  | 1 | 1.
+  |   |   ^
+  | unexpected end of input
+  | expecting digit
+float on ".5"
+  error: TrivialError 0 (Just (Tokens ('.' :| ""))) (fromList [Label ('d' :| "igit")])
+  | test:1:1:
+  |   |
+  | 1 | .5
+  |   | ^
+  | unexpected '.'
+  | expecting digit
+float on "-0.30000000000000004E+2"
+  ok: -30.000000000000004
 charLiteral on "a\\n\\t\\\\\\'\\\"\\65\\x41\\o101\\SOH\\SO\\^A\\DELz"
   ok: "a\n\t\\'\"AAA\SOH\SO\SOH\DELz"
 charLiteral on "\\q"

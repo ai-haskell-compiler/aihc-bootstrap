@@ -8,5 +8,6 @@ data Scientific = Scientific Integer Int
 scientific :: Integer -> Int -> Scientific
 scientific = Scientific
 
+-- Exact, as the real package is: the nearest number to c * 10^e.
 toRealFloat :: RealFloat a => Scientific -> a
-toRealFloat (Scientific c e) = fromInteger c * 10 ^^ e
+toRealFloat (Scientific c e) = fromRational (fromInteger c * 10 ^^ e)
