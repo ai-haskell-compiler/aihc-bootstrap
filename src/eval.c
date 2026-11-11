@@ -417,6 +417,7 @@ static Value *run(Expr *expr, Env *env, Value *value)
             case E_NAME:
             case E_OPERATORS:
             case E_RECORD:
+            case E_VISIBLE:
                 die("unresolved expression reached the evaluator");
             }
             expr = NULL;

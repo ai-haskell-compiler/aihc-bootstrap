@@ -426,7 +426,27 @@ Type *parse_type(Module *module, int start, int end, Binding ***variables,
         }
         parser.position++;
     }
-    parser.position = skip_type_context(&parser);
+    {
+        /* The variables are in the order they are first written, the
+           context included: `f @T` relies on that order. */
+        int after_context = skip_type_context(&parser);
+        int i;
+
+        for (i = parser.position; parser.open && i < after_context; i++) {
+            const Token *token = &parser.tokens[i];
+            int known = 0;
+            int k;
+
+            for (k = 0; k < *parser.count; k++) {
+                known = known
+                    || strcmp((*parser.variables)[k]->name, token->text) == 0;
+            }
+            if (token->kind == T_VARID && !known) {
+                add_type_variable(&parser, token->text);
+            }
+        }
+        parser.position = after_context;
+    }
     type = parse_function_type(&parser);
     if (parser.position != parser.end) {
         TODO_AT(&parser.tokens[parser.position], "type syntax");

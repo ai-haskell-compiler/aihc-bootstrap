@@ -198,6 +198,8 @@ enum ExprKind {
                       replaces it by applications */
     E_RECORD,      /* C { f = a } or e { f = a }; the resolver replaces it */
     E_ANNOTATION,  /* body :: type */
+    E_VISIBLE,     /* function @type: the type for the function's next type
+                      variable. The type pass removes it. */
     E_TYPE,        /* a type passed as an argument; made by the type pass */
     E_METHOD       /* a class method at a type; made by the type pass */
 };
@@ -233,7 +235,8 @@ struct Expr {
     const char *field_qualifier; /* E_RECORD: the M of the first M.f, or NULL */
     Expr **field_values;       /* E_RECORD: NULL for a field given as { f } */
     int field_wildcard;        /* E_RECORD: { .. } */
-    int type_start;            /* E_ANNOTATION: the tokens of the type */
+    int type_start;            /* E_ANNOTATION, E_VISIBLE: the tokens of the
+                                  type */
     int type_end;
     Type *type;                /* E_TYPE; E_METHOD: the class argument */
 };
