@@ -17,6 +17,10 @@ where
 -- A replacement for the package megaparsec, with the parts AIHC uses. The
 -- parsers behave as upstream's do, error for error. What differs is listed
 -- in Text.Megaparsec.Internal and Text.Megaparsec.Class.
+--
+-- getSourcePos needs the stream to be one whose lines can be counted
+-- (TraversableStream); the constraint is not written, since the class has
+-- only the monad to name.
 
 import Control.Monad.Combinators
 import Data.Functor.Identity (Identity)
@@ -73,20 +77,20 @@ runParser' p s = case runParsecT p s of
 -- ---- Failing ----
 
 -- Fails with what was found and what was expected.
-failure :: Maybe (ErrorItem (Token s)) -> Set (ErrorItem (Token s)) -> ParsecT e s m a
+failure :: MonadParsec m => Maybe (ErrorItem (TokenOf m)) -> Set (ErrorItem (TokenOf m)) -> m a
 failure us ps = getOffset >>= \o -> parseError (TrivialError o us ps)
 
-fancyFailure :: Set (ErrorFancy e) -> ParsecT e s m a
+fancyFailure :: MonadParsec m => Set (ErrorFancy (ErrorOf m)) -> m a
 fancyFailure xs = getOffset >>= \o -> parseError (FancyError o xs)
 
-unexpected :: ErrorItem (Token s) -> ParsecT e s m a
+unexpected :: MonadParsec m => ErrorItem (TokenOf m) -> m a
 unexpected item = failure (Just item) E.empty
 
-customFailure :: e -> ParsecT e s m a
+customFailure :: MonadParsec m => ErrorOf m -> m a
 customFailure e = fancyFailure (E.singleton (ErrorCustom e))
 
 -- Changes every error of the parser, the registered ones too.
-region :: (ParseError s e -> ParseError s e) -> ParsecT e s m a -> ParsecT e s m a
+region :: MonadParsec m => (ErrorIn m -> ErrorIn m) -> m a -> m a
 region f m = do
   state <- getParserState
   let deSoFar = stateParseErrors state
@@ -98,43 +102,43 @@ region f m = do
     Right x -> return x
 
 -- Notes the error and goes on. The run fails at its end (runParser').
-registerParseError :: ParseError s e -> ParsecT e s m ()
+registerParseError :: MonadParsec m => ErrorIn m -> m ()
 registerParseError e = updateParserState (\s -> s {stateParseErrors = e : stateParseErrors s})
 
-registerFailure :: Maybe (ErrorItem (Token s)) -> Set (ErrorItem (Token s)) -> ParsecT e s m ()
+registerFailure :: MonadParsec m => Maybe (ErrorItem (TokenOf m)) -> Set (ErrorItem (TokenOf m)) -> m ()
 registerFailure us ps = getOffset >>= \o -> registerParseError (TrivialError o us ps)
 
-registerFancyFailure :: Set (ErrorFancy e) -> ParsecT e s m ()
+registerFancyFailure :: MonadParsec m => Set (ErrorFancy (ErrorOf m)) -> m ()
 registerFancyFailure xs = getOffset >>= \o -> registerParseError (FancyError o xs)
 
 -- ---- Tokens ----
 
-single :: Stream s => Token s -> ParsecT e s m (Token s)
+single :: MonadParsec m => TokenOf m -> m (TokenOf m)
 single t = token (\x -> if x == t then Just x else Nothing) (E.singleton (Tokens (t :| [])))
 
-satisfy :: Stream s => (Token s -> Bool) -> ParsecT e s m (Token s)
+satisfy :: MonadParsec m => (TokenOf m -> Bool) -> m (TokenOf m)
 satisfy f = token (\x -> if f x then Just x else Nothing) E.empty
 
-anySingle :: Stream s => ParsecT e s m (Token s)
+anySingle :: MonadParsec m => m (TokenOf m)
 anySingle = satisfy (const True)
 
-anySingleBut :: Stream s => Token s -> ParsecT e s m (Token s)
+anySingleBut :: MonadParsec m => TokenOf m -> m (TokenOf m)
 anySingleBut t = satisfy (/= t)
 
-oneOf :: Stream s => [Token s] -> ParsecT e s m (Token s)
+oneOf :: MonadParsec m => [TokenOf m] -> m (TokenOf m)
 oneOf cs = satisfy (\x -> elem x cs)
 
-noneOf :: Stream s => [Token s] -> ParsecT e s m (Token s)
+noneOf :: MonadParsec m => [TokenOf m] -> m (TokenOf m)
 noneOf cs = satisfy (\x -> notElem x cs)
 
-chunk :: Stream s => Tokens s -> ParsecT e s m (Tokens s)
+chunk :: MonadParsec m => TokensOf m -> m (TokensOf m)
 chunk = tokens (==)
 
-(<?>) :: ParsecT e s m a -> String -> ParsecT e s m a
+(<?>) :: MonadParsec m => m a -> String -> m a
 (<?>) p l = label l p
 
 -- The tokens the parser read, with its result.
-match :: Stream s => ParsecT e s m a -> ParsecT e s m (Tokens s, a)
+match :: MonadParsec m => m a -> m (TokensOf m, a)
 match p = do
   o <- getOffset
   s <- getInput
@@ -142,30 +146,30 @@ match p = do
   o' <- getOffset
   return (fst (fromJust (takeN_ (o' - o) s)), r)
 
-takeRest :: Stream s => ParsecT e s m (Tokens s)
+takeRest :: MonadParsec m => m (TokensOf m)
 takeRest = takeWhileP Nothing (const True)
 
-atEnd :: Stream s => ParsecT e s m Bool
+atEnd :: MonadParsec m => m Bool
 atEnd = option False (fmap (const True) (hidden eof))
 
 -- ---- The state ----
 
-getInput :: ParsecT e s m s
+getInput :: MonadParsec m => m (StreamOf m)
 getInput = fmap stateInput getParserState
 
-setInput :: s -> ParsecT e s m ()
+setInput :: MonadParsec m => StreamOf m -> m ()
 setInput input = updateParserState (\s -> s {stateInput = input})
 
-getOffset :: ParsecT e s m Int
+getOffset :: MonadParsec m => m Int
 getOffset = fmap stateOffset getParserState
 
-setOffset :: Int -> ParsecT e s m ()
+setOffset :: MonadParsec m => Int -> m ()
 setOffset o = updateParserState (\s -> s {stateOffset = o})
 
-setParserState :: State s e -> ParsecT e s m ()
+setParserState :: MonadParsec m => StateOf m -> m ()
 setParserState st = updateParserState (const st)
 
-getSourcePos :: TraversableStream s => ParsecT e s m SourcePos
+getSourcePos :: MonadParsec m => m SourcePos
 getSourcePos = do
   st <- getParserState
   let pst = reachOffsetNoLine (stateOffset st) (statePosState st)

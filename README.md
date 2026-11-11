@@ -33,8 +33,8 @@ lists what is unsupported, most frequent first. Its first lines are the
 measure of progress:
 
 ```text
-modules loaded:        320
-definitions prepared:  9605 of 11901
+modules loaded:        331
+definitions prepared:  10625 of 12140
 ```
 
 The order of the library work is in [docs/PLAN.md](docs/PLAN.md).
@@ -96,8 +96,18 @@ against a real compiler:
 runghc --ghc-arg=-package-env --ghc-arg=- tests/NAME.hs > tests/NAME.stdout
 ```
 
+A test of a package that GHC does not ship says at its top how its expected
+output was made. `tests/megaparsec.hs` runs against megaparsec's own source;
+`tests/monoidmap.hs` and `tests/async.hs` were checked by hand.
+
 ## Licence
 
-Public domain, under the [Unlicense](LICENSE). One file is an exception:
-`lib/Data/Graph.hs` is derived from the `containers` package and stays under
-[its licence](licenses/containers.txt).
+Public domain, under the [Unlicense](LICENSE), except for the files that
+are derived from other packages. Each of those says so at its top and stays
+under the licence of its package:
+
+- `lib/Data/Graph.hs`: [containers](licenses/containers.txt).
+- `lib/Text/Megaparsec.hs` and `lib/Text/Megaparsec/`:
+  [megaparsec](licenses/megaparsec.txt).
+- `lib/Control/Monad/Combinators.hs`:
+  [parser-combinators](licenses/parser-combinators.txt).

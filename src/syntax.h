@@ -221,6 +221,7 @@ struct Expr {
                                   minus sign in front */
     int field_count;           /* E_RECORD */
     const char **field_names;  /* E_RECORD */
+    const char *field_qualifier; /* E_RECORD: the M of the first M.f, or NULL */
     Expr **field_values;       /* E_RECORD: NULL for a field given as { f } */
     int field_wildcard;        /* E_RECORD: { .. } */
     int type_start;            /* E_ANNOTATION: the tokens of the type */

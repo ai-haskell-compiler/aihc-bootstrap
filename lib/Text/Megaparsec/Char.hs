@@ -11,70 +11,70 @@ import Data.Functor (void)
 import Data.Proxy
 import Text.Megaparsec
 
-newline :: Stream s => ParsecT e s m (Token s)
+newline :: MonadParsec m => m (TokenOf m)
 newline = char '\n'
 
-crlf :: Stream s => ParsecT e s m (Tokens s)
+crlf :: MonadParsec m => m (TokensOf m)
 crlf = getInput >>= \input -> string (tokensToChunk (proxyOf input) "\r\n")
 
-eol :: Stream s => ParsecT e s m (Tokens s)
+eol :: MonadParsec m => m (TokensOf m)
 eol = getInput >>= \input -> (fmap (tokenToChunk (proxyOf input)) newline <|> crlf) <?> "end of line"
 
-tab :: Stream s => ParsecT e s m (Token s)
+tab :: MonadParsec m => m (TokenOf m)
 tab = char '\t'
 
 -- Zero or more white space characters.
-space :: Stream s => ParsecT e s m ()
+space :: MonadParsec m => m ()
 space = void (takeWhileP (Just "white space") isSpace)
 
-space1 :: Stream s => ParsecT e s m ()
+space1 :: MonadParsec m => m ()
 space1 = void (takeWhile1P (Just "white space") isSpace)
 
 -- As space, but not newlines.
-hspace :: Stream s => ParsecT e s m ()
+hspace :: MonadParsec m => m ()
 hspace = void (takeWhileP (Just "white space") isHSpace)
 
-hspace1 :: Stream s => ParsecT e s m ()
+hspace1 :: MonadParsec m => m ()
 hspace1 = void (takeWhile1P (Just "white space") isHSpace)
 
 isHSpace :: Char -> Bool
 isHSpace c = isSpace c && c /= '\n' && c /= '\r'
 
-spaceChar :: Stream s => ParsecT e s m (Token s)
+spaceChar :: MonadParsec m => m (TokenOf m)
 spaceChar = satisfy isSpace <?> "white space"
 
-upperChar :: Stream s => ParsecT e s m (Token s)
+upperChar :: MonadParsec m => m (TokenOf m)
 upperChar = satisfy isUpper <?> "uppercase letter"
 
-lowerChar :: Stream s => ParsecT e s m (Token s)
+lowerChar :: MonadParsec m => m (TokenOf m)
 lowerChar = satisfy isLower <?> "lowercase letter"
 
-letterChar :: Stream s => ParsecT e s m (Token s)
+letterChar :: MonadParsec m => m (TokenOf m)
 letterChar = satisfy isLetter <?> "letter"
 
-alphaNumChar :: Stream s => ParsecT e s m (Token s)
+alphaNumChar :: MonadParsec m => m (TokenOf m)
 alphaNumChar = satisfy isAlphaNum <?> "alphanumeric character"
 
-printChar :: Stream s => ParsecT e s m (Token s)
+printChar :: MonadParsec m => m (TokenOf m)
 printChar = satisfy isPrint <?> "printable character"
 
-digitChar :: Stream s => ParsecT e s m (Token s)
+digitChar :: MonadParsec m => m (TokenOf m)
 digitChar = satisfy isDigit <?> "digit"
 
-binDigitChar :: Stream s => ParsecT e s m (Token s)
+binDigitChar :: MonadParsec m => m (TokenOf m)
 binDigitChar = satisfy (\c -> c == '0' || c == '1') <?> "binary digit"
 
-octDigitChar :: Stream s => ParsecT e s m (Token s)
+octDigitChar :: MonadParsec m => m (TokenOf m)
 octDigitChar = satisfy isOctDigit <?> "octal digit"
 
-hexDigitChar :: Stream s => ParsecT e s m (Token s)
+hexDigitChar :: MonadParsec m => m (TokenOf m)
 hexDigitChar = satisfy isHexDigit <?> "hexadecimal digit"
 
-asciiChar :: Stream s => ParsecT e s m (Token s)
+asciiChar :: MonadParsec m => m (TokenOf m)
 asciiChar = satisfy isAscii <?> "ASCII character"
 
-char :: Stream s => Token s -> ParsecT e s m (Token s)
+char :: MonadParsec m => TokenOf m -> m (TokenOf m)
 char = single
 
-string :: Stream s => Tokens s -> ParsecT e s m (Tokens s)
+string :: MonadParsec m => TokensOf m -> m (TokensOf m)
 string = chunk

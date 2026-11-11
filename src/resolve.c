@@ -330,8 +330,8 @@ static void resolve_record_construction(Module *module, const Scope *scope,
    The let keeps `a` in one place when there are several constructors. */
 static void resolve_record_update(Module *module, const Scope *scope, Expr *expr)
 {
-    Entity *entity =
-        lookup_entity(module, NS_VARIABLE, NULL, expr->field_names[0]);
+    Entity *entity = lookup_entity(module, NS_VARIABLE, expr->field_qualifier,
+                                   expr->field_names[0]);
     const TypeCon *type;
     Expr *let = new_simple_expr(E_LET, expr->token);
     Expr *match = new_simple_expr(E_CASE, expr->token);

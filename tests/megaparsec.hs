@@ -11,11 +11,14 @@ module Main where
 --     --ghc-arg=-itests/ghc-stubs tests/megaparsec.hs > tests/megaparsec.stdout
 
 import Control.Monad (void)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Reader (ReaderT, ask, local, runReaderT)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Text.Megaparsec
+import qualified Text.Megaparsec as MPC
 import qualified Text.Megaparsec.Char as C
 import qualified Text.Megaparsec.Char.Lexer as L
 import qualified Text.Megaparsec.Internal as MPI
@@ -108,6 +111,46 @@ expression = foldl Add <$> product' <*> many (symbol "+" *> product')
 
 program :: Parser [Expr]
 program = sc *> (expression `sepEndBy` symbol ";") <* eof
+
+-- ---- A parser with an environment, as AIHC's parsers of its own formats ----
+
+type Scoped = ReaderT [String] (Parsec Custom Text)
+
+-- Names have to be bound by an enclosing `\name.` to be used.
+scoped :: Scoped [String]
+scoped = do
+  parts <- MPC.many part
+  MPC.eof
+  pure parts
+  where
+    part = MPC.try binder MPC.<|> use MPC.<?> "a part"
+
+binder :: Scoped String
+binder = do
+  void (C.char '\\')
+  name <- MPC.some C.lowerChar
+  void (C.char '.')
+  inner <- local (name :) (MPC.many (MPC.try binder MPC.<|> use))
+  void (lift (C.char ';'))
+  pure (name ++ "{" ++ unwords inner ++ "}")
+
+use :: Scoped String
+use = do
+  offset <- MPC.getOffset
+  name <- MPC.takeWhile1P (Just "letter") (`elem` ['a' .. 'z']) <* C.space
+  bound <- ask
+  if T.unpack name `elem` bound
+    then pure (T.unpack name)
+    else MPC.region (MPC.setErrorOffset offset) (MPC.customFailure (Custom ("unbound " ++ T.unpack name) (length bound)))
+
+runScoped :: String -> IO ()
+runScoped input = do
+  putStrLn ("scoped on " ++ show input)
+  case parse (runReaderT scoped ["top"]) "scoped" (T.pack input) of
+    Right a -> putStrLn ("  ok: " ++ show a)
+    Left bundle -> do
+      mapM_ (\e -> putStrLn ("  error: " ++ show e)) (NE.toList (bundleErrors bundle))
+      putStr (unlines (map ("  | " ++) (lines (errorBundlePretty bundle))))
 
 -- ---- A stream of tokens, read through the parser's own state ----
 
@@ -286,6 +329,7 @@ main = do
   run "getInput" (anySingle *> getInput) "abc"
   run "setInput" (setInput "xyz" *> many anySingle) "abc"
   run "setOffset" (setOffset 10 *> single 'q') "abc"
+  run "qualified field update" (MPC.updateParserState (\s -> s {MPC.stateOffset = MPC.stateOffset s + 5}) *> single 'q') "abc"
   run "getSourcePos" ((,,) <$> getSourcePos <*> (takeWhileP Nothing (/= 'x') *> getSourcePos) <*> (anySingle *> getSourcePos)) "ab\n\tcd\nefxg"
   run "match" (match (many (single 'a') *> single 'b')) "aabc"
   run "match" (match (pure ())) "abc"
@@ -357,6 +401,15 @@ main = do
   runText "text" (C.eol *> getSourcePos) "\r\nx"
   runText "text" (match (C.string (T.pack "a") *> many C.digitChar)) "a12b"
   runText "text" (some (C.char 'é') *> C.char 'x') "ééy"
+
+  -- An environment under the parser.
+  runScoped "top top"
+  runScoped "\\x.x top \\y.y x;;top"
+  runScoped "\\x.x; x"
+  runScoped "\\x.x y;"
+  runScoped "\\x.x"
+  runScoped "top \\X.;"
+  runScoped ""
 
   -- A stream of tokens.
   runToks "tree" [TInt 1]

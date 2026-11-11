@@ -777,6 +777,9 @@ static Expr *parse_record(Parser *parser, Expr *subject)
                                             count * sizeof(Expr *));
             record->field_names[record->field_count] = peek(parser)->text;
             record->field_values[record->field_count] = NULL;
+            if (record->field_count == 0) {
+                record->field_qualifier = peek(parser)->qualifier;
+            }
             parser->position++;
             if (next_is(parser, T_RESERVED, "=")) {
                 parser->position++;

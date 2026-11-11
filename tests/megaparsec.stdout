@@ -540,6 +540,14 @@ setOffset on "abc"
   |   |    ^
   | unexpected 'a'
   | expecting 'q'
+qualified field update on "abc"
+  error: TrivialError 5 (Just (Tokens ('a' :| ""))) (fromList [Tokens ('q' :| "")])
+  | test:1:4:
+  |   |
+  | 1 | abc
+  |   |    ^
+  | unexpected 'a'
+  | expecting 'q'
 getSourcePos on "ab\n\tcd\nefxg"
   ok: (SourcePos {sourceName = "test", sourceLine = Pos 1, sourceColumn = Pos 1},SourcePos {sourceName = "test", sourceLine = Pos 3, sourceColumn = Pos 3},SourcePos {sourceName = "test", sourceLine = Pos 3, sourceColumn = Pos 4})
 match on "aabc"
@@ -844,6 +852,44 @@ text on text "\233\233y"
   |   |   ^
   | unexpected 'y'
   | expecting 'x' or 'é'
+scoped on "top top"
+  ok: ["top","top"]
+scoped on "\\x.x top \\y.y x;;top"
+  ok: ["x{x top y{y x}}","top"]
+scoped on "\\x.x; x"
+  error: TrivialError 5 (Just (Tokens (' ' :| ""))) (fromList [Label ('a' :| " part"),EndOfInput])
+  | scoped:1:6:
+  |   |
+  | 1 | \x.x; x
+  |   |      ^
+  | unexpected space
+  | expecting a part or end of input
+scoped on "\\x.x y;"
+  error: TrivialError 0 (Just (Tokens ('\\' :| ""))) (fromList [EndOfInput])
+  | scoped:1:1:
+  |   |
+  | 1 | \x.x y;
+  |   | ^
+  | unexpected '\'
+  | expecting end of input
+scoped on "\\x.x"
+  error: TrivialError 0 (Just (Tokens ('\\' :| ""))) (fromList [Label ('a' :| " part"),EndOfInput])
+  | scoped:1:1:
+  |   |
+  | 1 | \x.x
+  |   | ^
+  | unexpected '\'
+  | expecting a part or end of input
+scoped on "top \\X.;"
+  error: TrivialError 4 (Just (Tokens ('\\' :| ""))) (fromList [Label ('a' :| " part"),Label ('w' :| "hite space"),EndOfInput])
+  | scoped:1:5:
+  |   |
+  | 1 | top \X.;
+  |   |     ^
+  | unexpected '\'
+  | expecting a part, end of input, or white space
+scoped on ""
+  ok: []
 tree on [TInt 1]
   ok: Leaf 1
 tree on [TName "f",TOpen,TInt 1,TComma,TName "g",TOpen,TClose,TComma,TName "h",TClose]

@@ -126,7 +126,8 @@ static Module *imported_module(Import *import);
 static int import_allows(const Import *import, const char *name,
                          const char *parent);
 static int import_might_provide(const Import *import,
-                                enum Namespace namespace, const char *name);
+                                enum Namespace namespace, const char *name,
+                                int associated_types_too);
 
 /* A name the module imports and lists among its exports, as itself or as
    one of the children of a T (..). Only the imports that could have it are
@@ -152,7 +153,7 @@ static Entity *find_listed_export(Module *module, enum Namespace namespace,
 
             /* For T (..), the import has to be one that T can come from. */
             if (!import_might_provide(import, by_name ? namespace : NS_TYPE,
-                                      item->name)) {
+                                      item->name, 0)) {
                 continue;
             }
             found = find_exported_within(imported_module(import), namespace,
@@ -257,7 +258,8 @@ static int import_allows(const Import *import, const char *name,
 /* A cheap test that needs no knowledge of the imported module. It lets us
    leave a module unloaded when its import list rules the name out. */
 static int import_might_provide(const Import *import,
-                                enum Namespace namespace, const char *name)
+                                enum Namespace namespace, const char *name,
+                                int associated_types_too)
 {
     const ImportItem *item;
 
@@ -265,9 +267,11 @@ static int import_might_provide(const Import *import,
         return 1;
     }
     for (item = import->items; item != NULL; item = item->next) {
-        /* T (..) can stand for any constructor or variable, but not for a
-           type. */
-        if ((item->all_children && namespace != NS_TYPE)
+        /* T (..) can stand for any constructor or variable. It can also
+           stand for a type, if T is a class with associated types; that is
+           rare, so it is only considered when asked for. */
+        if ((item->all_children
+             && (namespace != NS_TYPE || associated_types_too))
             || strcmp(item->name, name) == 0) {
             return 1;
         }
@@ -283,10 +287,12 @@ static Module *imported_module(Import *import)
     return import->module;
 }
 
-/* Export lists are ignored for now: a module exports everything it defines
-   and re-exports nothing. */
-Entity *lookup_entity(Module *module, enum Namespace namespace,
-                      const char *qualifier, const char *name)
+/* What the name means in the module: its own definition, or one it
+   imports. With `associated_types_too`, an import of C (..) is also looked
+   at for a type name. */
+static Entity *lookup(Module *module, enum Namespace namespace,
+                      const char *qualifier, const char *name,
+                      int associated_types_too)
 {
     Entity *found = NULL;
     Import *import;
@@ -316,7 +322,8 @@ Entity *lookup_entity(Module *module, enum Namespace namespace,
         Entity *entity;
 
         if (!import_matches_qualifier(import, qualifier)
-            || !import_might_provide(import, namespace, name)) {
+            || !import_might_provide(import, namespace, name,
+                                     associated_types_too)) {
             continue;
         }
         entity = find_exported_entity(imported_module(import), namespace, name);
@@ -328,7 +335,17 @@ Entity *lookup_entity(Module *module, enum Namespace namespace,
         }
         found = entity;
     }
+    if (found == NULL && namespace == NS_TYPE && !associated_types_too) {
+        /* Perhaps an associated type, imported with its class as C (..). */
+        return lookup(module, namespace, qualifier, name, 1);
+    }
     return found;
+}
+
+Entity *lookup_entity(Module *module, enum Namespace namespace,
+                      const char *qualifier, const char *name)
+{
+    return lookup(module, namespace, qualifier, name, 0);
 }
 
 const char *split_qualified(const char *name, const char **qualifier)
@@ -1181,6 +1198,9 @@ static int add_class_declaration(Module *module, int start, int end)
 
             if (family != NULL) {
                 family->is_family = 1;
+                /* Importing C (..) brings the associated types of C. */
+                find_entity(module, NS_TYPE, family->name)->parent =
+                    class->name;
             }
         } else if (colon >= 0) {
             add_signature(module, i, colon, next, class);
