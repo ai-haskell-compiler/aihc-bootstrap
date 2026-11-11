@@ -16,6 +16,7 @@ typedef struct Scheme Scheme;
 typedef struct TypeCon TypeCon;
 typedef struct Class Class;
 typedef struct Instance Instance;
+typedef struct FamilyInstance FamilyInstance;
 typedef struct Chunk Chunk;
 typedef struct Global Global;
 typedef struct Constructor Constructor;
@@ -64,6 +65,33 @@ struct TypeCon {
     Type *rhs;      /* synonym: NULL until first use */
     int constructor_count; /* data, newtype */
     Constructor **constructors;
+    int is_family;  /* declared with `type F a` in a class: see below */
+};
+
+/* An associated type. A class declares it:
+
+       class Stream s where
+         type Token s
+
+   and each instance says what it is for its type:
+
+       instance Stream Text where
+         type Token Text = Char
+
+   `Token s` stays as it is written until `s` is known, which at the latest
+   is when the program runs. Then it is replaced by the right-hand side of
+   the instance whose left-hand side it matches (reduce_family). */
+struct FamilyInstance {
+    Module *module;
+    int lhs_start; /* the tokens of `Token Text` */
+    int lhs_end;
+    int rhs_start; /* the tokens of `Char` */
+    int rhs_end;
+    Type *lhs;     /* NULL until first use; then the next three are set */
+    Type *rhs;
+    int variable_count;
+    Binding **variables;
+    FamilyInstance *next; /* all of them, of all loaded modules */
 };
 
 /* class C a where ... (one parameter only, for now) */
@@ -385,6 +413,7 @@ extern Constructor unit_constructor;      /* () */
 extern Constructor nil_constructor;       /* [] */
 extern Constructor cons_constructor;      /* : */
 extern Instance *all_instances;
+extern FamilyInstance *all_family_instances;
 
 /* Tuples of 2 to MAX_TUPLE elements. The constructor and the type are both
    named (,) or (,,) and so on. */
@@ -462,6 +491,12 @@ Scheme *global_scheme(Global *global);
 Scheme *constructor_scheme(Constructor *constructor);
 /* Fills in the class and head of the instance. */
 void prepare_instance(Instance *instance);
+
+/* instances.c: if the type is an associated type applied to a type that an
+   instance covers, what the instance says it is. Otherwise the type. */
+Type *reduce_family(Type *type);
+/* Whether the type is an associated type applied to something. */
+int is_family_application(Type *type);
 
 /* infer.c: works out the types in the definition of the variable, makes type
    arguments explicit, and returns the definition as a function of the

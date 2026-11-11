@@ -16,9 +16,9 @@ Instance *all_instances = NULL;
 const char *const PRELUDE_NAME = "Prelude";
 
 /* The types and constructors that have their own syntax. */
-TypeCon function_type_constructor = { "->", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL };
-TypeCon list_type_constructor = { "[]", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL };
-TypeCon unit_type_constructor = { "()", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL };
+TypeCon function_type_constructor = { "->", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0 };
+TypeCon list_type_constructor = { "[]", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0 };
+TypeCon unit_type_constructor = { "()", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0 };
 Constructor unit_constructor =
     { "()", &unit_type_constructor, NULL, 0, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, 0, NULL };
 Constructor nil_constructor =
@@ -1174,7 +1174,15 @@ static int add_class_declaration(Module *module, int start, int end)
         int colon = signature_colon(tokens, i, next);
         const char *name = clause_name(tokens, i, next);
 
-        if (colon >= 0) {
+        if (token_is(&tokens[i], T_RESERVED, "type")) {
+            /* An associated type: type F a [:: kind] */
+            int position = i + 1;
+            TypeCon *family = add_type_head(module, &position, next);
+
+            if (family != NULL) {
+                family->is_family = 1;
+            }
+        } else if (colon >= 0) {
             add_signature(module, i, colon, next, class);
         } else if (is_fixity_keyword(&tokens[i])) {
             add_fixity_declaration(module, i, next);
@@ -1182,7 +1190,7 @@ static int add_class_declaration(Module *module, int start, int end)
             /* The default definition of a method. */
             add_clause(find_or_add_variable(module, name)->global, i, next);
         }
-        /* Anything else (associated types, ...) is ignored for now. */
+        /* Anything else is ignored for now. */
         i = next;
     }
     return 1;
@@ -1203,6 +1211,26 @@ static Global *find_or_add_method(Instance *instance, const char *name)
     global->next = instance->methods;
     instance->methods = global;
     return global;
+}
+
+/* In an instance: type F (T a) = right-hand side */
+static void add_family_instance(Module *module, int start, int end)
+{
+    int equals = find_reserved(module->tokens, start, end, "=");
+    FamilyInstance *instance;
+
+    if (equals == end) {
+        return;
+    }
+    instance = xmalloc(sizeof(FamilyInstance));
+    memset(instance, 0, sizeof(FamilyInstance));
+    instance->module = module;
+    instance->lhs_start = start;
+    instance->lhs_end = equals;
+    instance->rhs_start = equals + 1;
+    instance->rhs_end = end;
+    instance->next = all_family_instances;
+    all_family_instances = instance;
 }
 
 /* instance Context => C (T a) where { method definitions } */
@@ -1237,11 +1265,13 @@ static int add_instance_declaration(Module *module, int start, int end)
         int next = item_end(tokens, i, end, column);
         const char *name = clause_name(tokens, i, next);
 
-        if (name != NULL && signature_colon(tokens, i, next) < 0) {
+        if (token_is(&tokens[i], T_RESERVED, "type")) {
+            add_family_instance(module, i + 1, next);
+        } else if (name != NULL && signature_colon(tokens, i, next) < 0) {
             add_clause(find_or_add_method(instance, name), i, next);
         }
-        /* Anything else (signatures, associated types, methods defined
-           infix) is ignored for now. */
+        /* Anything else (signatures, methods defined infix) is ignored for
+           now. */
         i = next;
     }
     return 1;

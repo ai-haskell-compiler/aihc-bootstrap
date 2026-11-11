@@ -96,6 +96,17 @@ static void unify(Type *a, Type *b, const Token *token)
     } else if (b->kind == TY_META) {
         lower_levels(a, b->level);
         b->link = a;
+    } else if (is_family_application(a) || is_family_application(b)) {
+        /* An associated type is equal to whatever it is used as: the
+           program is known to be well typed. If it is known what it stands
+           for, that is used; otherwise it is found out when the program
+           runs. */
+        Type *known_a = reduce_family(a);
+        Type *known_b = reduce_family(b);
+
+        if (known_a != a || known_b != b) {
+            unify(known_a, known_b, token);
+        }
     } else if (a->kind == TY_RIGID && b->kind == TY_RIGID
                && a->variable == b->variable) {
         return;
