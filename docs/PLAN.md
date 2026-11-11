@@ -57,6 +57,7 @@ replacing those packages instead of running them.
 | 6 Printing: prettyprinter | done | 11,056 of 12,263 |
 | Language backlog, first part | done | 11,685 of 12,292 |
 | Type applications; arrays and vectors | done | 12,025 of 12,404 |
+| `forall` in types, `Data`, `Read`, `Numeric` | done | 12,273 of 12,499 |
 | 7 Data formats | next | |
 
 Left over from phase 1, each stopping with a `TODO` when reached:
@@ -106,8 +107,8 @@ infix constructors, and about twenty small modules of `base`
 ...).
 
 The larger blocks the survey still shows, by definitions stopped:
-`GHC.Generics` 78, `Data.Data` 71, `Crypto.Hash.SHA256` 31, `Numeric` 30,
-`Data.Aeson` 25, `Text.Read` 17.
+`Crypto.Hash.SHA256` 34, `Rational` 33, `Data.Aeson` 25, `Double` and
+`GHC.Float` 26, a type mismatch in `Aihc.Native.Emit` 18.
 
 Arrays: `Data.Array`, `Data.Array.ST`, the vectors (`Data.Vector` and its
 mutable and unboxed variants) and the primitive arrays are all one array
@@ -252,6 +253,8 @@ Done, each with a test compared against GHC:
 | Export lists that hide a module's own definitions; pattern synonyms exported as part of a type | `tests/exports.hs` |
 | Type applications (`f @T`), with the type variables of a signature in scope in its body; type variables of their own in expression annotations | `tests/typeapp.hs` |
 | A pattern that is a variable or `_` does not evaluate what it is matched with | `tests/laziness.hs` |
+| `forall` inside a type: an argument that works at every type | `tests/rankn.hs` |
+| Derived `Data` (`gmapT`, `gmapQ`, `gmapM`) | `tests/data.hs` |
 
 How the less obvious ones work:
 
@@ -264,11 +267,19 @@ How the less obvious ones work:
   parameters. Used in an expression it is a function. A parameter that the
   synonym names with `@` can only be given a variable or `_`.
 
+How `forall` inside a type works: where a function's parameter has the
+type `forall a. t`, the argument is inferred with `a` standing for itself
+and becomes a function of `a`; each use of the parameter gives it a type.
+A `forall` on the result of a function is moved to the front of the
+signature, which means the same.
+
 Still missing, as the survey shows them:
 
-- `forall` inside a type (`RankNTypes`): 13.
 - `Double`, `Rational` and floating point literals.
-- Derived `Read`, `Generic`, `Data`; `deriving via`.
+- Derived `Read`; `deriving via`. (`Read` is there for numbers,
+  characters, strings, lists and a few small types: `tests/read.hs`.)
+- The methods of `Data` other than `gmapT`, `gmapQ` and `gmapM`, for a
+  derived instance. `Generic` is a class with nothing in it.
 - `MultiWayIf`; multi-parameter classes (one use, `MonadState`).
 
 ## Decisions

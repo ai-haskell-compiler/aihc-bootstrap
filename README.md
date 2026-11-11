@@ -33,8 +33,8 @@ lists what is unsupported, most frequent first. Its first lines are the
 measure of progress:
 
 ```text
-modules loaded:        353
-definitions prepared:  12025 of 12404
+modules loaded:        357
+definitions prepared:  12273 of 12499
 ```
 
 The order of the library work is in [docs/PLAN.md](docs/PLAN.md).
