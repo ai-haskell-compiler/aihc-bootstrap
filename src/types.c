@@ -56,6 +56,16 @@ Type *new_type_application(Type *function, Type *argument)
     return type;
 }
 
+Type *new_forall(int count, Binding **variables, Type *body)
+{
+    Type *type = new_type(TY_FORALL);
+
+    type->variable_count = count;
+    type->variables = variables;
+    type->body = body;
+    return type;
+}
+
 /* argument -> result is the type constructor -> applied to both. */
 Type *function_type(Type *argument, Type *result)
 {
@@ -110,6 +120,9 @@ Type *substitute(Type *type, int count, Binding **variables, Type **types)
         return new_type_application(
             substitute(type->function, count, variables, types),
             substitute(type->argument, count, variables, types));
+    case TY_FORALL:
+        return new_forall(type->variable_count, type->variables,
+                          substitute(type->body, count, variables, types));
     case TY_META:
     case TY_CON:
         break;
@@ -132,6 +145,7 @@ int types_equal(Type *a, Type *b)
             && types_equal(a->argument, b->argument);
     case TY_RIGID:
     case TY_META:
+    case TY_FORALL:
         break;
     }
     return 0;
@@ -155,6 +169,11 @@ void print_type(Type *type)
         print_type(type->function);
         fprintf(stderr, " ");
         print_type(type->argument);
+        fprintf(stderr, ")");
+        break;
+    case TY_FORALL:
+        fprintf(stderr, "(forall. ");
+        print_type(type->body);
         fprintf(stderr, ")");
         break;
     }
@@ -253,6 +272,66 @@ static int starts_type_atom(const TypeParser *parser)
         || type_next_is(parser, T_SPECIAL, "[");
 }
 
+static Type *parse_function_type(TypeParser *parser);
+static int skip_type_context(const TypeParser *parser);
+
+/* forall a b. [context =>] type, inside a type. Its variables are in
+   scope only in it. */
+static Type *parse_forall(TypeParser *parser)
+{
+    int outer = *parser->count;
+    Binding **variables;
+    Type *body;
+    int count;
+    int i;
+
+    parser->position++;
+    while (type_next_is_kind(parser, T_VARID)) {
+        add_type_variable(parser, parser->tokens[parser->position].text);
+        parser->position++;
+    }
+    count = *parser->count - outer;
+    if (!type_next_is(parser, T_VARSYM, ".")) {
+        TODO_AT(&parser->tokens[parser->position], "forall syntax");
+    }
+    parser->position++;
+    /* The context ends before the parenthesis the forall is inside. */
+    {
+        int end = parser->end;
+        int depth = 0;
+
+        for (i = parser->position; i < end; i++) {
+            const Token *token = &parser->tokens[i];
+
+            if (token->kind == T_SPECIAL && strchr("([", token->text[0])) {
+                depth++;
+            } else if (token->kind == T_SPECIAL
+                       && strchr(")]", token->text[0])) {
+                if (depth == 0) {
+                    break;
+                }
+                depth--;
+            }
+        }
+        parser->end = i;
+        parser->position = skip_type_context(parser);
+        parser->end = end;
+    }
+    body = parse_function_type(parser);
+    variables = xmalloc((size_t)count * sizeof(Binding *) + 1);
+    for (i = 0; i < count; i++) {
+        variables[i] = (*parser->variables)[outer + i];
+    }
+    /* The variables of the forall go out of scope. A variable that was
+       first seen inside it, and is not one of them, belongs to the
+       signature as a whole and stays. */
+    for (i = outer + count; i < *parser->count; i++) {
+        (*parser->variables)[i - count] = (*parser->variables)[i];
+    }
+    *parser->count -= count;
+    return new_forall(count, variables, body);
+}
+
 /* A type that can be an argument without parentheses around it. */
 static Type *parse_type_atom(TypeParser *parser)
 {
@@ -260,7 +339,7 @@ static Type *parse_type_atom(TypeParser *parser)
     Type *type;
 
     if (type_next_is(parser, T_VARID, "forall")) {
-        TODO_AT(token, "forall inside a type");
+        return parse_forall(parser);
     } else if (type_next_is_kind(parser, T_VARID)) {
         return parse_type_variable(parser);
     } else if (type_next_is_kind(parser, T_CONID)) {
@@ -371,8 +450,24 @@ static Type *parse_function_type(TypeParser *parser)
     Type *type = parse_type_application(parser);
 
     if (type_next_is(parser, T_RESERVED, "->")) {
+        Type *result;
+        int i;
+
         parser->position++;
-        return function_type(type, parse_function_type(parser));
+        result = parse_function_type(parser);
+        if (result->kind == TY_FORALL) {
+            /* a -> (forall b. c) is forall b. a -> c: a forall on the
+               result of a function belongs to the signature as a whole. */
+            for (i = 0; i < result->variable_count; i++) {
+                *parser->variables = xrealloc(
+                    *parser->variables,
+                    (size_t)(*parser->count + 1) * sizeof(Binding *));
+                (*parser->variables)[(*parser->count)++] =
+                    result->variables[i];
+            }
+            result = result->body;
+        }
+        return function_type(type, result);
     }
     return type;
 }

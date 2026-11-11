@@ -33,7 +33,9 @@ enum TypeKind {
     TY_META,  /* not known yet; inference fills in `link` */
     TY_RIGID, /* a type variable bound by a forall */
     TY_CON,   /* Int, Maybe, -> */
-    TY_APP    /* Maybe Int is (Maybe) applied to (Int) */
+    TY_APP,   /* Maybe Int is (Maybe) applied to (Int) */
+    TY_FORALL /* forall a. type, as the type of a function's argument: the
+                 argument is a function of types itself. See infer.c. */
 };
 
 struct Type {
@@ -45,6 +47,9 @@ struct Type {
     TypeCon *constructor; /* TY_CON */
     Type *function;       /* TY_APP */
     Type *argument;       /* TY_APP */
+    int variable_count;   /* TY_FORALL */
+    Binding **variables;  /* TY_FORALL */
+    Type *body;           /* TY_FORALL */
 };
 
 /* forall variables. type */
@@ -522,6 +527,7 @@ Type *new_meta(void);
 Type *new_rigid(Binding *variable);
 Type *new_type_constructor(TypeCon *constructor);
 Type *new_type_application(Type *function, Type *argument);
+Type *new_forall(int count, Binding **variables, Type *body);
 Type *function_type(Type *argument, Type *result);
 /* The type with every filled-in TY_META at its top replaced by what it
    stands for. */

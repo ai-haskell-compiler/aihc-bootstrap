@@ -361,6 +361,67 @@ Value *builtin_deepForce(Value **arguments)
     return make_con(TAG_UNIT, 0);
 }
 
+/* ---- Data ---- */
+
+/* dataFields :: a -> [Field]
+   The fields of the value, each with its type: Field is
+   `forall d. Field d`, so it keeps the type in front of the field. The
+   derived gmapT, gmapQ and gmapM are written with it, in
+   lib/Data/Data.hs. */
+Value *builtin_dataFields(Value **arguments)
+{
+    Type *type = force(arguments[0])->type;
+    Value *value = arguments[1];
+    Value **fields;
+    Constructor *constructor = constructor_of(type, &value, &fields);
+    Value *list = make_con(TAG_NIL, 0);
+    int i;
+
+    for (i = constructor->arity - 1; i >= 0; i--) {
+        Value *field = make_con(0, 2);
+        Value *cell = make_con(TAG_CONS, 2);
+
+        field->fields[0] = make_type(field_type(type, constructor, i));
+        field->fields[1] = fields[i];
+        cell->fields[0] = field;
+        cell->fields[1] = list;
+        list = cell;
+    }
+    return list;
+}
+
+/* dataRebuild :: a -> [Field] -> a
+   The value with its fields replaced by those of the list. */
+Value *builtin_dataRebuild(Value **arguments)
+{
+    Type *type = force(arguments[0])->type;
+    Value *value = arguments[1];
+    Value *list = force(arguments[2]);
+    Value **fields;
+    Constructor *constructor = constructor_of(type, &value, &fields);
+    Value *result;
+    int i;
+
+    if (constructor->is_newtype) {
+        return force(force(list->fields[0])->fields[1]);
+    }
+    result = make_con(value->tag, constructor->arity);
+    for (i = 0; i < constructor->arity; i++) {
+        result->fields[i] = force(list->fields[0])->fields[1];
+        list = force(list->fields[1]);
+    }
+    return result;
+}
+
+/* The function of lib/Data/Data.hs that is a derived method of Data, at
+   the type. */
+static Value *data_method(const char *name, Type *type)
+{
+    Global *global = library_entity("Data.Data", NS_VARIABLE, name)->global;
+
+    return apply(global_value(global), make_type(type));
+}
+
 /* ---- Choosing the method ---- */
 
 static const Builtin eq_builtin = { "derivedEq", 3, derived_eq };
@@ -448,12 +509,22 @@ Value *derived_method(const Instance *instance, Global *method, Type *type)
     if (strcmp(class_name, "Bounded") == 0) {
         return derived_bound(type, name);
     }
-    if (strcmp(class_name, "Read") == 0 || strcmp(class_name, "Generic") == 0
-        || strcmp(class_name, "Data") == 0 || strcmp(class_name, "Functor") == 0
+    if (strcmp(class_name, "Data") == 0) {
+        if (strcmp(name, "gmapT") == 0) {
+            return data_method("derivedGmapT", type);
+        }
+        if (strcmp(name, "gmapQ") == 0) {
+            return data_method("derivedGmapQ", type);
+        }
+        if (strcmp(name, "gmapM") == 0) {
+            return data_method("derivedGmapM", type);
+        }
+        TODO("derived method of Data other than gmapT, gmapQ and gmapM");
+    }
+    if (strcmp(class_name, "Read") == 0 || strcmp(class_name, "Functor") == 0
         || strcmp(class_name, "Foldable") == 0
         || strcmp(class_name, "Traversable") == 0) {
-        TODO("derived instance of Read, Generic, Data, Functor, Foldable or "
-             "Traversable");
+        TODO("derived instance of Read, Functor, Foldable or Traversable");
     }
     return NULL;
 }

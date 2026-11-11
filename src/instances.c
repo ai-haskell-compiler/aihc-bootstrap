@@ -33,6 +33,7 @@ static int match_type(Type *pattern, Type *type, int variable_count,
             && match_type(pattern->argument, type->argument, variable_count,
                           variables, bound);
     case TY_META:
+    case TY_FORALL:
         break;
     }
     return 0;

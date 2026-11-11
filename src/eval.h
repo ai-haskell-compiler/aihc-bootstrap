@@ -122,6 +122,8 @@ Value *builtin_numShow(Value **arguments);
    at the given type. NULL if the class's default definition is to be used. */
 Value *derived_method(const Instance *instance, Global *method, Type *type);
 Value *builtin_deepForce(Value **arguments);
+Value *builtin_dataFields(Value **arguments);
+Value *builtin_dataRebuild(Value **arguments);
 
 /* bytes.c: ByteString, and reading and writing files. */
 Value *builtin_bytesPack(Value **arguments);
