@@ -1,0 +1,15 @@
+[Name "x",Name "f",Name "y",Name "a",Name "b",Name "x",Name "a",Name "y"]
+[Name "main",Name "x",Name "f",Name "y",Name "a",Name "b",Name "x",Name "a",Name "y"]
+([1,5,2,3],[7],[8])
+(5,2,2)
+Lam [Name "a'"] (Var (Name "a'"))
+(False,Name "main'",[Name "x'",Name "y'"])
+App (Lit 2) [Lit 4,Var (Name "v")]
+(App (Lit 0) [Lit 1,Tuple (Lit 2,Just (Lit 3))],4)
+(False,4)
+([1,2],[0],[2],[0,2,1])
+["other","other"]
+((4,5,'c'),[False,False])
+(Just (1,2),Nothing)
+("",Note "x" 1,1)
+[Name "a0",Name "b1",Name "c2"]

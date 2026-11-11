@@ -290,6 +290,7 @@ static Type *parse_forall(TypeParser *parser)
         add_type_variable(parser, parser->tokens[parser->position].text);
         parser->position++;
     }
+    count = *parser->count - outer;
     if (!type_next_is(parser, T_VARSYM, ".")) {
         TODO_AT(&parser->tokens[parser->position], "forall syntax");
     }
@@ -317,12 +318,17 @@ static Type *parse_forall(TypeParser *parser)
         parser->end = end;
     }
     body = parse_function_type(parser);
-    count = *parser->count - outer;
     variables = xmalloc((size_t)count * sizeof(Binding *) + 1);
     for (i = 0; i < count; i++) {
         variables[i] = (*parser->variables)[outer + i];
     }
-    *parser->count = outer;
+    /* The variables of the forall go out of scope. A variable that was
+       first seen inside it, and is not one of them, belongs to the
+       signature as a whole and stays. */
+    for (i = outer + count; i < *parser->count; i++) {
+        (*parser->variables)[i - count] = (*parser->variables)[i];
+    }
+    *parser->count -= count;
     return new_forall(count, variables, body);
 }
 
@@ -444,8 +450,24 @@ static Type *parse_function_type(TypeParser *parser)
     Type *type = parse_type_application(parser);
 
     if (type_next_is(parser, T_RESERVED, "->")) {
+        Type *result;
+        int i;
+
         parser->position++;
-        return function_type(type, parse_function_type(parser));
+        result = parse_function_type(parser);
+        if (result->kind == TY_FORALL) {
+            /* a -> (forall b. c) is forall b. a -> c: a forall on the
+               result of a function belongs to the signature as a whole. */
+            for (i = 0; i < result->variable_count; i++) {
+                *parser->variables = xrealloc(
+                    *parser->variables,
+                    (size_t)(*parser->count + 1) * sizeof(Binding *));
+                (*parser->variables)[(*parser->count)++] =
+                    result->variables[i];
+            }
+            result = result->body;
+        }
+        return function_type(type, result);
     }
     return type;
 }

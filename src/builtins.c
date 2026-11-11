@@ -325,6 +325,8 @@ static const Builtin builtins[] = {
     { "sleepMicroseconds", 2, builtin_sleepMicroseconds },
     { "monotonicNanoseconds", 1, builtin_monotonicNanoseconds },
     { "deepForce", 2, builtin_deepForce },
+    { "dataFields", 2, builtin_dataFields },
+    { "dataRebuild", 3, builtin_dataRebuild },
     { "numAdd", 3, builtin_numAdd },
     { "numSub", 3, builtin_numSub },
     { "numMul", 3, builtin_numMul },
