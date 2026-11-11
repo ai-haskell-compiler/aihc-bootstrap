@@ -69,6 +69,8 @@ static void lower_levels(Type *type, int level)
     if (type->kind == TY_APP) {
         lower_levels(type->function, level);
         lower_levels(type->argument, level);
+    } else if (type->kind == TY_FORALL) {
+        lower_levels(type->body, level);
     } else if (type->kind == TY_META && type->level > level) {
         type->level = level;
     }
@@ -122,6 +124,19 @@ static void unify(Type *a, Type *b, const Token *token)
     } else if (a->kind == TY_APP && b->kind == TY_APP) {
         unify(a->function, b->function, token);
         unify(a->argument, b->argument, token);
+    } else if (a->kind == TY_FORALL && b->kind == TY_FORALL
+               && a->variable_count == b->variable_count) {
+        /* The same, with the variables of one named as those of the
+           other. */
+        Type **same = xmalloc((size_t)a->variable_count * sizeof(Type *) + 1);
+        int i;
+
+        for (i = 0; i < a->variable_count; i++) {
+            same[i] = new_rigid(a->variables[i]);
+        }
+        unify(a->body,
+              substitute(b->body, b->variable_count, b->variables, same),
+              token);
     } else {
         mismatch(a, b, token);
     }
@@ -326,6 +341,8 @@ static void generalize(Type *type, int level, Binding ***variables, int *count)
     if (type->kind == TY_APP) {
         generalize(type->function, level, variables, count);
         generalize(type->argument, level, variables, count);
+    } else if (type->kind == TY_FORALL) {
+        generalize(type->body, level, variables, count);
     } else if (type->kind == TY_META && type->level > level) {
         Binding *variable = new_binding("t");
 
@@ -434,6 +451,8 @@ static void generalize_function(Binding *binding, int count,
         add_type_parameters(*binding->definition, count, variables);
 }
 
+static void give_parameter_types(Expr *expr, Type *type);
+
 static void infer_binding(Inference *inference, Binding *binding)
 {
     const Token *token = (*binding->definition)->token;
@@ -449,6 +468,7 @@ static void infer_binding(Inference *inference, Binding *binding)
     binding->state = BINDING_INFERRING;
     if (binding->scheme != NULL) {
         /* It has a signature. */
+        give_parameter_types(*binding->definition, binding->scheme->type);
         unify(infer(inference, *binding->definition), binding->scheme->type,
               token);
         *binding->definition = add_type_parameters(
@@ -515,6 +535,19 @@ static Type *infer_local(Inference *inference, Expr *expr)
     if (binding->scheme != NULL) {
         type = instantiate(inference, binding->scheme, &metas);
         add_type_arguments(expr, metas, 0, binding->scheme->variable_count);
+        return type;
+    }
+    type = prune(binding->type);
+    if (binding->scheme == NULL && type->kind == TY_FORALL) {
+        /* A parameter that is a function of types: this use gives it
+           types. */
+        Scheme scheme;
+
+        scheme.variable_count = type->variable_count;
+        scheme.variables = type->variables;
+        scheme.type = type->body;
+        type = instantiate(inference, &scheme, &metas);
+        add_type_arguments(expr, metas, 0, scheme.variable_count);
         return type;
     }
     if (binding->is_function && (binding->state == BINDING_INFERRING
@@ -588,6 +621,25 @@ static void infer_alternative(Inference *inference, Alternative *alternative,
             }
         }
         unify(infer(inference, guard->body), result, guard->body->token);
+    }
+}
+
+/* Where a signature says a parameter has a forall type, the parameter gets
+   that type before the definition is inferred, so that every use of the
+   parameter can give it types of its own. Other parameters get their type
+   by inference, as always. */
+static void give_parameter_types(Expr *expr, Type *type)
+{
+    Type *parameter;
+    Type *result;
+
+    while (expr->kind == E_LAMBDA
+           && split_function_type(prune(type), &parameter, &result)) {
+        if (prune(parameter)->kind == TY_FORALL) {
+            expr->local->type = prune(parameter);
+        }
+        expr = expr->body;
+        type = result;
     }
 }
 
@@ -671,14 +723,35 @@ static Type *infer(Inference *inference, Expr *expr)
             inference, expr,
             library_entity("Prelude", NS_VARIABLE, "fromInteger")->global,
             "Integer");
-    case E_APP:
+    case E_APP: {
+        Type *parameter;
+
         type = infer(inference, expr->function);
+        if (split_function_type(prune(type), &parameter, &result)
+            && prune(parameter)->kind == TY_FORALL) {
+            /* The function wants an argument that works at every type:
+               forall a. body. The argument is inferred with the type
+               variables standing for themselves, and becomes a function
+               of them. */
+            parameter = prune(parameter);
+            unify(infer(inference, expr->argument), parameter->body,
+                  expr->token);
+            expr->argument = add_type_parameters(
+                expr->argument, parameter->variable_count,
+                parameter->variables);
+            return result;
+        }
         result = fresh(inference);
         unify(type, function_type(infer(inference, expr->argument), result),
               expr->token);
         return result;
+    }
     case E_LAMBDA:
-        expr->local->type = fresh(inference);
+        /* The type may have been given by a signature: see
+           give_parameter_types. */
+        if (expr->local->type == NULL) {
+            expr->local->type = fresh(inference);
+        }
         return function_type(expr->local->type, infer(inference, expr->body));
     case E_CASE:
         type = infer(inference, expr->scrutinee);
@@ -749,6 +822,9 @@ Expr *infer_global(Global *global, Expr *expr)
         } else if (token_is(&tokens[global->signature_start], T_VARID, "forall")) {
             inference.variable_count = scheme->variable_count;
         }
+    }
+    if (scheme != NULL) {
+        give_parameter_types(expr, scheme->type);
     }
     type = infer(&inference, expr);
     if (scheme != NULL) {

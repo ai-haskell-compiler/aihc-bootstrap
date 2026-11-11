@@ -169,6 +169,7 @@ static Type *close_type(Type *type, const Env *env)
                                     close_type(type->argument, env));
     case TY_META:
     case TY_CON:
+    case TY_FORALL:
         break;
     }
     return type;
