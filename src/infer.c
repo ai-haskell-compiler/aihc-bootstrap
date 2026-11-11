@@ -43,6 +43,8 @@ typedef struct Inference {
 enum {
     BINDING_UNTYPED,
     BINDING_INFERRING,
+    BINDING_PENDING, /* inferred, and waiting to be generalised with the
+                        function that leads its group */
     BINDING_TYPED
 };
 
@@ -366,6 +368,64 @@ static Scheme *local_signature(const Inference *inference, const Binding *bindin
 }
 
 /* Infers the definition of a variable bound by let or where. */
+/* Local functions that call each other.
+
+   The type of a local function is generalised when its definition has been
+   inferred. If the definition calls a function whose own definition is
+   still being inferred (it is further out: the call is how we got here),
+   the two depend on each other and neither can be generalised first. The
+   outer one becomes the leader of the inner one, and of every function
+   whose inference is in progress between them. A function with a leader is
+   left as it is (BINDING_PENDING) until the leader is done; then all of
+   them are generalised over the same type variables. Until then every use
+   of them is at the one type they have so far, and is recorded, so that it
+   can be given those type variables as arguments. */
+
+/* The function that will generalise this one: itself if it has no leader. */
+static Binding *group_leader(Binding *binding)
+{
+    while (binding->leader != NULL) {
+        binding = binding->leader;
+    }
+    return binding;
+}
+
+static void add_member(Binding *leader, Binding *member)
+{
+    leader->members = xrealloc(
+        leader->members,
+        (size_t)(leader->member_count + 1) * sizeof(Binding *));
+    leader->members[leader->member_count++] = member;
+}
+
+/* Makes the function a function of the type variables too, and completes
+   the recorded uses of it. */
+static void generalize_function(Binding *binding, int count,
+                                Binding **variables)
+{
+    Type **types;
+    int i;
+
+    if (count == 0) {
+        return;
+    }
+    types = xmalloc((size_t)count * sizeof(Type *));
+    binding->scheme = xmalloc(sizeof(Scheme));
+    binding->scheme->variable_count = count;
+    binding->scheme->variables = variables;
+    binding->scheme->type = binding->type;
+    /* Inside the group, a function is used at the group's own type
+       variables. */
+    for (i = 0; i < count; i++) {
+        types[i] = new_rigid(variables[i]);
+    }
+    for (i = 0; i < binding->use_count; i++) {
+        add_type_arguments(binding->uses[i], types, 0, count);
+    }
+    *binding->definition =
+        add_type_parameters(*binding->definition, count, variables);
+}
+
 static void infer_binding(Inference *inference, Binding *binding)
 {
     const Token *token = (*binding->definition)->token;
@@ -388,30 +448,38 @@ static void infer_binding(Inference *inference, Binding *binding)
             binding->scheme->variables);
     } else if (binding->is_function) {
         /* f x = ...: infer one level deeper, then generalise. */
+        Binding *leader;
+
         inference->level = binding->level + 1;
         inference->generalizing = binding;
+        binding->outer = saved_generalizing;
+        binding->leader = NULL;
         binding->type = fresh(inference);
         unify(binding->type, infer(inference, *binding->definition), token);
         inference->level = saved_level;
         inference->generalizing = saved_generalizing;
+        leader = group_leader(binding);
+        if (leader != binding) {
+            /* It calls a function further out whose type is not known yet.
+               That function generalises this one, and those this one
+               leads, when its own definition is done. */
+            add_member(leader, binding);
+            for (i = 0; i < binding->member_count; i++) {
+                add_member(leader, binding->members[i]);
+            }
+            binding->state = BINDING_PENDING;
+            return;
+        }
+        /* One list of type variables for the whole group. */
         generalize(binding->type, binding->level, &variables, &count);
-        if (count > 0) {
-            Type **types = xmalloc((size_t)count * sizeof(Type *));
-
-            binding->scheme = xmalloc(sizeof(Scheme));
-            binding->scheme->variable_count = count;
-            binding->scheme->variables = variables;
-            binding->scheme->type = binding->type;
-            /* Where the function calls itself, it does so at its own type
-               variables. */
-            for (i = 0; i < count; i++) {
-                types[i] = new_rigid(variables[i]);
-            }
-            for (i = 0; i < binding->use_count; i++) {
-                add_type_arguments(binding->uses[i], types, 0, count);
-            }
-            *binding->definition =
-                add_type_parameters(*binding->definition, count, variables);
+        for (i = 0; i < binding->member_count; i++) {
+            generalize(binding->members[i]->type, binding->level, &variables,
+                       &count);
+        }
+        generalize_function(binding, count, variables);
+        for (i = 0; i < binding->member_count; i++) {
+            generalize_function(binding->members[i], count, variables);
+            binding->members[i]->state = BINDING_TYPED;
         }
     } else {
         /* x = ...: not generalised, as the monomorphism restriction says.
@@ -441,12 +509,18 @@ static Type *infer_local(Inference *inference, Expr *expr)
         add_type_arguments(expr, metas, 0, binding->scheme->variable_count);
         return type;
     }
-    if (binding->state == BINDING_INFERRING && binding->is_function) {
-        /* A local function that calls itself. The call is completed when
-           the type of the function is known: see infer_binding. */
-        if (inference->generalizing != binding) {
-            TODO_AT(expr->token,
-                    "local functions that call each other, without signatures");
+    if (binding->is_function && (binding->state == BINDING_INFERRING
+                                 || binding->state == BINDING_PENDING)) {
+        /* A local function whose type is not general yet: it calls itself,
+           or it is in a group of functions that call each other. Every
+           function whose definition is being inferred between here and
+           the leader of that group joins the group. */
+        Binding *leader = group_leader(binding);
+        Binding *inner;
+
+        for (inner = inference->generalizing; inner != NULL && inner != leader;
+             inner = inner->outer) {
+            inner->leader = leader;
         }
         binding->uses = xrealloc(
             binding->uses, (size_t)(binding->use_count + 1) * sizeof(Expr *));

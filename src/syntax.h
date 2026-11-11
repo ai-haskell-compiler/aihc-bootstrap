@@ -149,6 +149,14 @@ struct Binding {
     int state;           /* of type inference: see infer.c */
     Expr **uses;         /* uses seen while its own type is being inferred */
     int use_count;
+    /* Local functions that call each other are generalised together: see
+       infer_binding. */
+    Binding *outer;      /* the function whose definition was being inferred
+                            when this one's was started, or NULL */
+    Binding *leader;     /* a function further out that this one has to be
+                            generalised with, or NULL */
+    Binding **members;   /* the functions to generalise with this one */
+    int member_count;
 };
 
 /* A data constructor. */
