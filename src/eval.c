@@ -364,6 +364,23 @@ static Expr *choose_alternative(const Expr *expr, Value *value, Env **env)
      - expr == NULL: holding `value`, the result of the last evaluation.
    It runs until it holds a fully evaluated value and the top frame is
    F_STOP. */
+/* Whether the pattern matches every value without evaluating it. */
+static int matches_anything(const Pattern *pattern)
+{
+    switch (pattern->kind) {
+    case P_VARIABLE:
+    case P_WILDCARD:
+        return 1;
+    case P_AS:
+        return matches_anything(pattern->inner);
+    case P_CONSTRUCTOR:
+        return pattern->constructor->is_newtype
+            && matches_anything(pattern->arguments[0]);
+    default:
+        return 0;
+    }
+}
+
 static Value *run(Expr *expr, Env *env, Value *value)
 {
     for (;;) {
@@ -374,6 +391,13 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 expr = expr->function;
                 continue;
             case E_CASE:
+                if (matches_anything(expr->alternatives->pattern)) {
+                    /* The first pattern does not look at the value, so the
+                       value is not evaluated: case e of _ -> ... */
+                    expr = choose_alternative(
+                        expr, make_thunk(expr->scrutinee, env), &env);
+                    continue;
+                }
                 push(F_CASE, NULL);
                 stack[stack_size - 1].expr = expr;
                 stack[stack_size - 1].env = env;

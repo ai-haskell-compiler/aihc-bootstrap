@@ -591,6 +591,33 @@ static void infer_alternative(Inference *inference, Alternative *alternative,
     }
 }
 
+/* The type written in an expression: `e :: type` or `f @type`. It may
+   mention the type variables in scope. Any other type variable stands for
+   a type that is still to be found out. */
+static Type *annotation_type(Inference *inference, int start, int end)
+{
+    int known = inference->variable_count;
+    int count = known;
+    Binding **variables = xmalloc((size_t)known * sizeof(Binding *) + 1);
+    Type **unknown;
+    Type *type;
+    int i;
+
+    if (known > 0) {
+        memcpy(variables, inference->variables,
+               (size_t)known * sizeof(Binding *));
+    }
+    type = parse_type(inference->module, start, end, &variables, &count, 1);
+    if (count == known) {
+        return type;
+    }
+    unknown = xmalloc((size_t)(count - known) * sizeof(Type *));
+    for (i = 0; i < count - known; i++) {
+        unknown[i] = fresh(inference);
+    }
+    return substitute(type, count - known, variables + known, unknown);
+}
+
 /* The type of the expression. Rewrites it as described at the top. */
 static Type *infer(Inference *inference, Expr *expr)
 {
@@ -662,8 +689,7 @@ static Type *infer(Inference *inference, Expr *expr)
         }
         return result;
     case E_ANNOTATION:
-        type = parse_type(inference->module, expr->type_start, expr->type_end,
-                          &inference->variables, &inference->variable_count, 0);
+        type = annotation_type(inference, expr->type_start, expr->type_end);
         unify(infer(inference, expr->body), type, expr->token);
         return type;
     case E_VISIBLE: {
@@ -681,9 +707,7 @@ static Type *infer(Inference *inference, Expr *expr)
         }
         if (!wildcard) {
             unify(inference->instantiated[inference->visible_count],
-                  parse_type(inference->module, expr->type_start,
-                             expr->type_end, &inference->variables,
-                             &inference->variable_count, 0),
+                  annotation_type(inference, expr->type_start, expr->type_end),
                   expr->token);
         }
         inference->visible_count++;

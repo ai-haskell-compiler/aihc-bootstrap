@@ -104,6 +104,92 @@ static Value *builtin_writeRef(Value **arguments)
     return make_io_result(make_con(TAG_UNIT, 0));
 }
 
+/* ---- Arrays ----
+
+   An array is a value with one field for each element, which the builtins
+   change in place. An immutable array is the same thing that nobody
+   changes any more. Every builtin takes the type of the elements first,
+   as every polymorphic builtin does. */
+
+static Value *array_argument(Value *value, long index)
+{
+    value = force(value);
+    if (index < 0 || index >= value->field_count) {
+        die("array index %ld is out of range (length %d)", index,
+            value->field_count);
+    }
+    return value;
+}
+
+/* arrayNew :: Int -> a -> IO (MutableArray a)
+   An array of that length with every element the given value. */
+static Value *builtin_arrayNew(Value **arguments)
+{
+    long length = force(arguments[1])->number;
+    Value *array = make_con(0, length < 0 ? 0 : (int)length);
+    long i;
+
+    for (i = 0; i < length; i++) {
+        array->fields[i] = arguments[2];
+    }
+    return make_io_result(array);
+}
+
+/* arrayRead :: MutableArray a -> Int -> IO a */
+static Value *builtin_arrayRead(Value **arguments)
+{
+    long index = force(arguments[2])->number;
+
+    return make_io_result(array_argument(arguments[1], index)->fields[index]);
+}
+
+/* arrayWrite :: MutableArray a -> Int -> a -> IO () */
+static Value *builtin_arrayWrite(Value **arguments)
+{
+    long index = force(arguments[2])->number;
+
+    array_argument(arguments[1], index)->fields[index] = arguments[3];
+    return make_io_result(make_con(TAG_UNIT, 0));
+}
+
+/* arrayLength :: MutableArray a -> Int */
+static Value *builtin_arrayLength(Value **arguments)
+{
+    return make_int(force(arguments[1])->field_count);
+}
+
+/* arrayIndex :: MutableArray a -> Int -> a
+   For an array that is not changed any more. */
+static Value *builtin_arrayIndex(Value **arguments)
+{
+    long index = force(arguments[2])->number;
+
+    return force(array_argument(arguments[1], index)->fields[index]);
+}
+
+/* arrayCopy :: MutableArray a -> Int -> MutableArray a -> Int -> Int -> IO ()
+   Copies that many elements from the first array, starting at its index,
+   into the second one, starting at its index. The arrays may be the same
+   one. */
+static Value *builtin_arrayCopy(Value **arguments)
+{
+    Value *source = force(arguments[1]);
+    long from = force(arguments[2])->number;
+    Value *target = force(arguments[3]);
+    long to = force(arguments[4])->number;
+    long count = force(arguments[5])->number;
+
+    if (count > 0) {
+        array_argument(source, from);
+        array_argument(source, from + count - 1);
+        array_argument(target, to);
+        array_argument(target, to + count - 1);
+        memmove(target->fields + to, source->fields + from,
+                (size_t)count * sizeof(Value *));
+    }
+    return make_io_result(make_con(TAG_UNIT, 0));
+}
+
 /* realWorld :: World
    The token an IO action is applied to. Any value would do. */
 static Value *builtin_realWorld(Value **arguments)
@@ -198,6 +284,12 @@ static const Builtin builtins[] = {
     { "newRef", 3, builtin_newRef },
     { "readRef", 3, builtin_readRef },
     { "writeRef", 4, builtin_writeRef },
+    { "arrayNew", 4, builtin_arrayNew },
+    { "arrayRead", 4, builtin_arrayRead },
+    { "arrayWrite", 5, builtin_arrayWrite },
+    { "arrayLength", 2, builtin_arrayLength },
+    { "arrayIndex", 3, builtin_arrayIndex },
+    { "arrayCopy", 7, builtin_arrayCopy },
     { "realWorld", 0, builtin_realWorld },
     { "interpreterTodo", 2, builtin_interpreterTodo },
     { "bytesPack", 1, builtin_bytesPack },
@@ -209,6 +301,9 @@ static const Builtin builtins[] = {
     { "bytesCompare", 2, builtin_bytesCompare },
     { "bytesFind", 2, builtin_bytesFind },
     { "bytesFromString", 1, builtin_bytesFromString },
+    { "bytesNew", 2, builtin_bytesNew },
+    { "bytesPoke", 4, builtin_bytesPoke },
+    { "bytesBlit", 6, builtin_bytesBlit },
     { "bytesValidUtf8", 1, builtin_bytesValidUtf8 },
     { "bytesToString", 1, builtin_bytesToString },
     { "bytesReadFile", 2, builtin_bytesReadFile },
