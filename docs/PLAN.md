@@ -58,17 +58,31 @@ replacing those packages instead of running them.
 | Language backlog, first part | done | 11,685 of 12,292 |
 | Type applications; arrays and vectors | done | 12,025 of 12,404 |
 | `forall` in types, `Data`, `Read`, `Numeric` | done | 12,273 of 12,499 |
+| `Integer` of any size, `Rational`, `Double`, `Float` | done | 12,965 of 13,143 |
 | 7 Data formats | next | |
 
 Left over from phase 1, each stopping with a `TODO` when reached:
 
-- `Integer` beyond a C `long` (values up to 2^64 - 1 can be held and
-  converted, but not calculated with).
-- `Double` and floating point literals.
-- Derived `Read`, `Generic`, `Data`, `Functor`, `Foldable`, `Traversable`;
-  `deriving via`.
-- Data declarations with infix constructors.
-- Character classification beyond ASCII (`Data.Char` is not written yet).
+- Division by zero as an exception.
+- Derived `Read`, `Functor`, `Foldable`, `Traversable`; `deriving via`.
+- Character classification beyond ASCII; `generalCategory`.
+
+Numbers, as they are now:
+
+- **`Integer`** is a C `long` while it fits and a sign with 32-bit limbs
+  otherwise (`src/integer.c`), with the algorithms done by hand. Every
+  result is made small again if it fits, so a number has one form.
+  `tests/integer.hs` runs about 4,000 pairs of numbers around each size
+  boundary through every operation.
+- **`Double` and `Float`** are their IEEE bits. Arithmetic is C's. The two
+  things C does not promise are done in Haskell with `Integer`
+  (`lib/GHC/Float.hs`), following GHC's base: a fraction to the nearest
+  number, rounded once (literals, `read`, `fromRational`), and the
+  shortest digits that mean the same number (`show`). `tests/floating.hs`
+  compares the bits of literals and the text of `show` with GHC.
+- **`Rational`** is `Data.Ratio`, as in the Haskell report.
+- **A literal like `1.5`** is `fromRational` of its exact fraction. A type
+  that nothing decides and that is used as a fraction is `Double`.
 
 Left over from phase 4:
 
@@ -107,8 +121,9 @@ infix constructors, and about twenty small modules of `base`
 ...).
 
 The larger blocks the survey still shows, by definitions stopped:
-`Crypto.Hash.SHA256` 34, `Rational` 33, `Data.Aeson` 25, `Double` and
-`GHC.Float` 26, a type mismatch in `Aihc.Native.Emit` 18.
+`Crypto.Hash.SHA256` 34, `Data.Aeson` 25, a type mismatch in
+`Aihc.Native.Emit` 18, an ambiguous `TyCon` in two modules 25,
+`generalCategory` 11.
 
 Arrays: `Data.Array`, `Data.Array.ST`, the vectors (`Data.Vector` and its
 mutable and unboxed variants) and the primitive arrays are all one array
@@ -275,7 +290,6 @@ signature, which means the same.
 
 Still missing, as the survey shows them:
 
-- `Double`, `Rational` and floating point literals.
 - Derived `Read`; `deriving via`. (`Read` is there for numbers,
   characters, strings, lists and a few small types: `tests/read.hs`.)
 - The methods of `Data` other than `gmapT`, `gmapQ` and `gmapM`, for a
