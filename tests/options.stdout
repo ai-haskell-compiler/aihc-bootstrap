@@ -1,0 +1,1 @@
+build in.hs verbose=yes includes=a;b; output=out level=high fast=yes

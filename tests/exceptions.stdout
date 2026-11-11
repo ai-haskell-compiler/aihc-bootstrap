@@ -1,0 +1,8 @@
+running
+no exception
+caught Failure: thrown in IO
+caught Failure: thrown in pure code
+caught Failure: thrown in pure code
+caught Failure: passed on
+any: Other
+exiting

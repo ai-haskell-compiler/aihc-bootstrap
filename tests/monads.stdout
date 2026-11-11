@@ -1,0 +1,41 @@
+([(10,"a"),(11,"b"),(12,"c")],13)
+(42,55,(5,6))
+step 1 after 0
+step 2 after 1
+step 3 after 3
+((),42)
+(Right 20,["dividing 100","dividing 10"])
+(Left "division by zero",["dividing 10"])
+Right 16
+in MaybeT
+(Just 3,Nothing)
+(5050,Just 1,Just 'x',[1,2,3],Just Nothing,[Just 1,Nothing])
+("aabb",55,True,False)
+(Just 1,Sum {getSum = 5},[3,2,1])
+(Just 6,Nothing)
+(["aa","ab","ba","bb"],[1,2,3],Just 12,[4,8])
+(Just 'x',Just 2,Just (),Just 'y',"")
+(("ab",[1,2]),[1],True)
+((3,"1"),(2,'x'),True)
+visit 3
+visit 2
+visit 1
+6
+3
+1
+2
+(5 :| [3,8],[5,3,8],5,8,10 :| [6,16],Nothing,Just ('a' :| "b"),8,True)
+(48,255,240,65535,-6)
+(9223372036854775808,-128,-4,4096,240)
+(16,8,True,False,128,254,16)
+(7,3,8,64)
+(15,30,7)
+acquire
+use
+release
+"failed"
+body
+finally
+"3"
+1a
+2b

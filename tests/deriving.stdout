@@ -1,0 +1,17 @@
+[Red,Green,Blue]
+(True,False,True,LT,True)
+(Red,Blue,Green,Green,2,Green)
+[Blue,Green,Red]
+[Red,Blue]
+Circle Red (-3)
+Square {side = 2, fill = Just Blue}
+Group [Circle Green 1,Square {side = 0, fill = Nothing}]
+(Just (Circle Red 1),[Left 1,Right "two"])
+(True,False,True)
+(LT,True)
+(Pair 'x' (Wrapper True),Pair (Just (-1)) ())
+(Pair False Red,Pair Blue '\1114111')
+(Wrapper (Wrapper 3),True)
+(Count 7,True,True)
+(True,False,Holder <loose> 2)
+(Blue,[False,True],(LT,EQ,GT))

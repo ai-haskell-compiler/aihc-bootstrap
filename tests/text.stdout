@@ -1,0 +1,19 @@
+"  Hello, wide world!  "
+("  Hello, wide world!  ","packed",22,False,True,"","x")
+("Hello, wide world!","Hello, wide world!  ","  Hello, wide world!","Hello, wide world!")
+("MIXED CASE 12","mixed case 12","cba","bcd")
+("abc","def","ef","abcd",("ab","cdef"),"ab","ab")
+("ab","cdef","def","abc")
+(("ab","cab"),("ab","cab"),"bnn",Just 2,False)
+(Just ('a',"bc"),Nothing,"xyz",'a','c',"bc",True,False)
+(["a","b","","c"],["a","b:c"],[""],["","","",""])
+(("key","::value::more"),("none",""),"bANANa",2)
+("a, b, c","xy","aabbcc","ababab")
+(True,True,False,True)
+(Just "c",Nothing,Just "a",Nothing)
+(["one","two","","four"],"a\nb\n",["two","words","here"],"a b")
+(1234,GT,EQ,LT)
+(True,GT,True,"xy","pear")
+("\"quote\\\"d\"","tab\there",3)
+printed as text: λ
+no newline

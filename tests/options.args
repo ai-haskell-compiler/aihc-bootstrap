@@ -1,0 +1,1 @@
+build -v --include a in.hs -i b --output=out -Ohigh --quick

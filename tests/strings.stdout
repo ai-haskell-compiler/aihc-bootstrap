@@ -1,0 +1,9 @@
+tab:	| quote:" | backslash:\ | apostrophe:'
+decimal:λ hex:λ octal:λ literal:λ
+names:1 [0m | control:|
+a gap joins lines
+a'\λλ
+empty
+lambda
+tab first
+other
