@@ -417,8 +417,11 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 value = global_value(expr->global);
                 break;
             case E_INT:
-                value = make_int(expr->number);
-                value->tag = expr->big;
+                /* A literal is an Integer. */
+                value = expr->big == 2 ? integer_from_literal(expr->string)
+                    : expr->big == 1
+                        ? integer_from_unsigned((unsigned long)expr->number)
+                        : make_int(expr->number);
                 break;
             case E_CHAR:
                 value = make_char(expr->number);

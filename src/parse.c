@@ -499,6 +499,7 @@ static Pattern *parse_pattern_atom(Parser *parser)
         pattern->literal = new_expr(E_INT, token);
         pattern->literal->number = token->number;
         pattern->literal->big = token->big;
+        pattern->literal->string = token->text;
     } else if (next_is(parser, T_VARSYM, "-")
                && parser->tokens[parser->position + 1].kind == T_INT) {
         /* A negative number: -1 */
@@ -912,6 +913,7 @@ static Expr *parse_atom(Parser *parser)
         expr = new_expr(E_INT, token);
         expr->number = token->number;
         expr->big = token->big;
+        expr->string = token->text;
         parser->position++;
     } else if (next_is_kind(parser, T_CHAR)) {
         expr = new_expr(E_CHAR, token);

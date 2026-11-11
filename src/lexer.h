@@ -21,7 +21,8 @@ typedef struct Token {
     const char *text;
     const char *qualifier; /* T_VARID, T_VARSYM: the M of M.x, or NULL */
     long number;
-    int big;    /* T_INT: `number` holds the bits of a value from 2^63 to
+    int big;    /* T_INT: 2 if the value is 2^64 or more; it is then in `text`.
+                   1 if `number` holds the bits of a value from 2^63 to
                    2^64 - 1 */
     const char *file;
     int line;

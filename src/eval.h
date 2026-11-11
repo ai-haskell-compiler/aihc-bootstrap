@@ -99,6 +99,21 @@ Value *apply(Value *function, Value *argument);
 Value *catch_exception(Value *function, Value *argument, Value **exception);
 void raise_exception(Value *exception);
 
+/* integer.c: Integer beyond a C long. A value with this tag is one; see
+   integer.c for what is in it. The arguments of these functions are
+   Integers, big or not, and so are their results. */
+#define INTEGER_BIG 1
+int integer_is_big(Value *value);
+Value *integer_from_unsigned(unsigned long number);
+Value *integer_from_literal(const char *text);
+Value *integer_arithmetic(char operation, Value *left, Value *right);
+Value *integer_division(char operation, Value *left, Value *right);
+int integer_compare(Value *left, Value *right);
+Value *integer_shift(Value *value, long count, int left);
+Value *integer_bitwise(char operation, Value *left, Value *right);
+unsigned long integer_low_bits(Value *value);
+char *integer_show(Value *value);
+
 /* numbers.c: the arithmetic builtins. */
 Value *builtin_numAdd(Value **arguments);
 Value *builtin_numSub(Value **arguments);
