@@ -1,4 +1,4 @@
-module Data.IntMap (module Data.Map.Base) where
+module Data.IntMap (module Data.IntMap, module Data.Map.Base) where
 
 -- An IntMap is a Map with Int keys. All its functions are those of Data.Map.
 

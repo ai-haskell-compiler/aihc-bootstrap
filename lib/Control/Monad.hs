@@ -1,4 +1,4 @@
-module Control.Monad (module Prelude) where
+module Control.Monad (module Control.Monad, module Prelude) where
 
 import Control.Applicative (Alternative (..))
 

@@ -1,4 +1,4 @@
-module Data.ByteString.Char8 (module Data.ByteString) where
+module Data.ByteString.Char8 (module Data.ByteString.Char8, module Data.ByteString) where
 
 -- The same ByteString, with each byte seen as a character. The functions of
 -- Data.ByteString that do not mention a byte are used as they are.

@@ -1,4 +1,4 @@
-module Data.Int (module Prelude) where
+module Data.Int (module Data.Int, module Prelude) where
 
 -- The instances are the same for every built-in number type; the arithmetic
 -- itself is in src/numbers.c, which goes by the name of the type.

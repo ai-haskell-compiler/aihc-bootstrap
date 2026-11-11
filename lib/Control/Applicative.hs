@@ -1,4 +1,4 @@
-module Control.Applicative (module Data.Functor.Const) where
+module Control.Applicative (module Control.Applicative, module Data.Functor.Const) where
 
 import Data.Functor.Const
 

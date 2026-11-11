@@ -1,4 +1,4 @@
-module Data.Either (module Prelude) where
+module Data.Either (module Data.Either, module Prelude) where
 
 lefts :: [Either a b] -> [a]
 lefts list = [a | Left a <- list]

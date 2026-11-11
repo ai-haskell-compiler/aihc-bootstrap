@@ -1,4 +1,4 @@
-module Data.ByteString.Lazy (module Data.ByteString) where
+module Data.ByteString.Lazy (module Data.ByteString.Lazy, module Data.ByteString) where
 
 -- A lazy ByteString is a strict one here: nothing is read or built in
 -- pieces. Lengths are Int64, as in the real module; the rest is

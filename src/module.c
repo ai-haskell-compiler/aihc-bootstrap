@@ -179,6 +179,10 @@ static Entity *find_exported_within(Module *module, enum Namespace namespace,
     Import *import;
     int i;
 
+    if (entity != NULL && module->exports != NULL && !module->exports_itself
+        && !import_allows(module->exports, name, entity->parent)) {
+        entity = NULL; /* defined here, and not in the export list */
+    }
     if (entity != NULL || module->searched == current_search) {
         return entity;
     }
@@ -249,12 +253,6 @@ static int import_allows(const Import *import, const char *name,
         }
         if (parent != NULL && item->all_children
             && strcmp(item->name, parent) == 0) {
-            listed = 1;
-        }
-        /* A pattern synonym can be exported as part of a type. We do not
-           know which, so any T (..) lets it through. */
-        if (parent != NULL && item->all_children
-            && strcmp(parent, PATTERN_PARENT) == 0) {
             listed = 1;
         }
     }
@@ -599,6 +597,7 @@ static ImportItem *add_import_item(Import *import, const char *name)
     ImportItem *item = xmalloc(sizeof(ImportItem));
 
     item->name = name;
+    item->parent = NULL;
     item->all_children = 0;
     item->next = import->items;
     import->items = item;
@@ -636,12 +635,12 @@ static void add_import_items(Import *import, const Token *tokens, int start,
         } else if (token_is(token, T_VARID, "pattern")
                    && tokens[i + 1].kind == T_CONID) {
             /* `pattern P`: the keyword adds nothing. */
-        } else if (token->kind == T_VARID) {
-            add_import_item(import, token->text);
-        } else if (token->kind == T_CONID) {
+        } else if (token->kind == T_VARID || token->kind == T_CONID) {
             ImportItem *item = add_import_item(import, token->text);
 
-            if (!in_sublist) {
+            if (in_sublist && parent_item != NULL) {
+                item->parent = parent_item->name;
+            } else if (token->kind == T_CONID) {
                 parent_item = item;
             }
         }
@@ -1314,6 +1313,23 @@ static int add_instance_declaration(Module *module, int start, int end)
     return 1;
 }
 
+/* The T that the export list names the name inside, as in T (name), or
+   NULL. */
+static const char *export_parent(const Module *module, const char *name)
+{
+    const ImportItem *item;
+
+    if (module->exports == NULL) {
+        return NULL;
+    }
+    for (item = module->exports->items; item != NULL; item = item->next) {
+        if (item->parent != NULL && strcmp(item->name, name) == 0) {
+            return item->parent;
+        }
+    }
+    return NULL;
+}
+
 /* pattern P x y <- pattern [where P x y = expression]
    pattern P {f, g} <- pattern
    pattern x :+ y <- pattern
@@ -1373,14 +1389,17 @@ static int add_pattern_synonym(Module *module, int start, int end)
         synonym->builder = new_global(module, synonym->name);
         add_clause(synonym->builder, start + 1, end);
     }
-    entity = add_entity(module, NS_CONSTRUCTOR, synonym->name, PATTERN_PARENT);
+    /* An export list can make the synonym part of a type:
+       T (.., P) or T (P, field). Then importing T (..) brings it. */
+    entity = add_entity(module, NS_CONSTRUCTOR, synonym->name,
+                        export_parent(module, synonym->name));
     entity->synonym = synonym;
     if (is_record) {
         for (i = 0; i < synonym->parameter_count; i++) {
             Entity *field =
                 find_or_add_variable(module, synonym->parameters[i]);
 
-            field->parent = PATTERN_PARENT;
+            field->parent = export_parent(module, synonym->parameters[i]);
             field->global->synonym = synonym;
         }
     }
@@ -1500,7 +1519,10 @@ static Module *parse_module(const char *file, const char *source,
                 die("%s: module header without where", file);
             }
             if (position > 1 && token_is(&tokens[position], T_RESERVED, "module")
-                && strcmp(tokens[position + 1].text, module->name) != 0) {
+                && strcmp(tokens[position + 1].text, module->name) == 0) {
+                module->exports_itself = 1;
+            } else if (position > 1
+                       && token_is(&tokens[position], T_RESERVED, "module")) {
                 /* module A in the export list */
                 module->reexports = xrealloc(
                     module->reexports,

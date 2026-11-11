@@ -55,6 +55,7 @@ replacing those packages instead of running them.
 | 5 Concurrency | done | 9,605 of 11,901 |
 | 6 Parsing: megaparsec | done | 10,625 of 12,140 |
 | 6 Printing: prettyprinter | done | 11,056 of 12,263 |
+| Language backlog, first part | done | 11,685 of 12,292 |
 | 7 Data formats | next | |
 
 Left over from phase 1, each stopping with a `TODO` when reached:
@@ -105,11 +106,9 @@ infix constructors, and about twenty small modules of `base`
 ...).
 
 The larger blocks the survey still shows, by definitions stopped:
-`Data.Data` 80, `GHC.Generics` 76, `Data.Vector.Unboxed.Mutable` 43,
-`Data.Array.Unboxed` 41, `Data.Primitive.ByteArray` 34,
-`Crypto.Hash.SHA256` 30, `Numeric` 30. What is left is now mostly the
-language backlog and unresolved names: about 140 kinds of failure, none of
-them large.
+`GHC.Generics` 78, `Data.Data` 67, `Data.Vector.Unboxed.Mutable` 43,
+`Data.Array.Unboxed` 41, `Data.Primitive.ByteArray` 35,
+`Crypto.Hash.SHA256` 31, `Numeric` 30, `Data.Aeson` 25.
 
 ## Phase 0: survey mode
 
@@ -236,12 +235,35 @@ is attempted:
 
 ## Language backlog
 
-From the `LANGUAGE` pragmas in the sources, to be confirmed by the survey:
-`PatternSynonyms` (21 modules), `ViewPatterns` (19), `LambdaCase` (19),
-`BangPatterns` (15), `TypeApplications` (7), `TupleSections`, `MultiWayIf`,
-`RankNTypes` (4). Also known to be missing: negation, arithmetic sequences,
-list comprehensions, operators defined infix, export lists and re-exports,
-multi-parameter classes (one use, `MonadState`).
+Done, each with a test compared against GHC:
+
+| Feature | Test |
+| --- | --- |
+| Associated types of classes | `tests/families.hs` |
+| `\case`, view patterns, tuple sections, named field puns, `let` in guards, bang patterns in clauses, operators defined between their parameters, qualified constructor operators | `tests/extensions.hs` |
+| Local functions that call each other, without signatures | `tests/recursion.hs` |
+| Pattern synonyms: both directions, with a `where` clause, with fields, as operators | `tests/patsyn.hs` |
+| Export lists that hide a module's own definitions; pattern synonyms exported as part of a type | `tests/exports.hs` |
+
+How the less obvious ones work:
+
+- **A view pattern** `(f -> p)` matches a value `v` if `p` matches `f v`.
+- **Local functions that call each other** are inferred as a group and
+  generalised over one list of type variables (`infer_binding`).
+- **A pattern synonym** used in a pattern is replaced by its right-hand
+  side, read again from the tokens for each use and resolved in the module
+  of the synonym, with the arguments of the use in place of the
+  parameters. Used in an expression it is a function. A parameter that the
+  synonym names with `@` can only be given a variable or `_`.
+
+Still missing, as the survey shows them:
+
+- `TypeApplications` (`f @T`) and scoped type variables: about 40
+  definitions.
+- `forall` inside a type (`RankNTypes`): 13.
+- `Double`, `Rational` and floating point literals.
+- Derived `Read`, `Generic`, `Data`; `deriving via`.
+- `MultiWayIf`; multi-parameter classes (one use, `MonadState`).
 
 ## Decisions
 

@@ -34,7 +34,7 @@ measure of progress:
 
 ```text
 modules loaded:        335
-definitions prepared:  11056 of 12263
+definitions prepared:  11685 of 12292
 ```
 
 The order of the library work is in [docs/PLAN.md](docs/PLAN.md).
@@ -95,6 +95,9 @@ against a real compiler:
 ```sh
 runghc --ghc-arg=-package-env --ghc-arg=- tests/NAME.hs > tests/NAME.stdout
 ```
+
+A test that imports modules of its own keeps them in `tests/lib`, which
+`runghc` is told about with `--ghc-arg=-itests/lib`.
 
 A test of a package that GHC does not ship says at its top how its expected
 output was made. `tests/megaparsec.hs` and `tests/prettyprinter.hs` run

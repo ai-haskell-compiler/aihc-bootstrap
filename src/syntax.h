@@ -394,10 +394,6 @@ struct PatternSynonym {
     Global *builder; /* NULL if P cannot be used in an expression */
 };
 
-/* The `parent` of the entity of a pattern synonym or of one of its
-   fields. */
-#define PATTERN_PARENT "(pattern)"
-
 struct Entity {
     enum Namespace namespace;
     const char *name;
@@ -415,6 +411,7 @@ struct Entity {
 /* One name in an import list. */
 struct ImportItem {
     const char *name;
+    const char *parent; /* the T, for a name inside T (...); else NULL */
     int all_children; /* T (..) */
     ImportItem *next;
 };
@@ -442,6 +439,8 @@ struct Module {
     const char **reexports; /* the A and B: module names or import aliases */
     Import *exports;        /* the names of the export list, kept like an
                                import list; NULL if there is no list */
+    int exports_itself;     /* the export list has `module M`: everything
+                               the module defines */
     Chunk *unsupported; /* declarations we skip */
     int overloaded_strings; /* the OverloadedStrings extension is on */
     unsigned long searched; /* the last search of exports that came here */

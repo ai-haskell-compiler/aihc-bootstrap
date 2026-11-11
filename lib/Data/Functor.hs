@@ -1,4 +1,4 @@
-module Data.Functor (module Prelude) where
+module Data.Functor (module Data.Functor, module Prelude) where
 
 infixl 4 $>
 
