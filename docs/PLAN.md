@@ -53,7 +53,8 @@ replacing those packages instead of running them.
 | `Data.Text.Unsafe` | done | |
 | 4 The system | done, except as listed below | 9,459 of 11,833 |
 | 5 Concurrency | done | 9,605 of 11,901 |
-| 6 Parsing and printing | next | |
+| 6 Parsing: megaparsec | done | 10,625 of 12,140 |
+| 6 Printing: prettyprinter | next | |
 
 Left over from phase 1, each stopping with a `TODO` when reached:
 
@@ -103,8 +104,8 @@ infix constructors, and about twenty small modules of `base`
 ...).
 
 The larger blocks the survey still shows, by definitions stopped:
-`Text.Megaparsec` 742, `Prettyprinter` 322, `GHC.Generics` 76, `Data.Data`
-62, `Data.Vector.Unboxed.Mutable` 43, `Data.Array.Unboxed` 41.
+`Prettyprinter` 324, `Data.Data` 78, `GHC.Generics` 76,
+`Data.Vector.Unboxed.Mutable` 43, `Data.Array.Unboxed` 41.
 
 ## Phase 0: survey mode
 
@@ -189,12 +190,19 @@ thread is a stack, and a blocked `takeMVar` switches stacks.
 
 ## Phase 6: parsing and printing
 
-- **`megaparsec`** is the riskiest replacement. AIHC uses 17 modules of it,
-  with a custom `Stream` instance, direct access to the parser state
-  (`stateInput`, `stateOffset`, `updateParserState`), `observing`, and
-  `errorBundlePretty`. A replacement is a real parser library of perhaps 600
-  to 900 lines. It starts with a short study of `aihc-parser` to see how
-  much of the state is really used.
+- **`megaparsec`** is a port of the upstream core (`lib/Text/Megaparsec/`),
+  definition by definition, because which error a parser reports decides
+  what the parsers built on it do. `tests/megaparsec.hs` compares about
+  900 lines of results and errors with upstream, run from its source.
+  Three things differ:
+  - The parser's continuations return an opaque `Answer` where upstream
+    has `forall b. m b`, and nothing runs under a parser: `ParsecT e s m`
+    ignores its `m`.
+  - Upstream's class `MonadParsec e s m` has three parameters. Here it has
+    `m` only, with `e` and `s` as associated types. That needed
+    associated types in the interpreter, which megaparsec's `Stream` class
+    needs anyway (`tests/families.hs`).
+  - `Text.Megaparsec.Char.Lexer.float` waits for `Double`.
 - **`prettyprinter`** is a port of the upstream layout algorithm.
 
 ## Phase 7: data formats

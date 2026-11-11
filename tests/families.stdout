@@ -1,0 +1,13 @@
+0='a' 1='b' 2='c'
+0=True 1=False
+"one"="one" "two"="two"
+False=Left True True=Right 'x'
+Just 5
+Just "quince"
+Just (Right 'q')
+Nothing
+(3,1,1)
+'a' at [1,3,5]
+Left True at [False]
+(Just 'x',Just "c")
+Just 11

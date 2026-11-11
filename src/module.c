@@ -16,9 +16,9 @@ Instance *all_instances = NULL;
 const char *const PRELUDE_NAME = "Prelude";
 
 /* The types and constructors that have their own syntax. */
-TypeCon function_type_constructor = { "->", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL };
-TypeCon list_type_constructor = { "[]", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL };
-TypeCon unit_type_constructor = { "()", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL };
+TypeCon function_type_constructor = { "->", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0 };
+TypeCon list_type_constructor = { "[]", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0 };
+TypeCon unit_type_constructor = { "()", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0 };
 Constructor unit_constructor =
     { "()", &unit_type_constructor, NULL, 0, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, 0, NULL };
 Constructor nil_constructor =
@@ -126,7 +126,8 @@ static Module *imported_module(Import *import);
 static int import_allows(const Import *import, const char *name,
                          const char *parent);
 static int import_might_provide(const Import *import,
-                                enum Namespace namespace, const char *name);
+                                enum Namespace namespace, const char *name,
+                                int associated_types_too);
 
 /* A name the module imports and lists among its exports, as itself or as
    one of the children of a T (..). Only the imports that could have it are
@@ -152,7 +153,7 @@ static Entity *find_listed_export(Module *module, enum Namespace namespace,
 
             /* For T (..), the import has to be one that T can come from. */
             if (!import_might_provide(import, by_name ? namespace : NS_TYPE,
-                                      item->name)) {
+                                      item->name, 0)) {
                 continue;
             }
             found = find_exported_within(imported_module(import), namespace,
@@ -257,7 +258,8 @@ static int import_allows(const Import *import, const char *name,
 /* A cheap test that needs no knowledge of the imported module. It lets us
    leave a module unloaded when its import list rules the name out. */
 static int import_might_provide(const Import *import,
-                                enum Namespace namespace, const char *name)
+                                enum Namespace namespace, const char *name,
+                                int associated_types_too)
 {
     const ImportItem *item;
 
@@ -265,9 +267,11 @@ static int import_might_provide(const Import *import,
         return 1;
     }
     for (item = import->items; item != NULL; item = item->next) {
-        /* T (..) can stand for any constructor or variable, but not for a
-           type. */
-        if ((item->all_children && namespace != NS_TYPE)
+        /* T (..) can stand for any constructor or variable. It can also
+           stand for a type, if T is a class with associated types; that is
+           rare, so it is only considered when asked for. */
+        if ((item->all_children
+             && (namespace != NS_TYPE || associated_types_too))
             || strcmp(item->name, name) == 0) {
             return 1;
         }
@@ -283,10 +287,12 @@ static Module *imported_module(Import *import)
     return import->module;
 }
 
-/* Export lists are ignored for now: a module exports everything it defines
-   and re-exports nothing. */
-Entity *lookup_entity(Module *module, enum Namespace namespace,
-                      const char *qualifier, const char *name)
+/* What the name means in the module: its own definition, or one it
+   imports. With `associated_types_too`, an import of C (..) is also looked
+   at for a type name. */
+static Entity *lookup(Module *module, enum Namespace namespace,
+                      const char *qualifier, const char *name,
+                      int associated_types_too)
 {
     Entity *found = NULL;
     Import *import;
@@ -316,7 +322,8 @@ Entity *lookup_entity(Module *module, enum Namespace namespace,
         Entity *entity;
 
         if (!import_matches_qualifier(import, qualifier)
-            || !import_might_provide(import, namespace, name)) {
+            || !import_might_provide(import, namespace, name,
+                                     associated_types_too)) {
             continue;
         }
         entity = find_exported_entity(imported_module(import), namespace, name);
@@ -328,7 +335,17 @@ Entity *lookup_entity(Module *module, enum Namespace namespace,
         }
         found = entity;
     }
+    if (found == NULL && namespace == NS_TYPE && !associated_types_too) {
+        /* Perhaps an associated type, imported with its class as C (..). */
+        return lookup(module, namespace, qualifier, name, 1);
+    }
     return found;
+}
+
+Entity *lookup_entity(Module *module, enum Namespace namespace,
+                      const char *qualifier, const char *name)
+{
+    return lookup(module, namespace, qualifier, name, 0);
 }
 
 const char *split_qualified(const char *name, const char **qualifier)
@@ -1174,7 +1191,18 @@ static int add_class_declaration(Module *module, int start, int end)
         int colon = signature_colon(tokens, i, next);
         const char *name = clause_name(tokens, i, next);
 
-        if (colon >= 0) {
+        if (token_is(&tokens[i], T_RESERVED, "type")) {
+            /* An associated type: type F a [:: kind] */
+            int position = i + 1;
+            TypeCon *family = add_type_head(module, &position, next);
+
+            if (family != NULL) {
+                family->is_family = 1;
+                /* Importing C (..) brings the associated types of C. */
+                find_entity(module, NS_TYPE, family->name)->parent =
+                    class->name;
+            }
+        } else if (colon >= 0) {
             add_signature(module, i, colon, next, class);
         } else if (is_fixity_keyword(&tokens[i])) {
             add_fixity_declaration(module, i, next);
@@ -1182,7 +1210,7 @@ static int add_class_declaration(Module *module, int start, int end)
             /* The default definition of a method. */
             add_clause(find_or_add_variable(module, name)->global, i, next);
         }
-        /* Anything else (associated types, ...) is ignored for now. */
+        /* Anything else is ignored for now. */
         i = next;
     }
     return 1;
@@ -1203,6 +1231,26 @@ static Global *find_or_add_method(Instance *instance, const char *name)
     global->next = instance->methods;
     instance->methods = global;
     return global;
+}
+
+/* In an instance: type F (T a) = right-hand side */
+static void add_family_instance(Module *module, int start, int end)
+{
+    int equals = find_reserved(module->tokens, start, end, "=");
+    FamilyInstance *instance;
+
+    if (equals == end) {
+        return;
+    }
+    instance = xmalloc(sizeof(FamilyInstance));
+    memset(instance, 0, sizeof(FamilyInstance));
+    instance->module = module;
+    instance->lhs_start = start;
+    instance->lhs_end = equals;
+    instance->rhs_start = equals + 1;
+    instance->rhs_end = end;
+    instance->next = all_family_instances;
+    all_family_instances = instance;
 }
 
 /* instance Context => C (T a) where { method definitions } */
@@ -1237,11 +1285,13 @@ static int add_instance_declaration(Module *module, int start, int end)
         int next = item_end(tokens, i, end, column);
         const char *name = clause_name(tokens, i, next);
 
-        if (name != NULL && signature_colon(tokens, i, next) < 0) {
+        if (token_is(&tokens[i], T_RESERVED, "type")) {
+            add_family_instance(module, i + 1, next);
+        } else if (name != NULL && signature_colon(tokens, i, next) < 0) {
             add_clause(find_or_add_method(instance, name), i, next);
         }
-        /* Anything else (signatures, associated types, methods defined
-           infix) is ignored for now. */
+        /* Anything else (signatures, methods defined infix) is ignored for
+           now. */
         i = next;
     }
     return 1;

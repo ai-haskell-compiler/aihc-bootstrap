@@ -27,3 +27,8 @@ listToMaybe (a : _) = Just a
 maybeToList :: Maybe a -> [a]
 maybeToList Nothing = []
 maybeToList (Just a) = [a]
+
+fromJust :: Maybe a -> a
+fromJust found = case found of
+  Just a -> a
+  Nothing -> error "Maybe.fromJust: Nothing"

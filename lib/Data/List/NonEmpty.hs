@@ -3,6 +3,7 @@ module Data.List.NonEmpty where
 -- A list with at least one element.
 
 import Prelude hiding (filter, head, init, last, length, map, tail, zipWith)
+import qualified Data.List as List
 import qualified Prelude as P
 
 infixr 5 :|
@@ -65,3 +66,8 @@ zipWith f (a :| as) (b :| bs) = f a b :| P.zipWith f as bs
 
 reverse :: NonEmpty a -> NonEmpty a
 reverse list = fromList (P.reverse (toList list))
+
+-- Sorted by what the function gives. Elements that give the same keep
+-- their order.
+sortWith :: Ord b => (a -> b) -> NonEmpty a -> NonEmpty a
+sortWith key list = fromList (List.sortBy (\a b -> compare (key a) (key b)) (toList list))

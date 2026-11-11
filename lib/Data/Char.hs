@@ -99,3 +99,50 @@ beyondAscii :: String -> a
 beyondAscii name = interpreterTodo ("Data.Char." ++ name ++ " of a character beyond ASCII")
 
 foreign import prim "interpreterTodo" interpreterTodo :: String -> a
+
+-- Reads one character as it is written in a Haskell string literal: itself,
+-- or an escape. The result is empty if the string does not start with one.
+readLitChar :: String -> [(Char, String)]
+readLitChar string = case string of
+  [] -> []
+  '\\' : rest -> readEscape rest
+  c : rest -> [(c, rest)]
+
+readEscape :: String -> [(Char, String)]
+readEscape string = case string of
+  'a' : rest -> [('\a', rest)]
+  'b' : rest -> [('\b', rest)]
+  'f' : rest -> [('\f', rest)]
+  'n' : rest -> [('\n', rest)]
+  'r' : rest -> [('\r', rest)]
+  't' : rest -> [('\t', rest)]
+  'v' : rest -> [('\v', rest)]
+  '\\' : rest -> [('\\', rest)]
+  '\'' : rest -> [('\'', rest)]
+  '"' : rest -> [('"', rest)]
+  '^' : c : rest | c >= '@' && c <= '_' -> [(chr (ord c - 64), rest)]
+  'o' : rest -> readCode 8 isOctDigit rest
+  'x' : rest -> readCode 16 isHexDigit rest
+  c : _ | isDigit c -> readCode 10 isDigit string
+  _ -> take 1 [(chr code, drop (length name) string) | (name, code) <- asciiNames, isPrefix name string]
+  where
+    isPrefix name text = take (length name) text == name
+
+-- The number of a character, in the base.
+readCode :: Int -> (Char -> Bool) -> String -> [(Char, String)]
+readCode base isDigitOfBase string = case span isDigitOfBase string of
+  ([], _) -> []
+  (digits, rest) ->
+    let code = foldl (\n c -> n * base + digitToInt c) 0 digits
+     in if code > 0x10FFFF then [] else [(chr code, rest)]
+
+-- The names of the control characters. SOH is before SO, so that the
+-- longer name is tried first.
+asciiNames :: [(String, Int)]
+asciiNames =
+  [ ("NUL", 0), ("SOH", 1), ("STX", 2), ("ETX", 3), ("EOT", 4), ("ENQ", 5), ("ACK", 6), ("BEL", 7),
+    ("BS", 8), ("HT", 9), ("LF", 10), ("VT", 11), ("FF", 12), ("CR", 13), ("SO", 14), ("SI", 15),
+    ("DLE", 16), ("DC1", 17), ("DC2", 18), ("DC3", 19), ("DC4", 20), ("NAK", 21), ("SYN", 22), ("ETB", 23),
+    ("CAN", 24), ("EM", 25), ("SUB", 26), ("ESC", 27), ("FS", 28), ("GS", 29), ("RS", 30), ("US", 31),
+    ("SP", 32), ("DEL", 127)
+  ]
