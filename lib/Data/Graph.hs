@@ -1,3 +1,7 @@
+-- This file is derived from Data.Graph in the package containers,
+-- Copyright 2004, The University Court of the University of Glasgow, and is
+-- under that package's licence: see licenses/containers.txt.
+
 module Data.Graph where
 
 -- Strongly connected components, as in containers 0.7.
