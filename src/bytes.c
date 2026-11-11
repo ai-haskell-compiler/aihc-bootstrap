@@ -406,14 +406,10 @@ Value *builtin_bytesWriteFile(Value **arguments)
    The Int is a file descriptor: 1 for stdout, 2 for stderr. */
 Value *builtin_bytesHPut(Value **arguments)
 {
-    long descriptor = force(arguments[0])->number;
     Value *bytes = bytes_argument(arguments[1]);
 
-    if (descriptor != 1 && descriptor != 2) {
-        TODO("output to a file handle");
-    }
     fwrite(bytes->bytes, 1, (size_t)bytes->number,
-           descriptor == 2 ? stderr : stdout);
+           handle_stream(force(arguments[0])->number));
     return make_io_result(make_con(TAG_UNIT, 0));
 }
 

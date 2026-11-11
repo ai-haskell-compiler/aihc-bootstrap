@@ -12,7 +12,7 @@
 
    --survey runs nothing. It prepares every definition the program could
    reach and reports what the interpreter does not support (survey.c). */
-int main(int argc, char **argv)
+static int interpret(int argc, char **argv)
 {
     const char *file = NULL;
     Module *module;
@@ -67,4 +67,12 @@ int main(int argc, char **argv)
     /* An IO action is a function from a world token; see eval.h. */
     apply(action, make_con(TAG_UNIT, 0));
     return 0;
+}
+
+/* The interpreter evaluates a value inside a value with a C call inside a
+   C call, so a long chain of them (a sum of a long list that nothing has
+   looked at yet) goes deep. It gets a stack to match. */
+int main(int argc, char **argv)
+{
+    return run_with_big_stack(interpret, argc, argv);
 }

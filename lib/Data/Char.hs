@@ -1,8 +1,48 @@
 module Data.Char where
 
--- Classification is written for ASCII. A question about any other
--- character stops the interpreter instead of giving an answer that might
--- be wrong; Unicode tables are added when that happens.
+-- What is known about a character comes from a table that was made with
+-- GHC (src/unicode.c, scripts/gen-unicode.hs), so that every answer here
+-- is GHC's. The definitions on top of the table are those of GHC's base.
+
+data GeneralCategory
+  = UppercaseLetter
+  | LowercaseLetter
+  | TitlecaseLetter
+  | ModifierLetter
+  | OtherLetter
+  | NonSpacingMark
+  | SpacingCombiningMark
+  | EnclosingMark
+  | DecimalNumber
+  | LetterNumber
+  | OtherNumber
+  | ConnectorPunctuation
+  | DashPunctuation
+  | OpenPunctuation
+  | ClosePunctuation
+  | InitialQuote
+  | FinalQuote
+  | OtherPunctuation
+  | MathSymbol
+  | CurrencySymbol
+  | ModifierSymbol
+  | OtherSymbol
+  | Space
+  | LineSeparator
+  | ParagraphSeparator
+  | Control
+  | Format
+  | Surrogate
+  | PrivateUse
+  | NotAssigned
+  deriving (Eq, Ord, Show, Enum, Bounded)
+
+-- 0: the general category, by position. 1, 2, 3: the character in upper,
+-- lower and title case. 4, 5: 1 if it is upper case, lower case.
+foreign import prim "charInfo" charInfo :: Int -> Char -> Int
+
+generalCategory :: Char -> GeneralCategory
+generalCategory c = toEnum (charInfo 0 c)
 
 ord :: Char -> Int
 ord = numConvert
@@ -17,7 +57,7 @@ isLatin1 :: Char -> Bool
 isLatin1 c = c <= '\255'
 
 isControl :: Char -> Bool
-isControl c = if isAscii c then c < ' ' || c == '\DEL' else beyondAscii "isControl"
+isControl c = generalCategory c == Control
 
 isDigit :: Char -> Bool
 isDigit c = c >= '0' && c <= '9'
@@ -35,52 +75,54 @@ isAsciiLower :: Char -> Bool
 isAsciiLower c = c >= 'a' && c <= 'z'
 
 isUpper :: Char -> Bool
-isUpper c = if isAscii c then isAsciiUpper c else beyondAscii "isUpper"
+isUpper c = charInfo 4 c == 1
 
 isLower :: Char -> Bool
-isLower c = if isAscii c then isAsciiLower c else beyondAscii "isLower"
+isLower c = charInfo 5 c == 1
 
 isAlpha :: Char -> Bool
-isAlpha c = if isAscii c then isAsciiUpper c || isAsciiLower c else beyondAscii "isAlpha"
+isAlpha c = generalCategory c <= OtherLetter
 
 isLetter :: Char -> Bool
 isLetter = isAlpha
 
+isMark :: Char -> Bool
+isMark c = let category = generalCategory c in category >= NonSpacingMark && category <= EnclosingMark
+
+isNumber :: Char -> Bool
+isNumber c = let category = generalCategory c in category >= DecimalNumber && category <= OtherNumber
+
 isAlphaNum :: Char -> Bool
-isAlphaNum c = if isAscii c then isAsciiUpper c || isAsciiLower c || isDigit c else beyondAscii "isAlphaNum"
+isAlphaNum c = isAlpha c || isNumber c
 
 isPrint :: Char -> Bool
-isPrint c = if isAscii c then c >= ' ' && c < '\DEL' else beyondAscii "isPrint"
+isPrint c = generalCategory c < LineSeparator
 
 isPunctuation :: Char -> Bool
-isPunctuation c =
-  if isAscii c
-    then elem c "!\"#%&'()*,-./:;?@[\\]_{}"
-    else beyondAscii "isPunctuation"
+isPunctuation c = let category = generalCategory c in category >= ConnectorPunctuation && category <= OtherPunctuation
 
 isSymbol :: Char -> Bool
-isSymbol c = if isAscii c then elem c "$+<=>^`|~" else beyondAscii "isSymbol"
+isSymbol c = let category = generalCategory c in category >= MathSymbol && category <= OtherSymbol
 
--- The white space of ASCII and the no-break space. The other spaces of
--- Unicode are not known here.
+isSeparator :: Char -> Bool
+isSeparator c = let category = generalCategory c in category >= Space && category <= ParagraphSeparator
+
+-- The space, the control characters that move the cursor, and every
+-- character Unicode calls a space.
 isSpace :: Char -> Bool
 isSpace c
-  | c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v' = True
-  | isAscii c = False
-  | c == '\160' = True
-  | otherwise = beyondAscii "isSpace"
+  | c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v' || c == '\160' = True
+  | c < '\887' = False
+  | otherwise = generalCategory c == Space
 
 toUpper :: Char -> Char
-toUpper c
-  | isAsciiLower c = chr (ord c - 32)
-  | isAscii c = c
-  | otherwise = beyondAscii "toUpper"
+toUpper c = chr (charInfo 1 c)
 
 toLower :: Char -> Char
-toLower c
-  | isAsciiUpper c = chr (ord c + 32)
-  | isAscii c = c
-  | otherwise = beyondAscii "toLower"
+toLower c = chr (charInfo 2 c)
+
+toTitle :: Char -> Char
+toTitle c = chr (charInfo 3 c)
 
 digitToInt :: Char -> Int
 digitToInt c
@@ -94,11 +136,6 @@ intToDigit n
   | n >= 0 && n <= 9 = chr (ord '0' + n)
   | n >= 10 && n <= 15 = chr (ord 'a' + n - 10)
   | otherwise = error "Char.intToDigit: not a digit"
-
-beyondAscii :: String -> a
-beyondAscii name = interpreterTodo ("Data.Char." ++ name ++ " of a character beyond ASCII")
-
-foreign import prim "interpreterTodo" interpreterTodo :: String -> a
 
 -- Reads one character as it is written in a Haskell string literal: itself,
 -- or an escape. The result is empty if the string does not start with one.

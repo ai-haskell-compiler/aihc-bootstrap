@@ -26,3 +26,15 @@ hPutStr handle (Text string) = IO.hPutStr handle string
 
 hPutStrLn :: Handle -> Text -> IO ()
 hPutStrLn handle (Text string) = IO.hPutStrLn handle string
+
+hGetLine :: Handle -> IO Text
+hGetLine handle = fmap Text (IO.hGetLine handle)
+
+hGetContents :: Handle -> IO Text
+hGetContents handle = fmap Text (IO.hGetContents handle)
+
+getLine :: IO Text
+getLine = hGetLine IO.stdin
+
+getContents :: IO Text
+getContents = hGetContents IO.stdin

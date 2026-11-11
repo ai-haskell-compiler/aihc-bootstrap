@@ -256,3 +256,26 @@ hPut (Handle descriptor) bytes = bytesHPut descriptor bytes
 
 putStr :: ByteString -> IO ()
 putStr = bytesHPut 1
+
+-- ---- Handles ----
+
+hPutStr :: Handle -> ByteString -> IO ()
+hPutStr = hPut
+
+-- Everything that is left to read.
+hGetContents :: Handle -> IO ByteString
+hGetContents (Handle descriptor) = fmap (maybe empty id) (handleRead descriptor False)
+
+-- The next line, without its newline.
+hGetLine :: Handle -> IO ByteString
+hGetLine (Handle descriptor) = handleRead descriptor True >>= \found -> case found of
+  Just bytes -> pure bytes
+  Nothing -> throwIO (IOError "end of file")
+
+getContents :: IO ByteString
+getContents = hGetContents (Handle 0)
+
+getLine :: IO ByteString
+getLine = hGetLine (Handle 0)
+
+foreign import prim "handleRead" handleRead :: Int -> Bool -> IO (Maybe ByteString)
