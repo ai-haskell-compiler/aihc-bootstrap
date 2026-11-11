@@ -571,6 +571,7 @@ static int starts_atom(const Parser *parser)
     return next_is_kind(parser, T_VARID)
         || next_is_kind(parser, T_CONID)
         || next_is_kind(parser, T_INT)
+        || next_is_kind(parser, T_FLOAT)
         || next_is_kind(parser, T_CHAR)
         || next_is_kind(parser, T_STRING)
         || next_is(parser, T_SPECIAL, "(")
@@ -914,6 +915,18 @@ static Expr *parse_atom(Parser *parser)
         expr->number = token->number;
         expr->big = token->big;
         expr->string = token->text;
+        parser->position++;
+    } else if (next_is_kind(parser, T_FLOAT)) {
+        /* 1.5 is fromRational (rationalLiteral "1.5"): the text of the
+           literal becomes an exact fraction, and that a number of the type
+           wanted (lib/Data/Ratio.hs, lib/GHC/Float.hs). */
+        Expr *text = new_expr(E_STRING, token);
+
+        text->string = token->text;
+        text->is_plain_string = 1;
+        expr = new_application(
+            new_prelude_name(token, "fromRational"),
+            new_application(new_prelude_name(token, "rationalLiteral"), text));
         parser->position++;
     } else if (next_is_kind(parser, T_CHAR)) {
         expr = new_expr(E_CHAR, token);

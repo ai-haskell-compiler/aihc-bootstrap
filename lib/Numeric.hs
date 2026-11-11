@@ -1,8 +1,9 @@
 module Numeric where
 
--- Numbers in other bases. Floating point numbers are not written yet.
+-- Numbers in other bases, and floating point numbers in other formats.
 
 import Data.Char (digitToInt, intToDigit, isDigit, isHexDigit, isOctDigit)
+import GHC.Float (FFFormat (..), floatToDigits, formatRealFloat, readFloat, showFloat)
 import Text.Read (ReadS)
 
 -- The digits of a number that is not negative, in the base, in front of
@@ -47,7 +48,13 @@ readDec = readInt 10 isDigit digitToInt
 readBin :: (Eq a, Num a) => ReadS a
 readBin = readInt 2 (\c -> c == '0' || c == '1') digitToInt
 
-showFFloat :: Maybe Int -> a -> ShowS
-showFFloat _ _ = interpreterTodo "Numeric.showFFloat: floating point numbers"
+-- With that many digits after the point, if a number is given:
+-- 1234.5 as 1234.5, as 1.2345e3, and as whichever of the two `show` takes.
+showFFloat :: RealFloat a => Maybe Int -> a -> ShowS
+showFFloat decimals x rest = formatRealFloat FFFixed decimals x ++ rest
 
-foreign import prim "interpreterTodo" interpreterTodo :: String -> a
+showEFloat :: RealFloat a => Maybe Int -> a -> ShowS
+showEFloat decimals x rest = formatRealFloat FFExponent decimals x ++ rest
+
+showGFloat :: RealFloat a => Maybe Int -> a -> ShowS
+showGFloat decimals x rest = formatRealFloat FFGeneric decimals x ++ rest

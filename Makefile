@@ -7,7 +7,7 @@ HEADERS = src/util.h src/lexer.h src/syntax.h src/eval.h
 
 build/aihc-bootstrap: $(SOURCES) $(HEADERS)
 	mkdir -p build
-	$(CC) $(CFLAGS) -o $@ $(SOURCES)
+	$(CC) $(CFLAGS) -o $@ $(SOURCES) -lm
 
 .PHONY: test survey clean
 

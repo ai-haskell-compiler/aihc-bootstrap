@@ -113,6 +113,8 @@ Value *integer_shift(Value *value, long count, int left);
 Value *integer_bitwise(char operation, Value *left, Value *right);
 unsigned long integer_low_bits(Value *value);
 char *integer_show(Value *value);
+void integer_top_bits(Value *value, unsigned long *top, long *shift,
+                      int *negative);
 
 /* numbers.c: the arithmetic builtins. */
 Value *builtin_numAdd(Value **arguments);
@@ -132,6 +134,15 @@ Value *builtin_numShiftL(Value **arguments);
 Value *builtin_numShiftR(Value **arguments);
 Value *builtin_numConvert(Value **arguments);
 Value *builtin_numShow(Value **arguments);
+Value *builtin_floatDivide(Value **arguments);
+Value *builtin_floatMantissa(Value **arguments);
+Value *builtin_floatExponent(Value **arguments);
+Value *builtin_floatEncode(Value **arguments);
+Value *builtin_floatClass(Value **arguments);
+Value *builtin_floatMath(Value **arguments);
+Value *builtin_floatPower(Value **arguments);
+Value *builtin_floatAtan2(Value **arguments);
+Value *builtin_floatConvert(Value **arguments);
 
 /* derive.c: the method of an instance that comes from a `deriving` clause,
    at the given type. NULL if the class's default definition is to be used. */

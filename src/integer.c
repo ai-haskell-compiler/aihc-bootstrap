@@ -536,3 +536,27 @@ Value *integer_from_literal(const char *text)
     }
     return value_of(result);
 }
+
+/* The number as sign * top * 2^shift, where `top` has its highest bits and
+   the bits below them are dropped. If any dropped bit was 1, the lowest
+   bit of `top` is set: then rounding `top` to a floating point number
+   rounds the whole number correctly. */
+void integer_top_bits(Value *value, unsigned long *top, long *shift,
+                      int *negative)
+{
+    Big a = big_of(value);
+    int length = bit_length(a);
+    int lost = 0;
+    Big high;
+
+    *negative = a.sign < 0;
+    *shift = length > 64 ? length - 64 : 0;
+    high = shift_magnitude_right(a, *shift, &lost);
+    *top = high.count > 0 ? high.limbs[0] : 0;
+    if (high.count > 1) {
+        *top |= (unsigned long)high.limbs[1] << LIMB_BITS;
+    }
+    if (lost) {
+        *top |= 1ul;
+    }
+}
