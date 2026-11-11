@@ -33,8 +33,8 @@ lists what is unsupported, most frequent first. Its first lines are the
 measure of progress:
 
 ```text
-modules loaded:        331
-definitions prepared:  10625 of 12140
+modules loaded:        335
+definitions prepared:  11056 of 12263
 ```
 
 The order of the library work is in [docs/PLAN.md](docs/PLAN.md).
@@ -97,7 +97,8 @@ runghc --ghc-arg=-package-env --ghc-arg=- tests/NAME.hs > tests/NAME.stdout
 ```
 
 A test of a package that GHC does not ship says at its top how its expected
-output was made. `tests/megaparsec.hs` runs against megaparsec's own source;
+output was made. `tests/megaparsec.hs` and `tests/prettyprinter.hs` run
+against the source of those packages;
 `tests/monoidmap.hs` and `tests/async.hs` were checked by hand.
 
 ## Licence
@@ -111,3 +112,4 @@ under the licence of its package:
   [megaparsec](licenses/megaparsec.txt).
 - `lib/Control/Monad/Combinators.hs`:
   [parser-combinators](licenses/parser-combinators.txt).
+- `lib/Prettyprinter/Internal.hs`: [prettyprinter](licenses/prettyprinter.txt).

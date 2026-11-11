@@ -1,0 +1,1257 @@
+== words
+|------------------------------------------------------------------------------| 80
+the quick brown fox jumps over the lazy dog
+|--------------------------------------| 40
+the quick brown fox jumps over the lazy dog
+|----------------------| 24
+the quick brown fox jumps over the lazy dog
+|----------| 12
+the quick brown fox jumps over the lazy dog
+|---| 5
+the quick brown fox jumps over the lazy dog
+(unbounded)
+the quick brown fox jumps over the lazy dog
+== vsep
+|------------------------------------------------------------------------------| 80
+one
+two
+three
+|--------------------------------------| 40
+one
+two
+three
+|----------------------| 24
+one
+two
+three
+|----------| 12
+one
+two
+three
+|---| 5
+one
+two
+three
+(unbounded)
+one
+two
+three
+== sep
+|------------------------------------------------------------------------------| 80
+one two three
+|--------------------------------------| 40
+one two three
+|----------------------| 24
+one two three
+|----------| 12
+one
+two
+three
+|---| 5
+one
+two
+three
+(unbounded)
+one two three
+== cat
+|------------------------------------------------------------------------------| 80
+onetwothree
+|--------------------------------------| 40
+onetwothree
+|----------------------| 24
+onetwothree
+|----------| 12
+onetwothree
+|---| 5
+one
+two
+three
+(unbounded)
+onetwothree
+== hcat, vcat
+|------------------------------------------------------------------------------| 80
+ab c
+d
+|--------------------------------------| 40
+ab c
+d
+|----------------------| 24
+ab c
+d
+|----------| 12
+ab c
+d
+|---| 5
+ab c
+d
+(unbounded)
+ab c
+d
+== fillSep
+|------------------------------------------------------------------------------| 80
+a paragraph of text that is filled so that every line is as long as it can be
+|--------------------------------------| 40
+a paragraph of text that is filled so
+that every line is as long as it can be
+|----------------------| 24
+a paragraph of text that
+is filled so that every
+line is as long as it
+can be
+|----------| 12
+a paragraph
+of text that
+is filled so
+that every
+line is as
+long as it
+can be
+|---| 5
+a
+paragraph
+of
+text
+that
+is
+filled
+so
+that
+every
+line
+is as
+long
+as it
+can
+be
+(unbounded)
+a paragraph of text that is filled so that every line is as long as it can be
+== fillCat
+|------------------------------------------------------------------------------| 80
+abcdefghijklmnopqrstuvwxyz
+|--------------------------------------| 40
+abcdefghijklmnopqrstuvwxyz
+|----------------------| 24
+abcdefghijklmnopqrstuvwx
+yz
+|----------| 12
+abcdefghijkl
+mnopqrstuvwx
+yz
+|---| 5
+abc
+def
+ghi
+jkl
+mno
+pqr
+stu
+vwxyz
+(unbounded)
+abcdefghijklmnopqrstuvwxyz
+== group of lines
+|------------------------------------------------------------------------------| 80
+a bc
+|--------------------------------------| 40
+a bc
+|----------------------| 24
+a bc
+|----------| 12
+a bc
+|---| 5
+a bc
+(unbounded)
+a bc
+== softline
+|------------------------------------------------------------------------------| 80
+left rightend
+|--------------------------------------| 40
+left rightend
+|----------------------| 24
+left rightend
+|----------| 12
+left right
+end
+|---| 5
+left
+right
+end
+(unbounded)
+left rightend
+== hardline in a group
+|------------------------------------------------------------------------------| 80
+a
+b
+c
+d
+|--------------------------------------| 40
+a
+b
+c
+d
+|----------------------| 24
+a
+b
+c
+d
+|----------| 12
+a
+b
+c
+d
+|---| 5
+a
+b
+c
+d
+(unbounded)
+a
+b
+c
+d
+== flatAlt
+|------------------------------------------------------------------------------| 80
+flat x
+|--------------------------------------| 40
+flat x
+|----------------------| 24
+flat x
+|----------| 12
+flat x
+|---| 5
+broken
+x
+(unbounded)
+flat x
+== text with newlines
+|------------------------------------------------------------------------------| 80
+first
+second
+
+fourth end
+|--------------------------------------| 40
+first
+second
+
+fourth end
+|----------------------| 24
+first
+second
+
+fourth end
+|----------| 12
+first
+second
+
+fourth end
+|---| 5
+first
+second
+
+fourth end
+(unbounded)
+first
+second
+
+fourth end
+== string with a newline
+|------------------------------------------------------------------------------| 80
+a b
+c
+|--------------------------------------| 40
+a b
+c
+|----------------------| 24
+a b
+c
+|----------| 12
+a b
+c
+|---| 5
+a b
+c
+(unbounded)
+a b
+c
+== empty pieces
+|------------------------------------------------------------------------------| 80
+a  b
+|--------------------------------------| 40
+a  b
+|----------------------| 24
+a  b
+|----------| 12
+a  b
+|---| 5
+a  b
+(unbounded)
+a  b
+== nest
+|------------------------------------------------------------------------------| 80
+begin
+    one
+    two
+end
+|--------------------------------------| 40
+begin
+    one
+    two
+end
+|----------------------| 24
+begin
+    one
+    two
+end
+|----------| 12
+begin
+    one
+    two
+end
+|---| 5
+begin
+    one
+    two
+end
+(unbounded)
+begin
+    one
+    two
+end
+== nest in a group
+|------------------------------------------------------------------------------| 80
+begin one two end
+|--------------------------------------| 40
+begin one two end
+|----------------------| 24
+begin one two end
+|----------| 12
+begin
+    one
+    two
+end
+|---| 5
+begin
+    one
+    two
+end
+(unbounded)
+begin one two end
+== nest by nothing and less
+|------------------------------------------------------------------------------| 80
+a
+b
+ c
+|--------------------------------------| 40
+a
+b
+ c
+|----------------------| 24
+a
+b
+ c
+|----------| 12
+a
+b
+ c
+|---| 5
+a
+b
+ c
+(unbounded)
+a
+b
+ c
+== align
+|------------------------------------------------------------------------------| 80
+prefix one
+       two
+       three
+|--------------------------------------| 40
+prefix one
+       two
+       three
+|----------------------| 24
+prefix one
+       two
+       three
+|----------| 12
+prefix one
+       two
+       three
+|---| 5
+prefix one
+       two
+       three
+(unbounded)
+prefix one
+       two
+       three
+== hang
+|------------------------------------------------------------------------------| 80
+prefix some words that hang under the first one of them
+|--------------------------------------| 40
+prefix some words that hang under the
+         first one of them
+|----------------------| 24
+prefix some words that
+         hang under the
+         first one of
+         them
+|----------| 12
+prefix some
+         words
+         that
+         hang
+         under
+         the
+         first
+         one
+         of
+         them
+|---| 5
+prefix some
+         words
+         that
+         hang
+         under
+         the
+         first
+         one
+         of
+         them
+(unbounded)
+prefix some words that hang under the first one of them
+== indent
+|------------------------------------------------------------------------------| 80
+prefix    one
+          two
+  three
+|--------------------------------------| 40
+prefix    one
+          two
+  three
+|----------------------| 24
+prefix    one
+          two
+  three
+|----------| 12
+prefix    one
+          two
+  three
+|---| 5
+prefix    one
+          two
+  three
+(unbounded)
+prefix    one
+          two
+  three
+== column and nesting
+|------------------------------------------------------------------------------| 80
+abcol 2
+     nesting 5
+|--------------------------------------| 40
+abcol 2
+     nesting 5
+|----------------------| 24
+abcol 2
+     nesting 5
+|----------| 12
+abcol 2
+     nesting 5
+|---| 5
+abcol 2
+     nesting 5
+(unbounded)
+abcol 2
+     nesting 5
+== width
+|------------------------------------------------------------------------------| 80
+four is 4 wide
+|--------------------------------------| 40
+four is 4 wide
+|----------------------| 24
+four is 4 wide
+|----------| 12
+four is 4 wide
+|---| 5
+four is 4 wide
+(unbounded)
+four is 4 wide
+== fill
+|------------------------------------------------------------------------------| 80
+id       :: a -> a
+const    :: a -> b -> a
+composition :: ..
+|--------------------------------------| 40
+id       :: a -> a
+const    :: a -> b -> a
+composition :: ..
+|----------------------| 24
+id       :: a -> a
+const    :: a -> b -> a
+composition :: ..
+|----------| 12
+id       :: a -> a
+const    :: a -> b -> a
+composition :: ..
+|---| 5
+id       :: a -> a
+const    :: a -> b -> a
+composition :: ..
+(unbounded)
+id       :: a -> a
+const    :: a -> b -> a
+composition :: ..
+== fillBreak
+|------------------------------------------------------------------------------| 80
+id       :: a -> a
+composition
+         :: ..
+|--------------------------------------| 40
+id       :: a -> a
+composition
+         :: ..
+|----------------------| 24
+id       :: a -> a
+composition
+         :: ..
+|----------| 12
+id       :: a -> a
+composition
+         :: ..
+|---| 5
+id       :: a -> a
+composition
+         :: ..
+(unbounded)
+id       :: a -> a
+composition
+         :: ..
+== pageWidth
+|------------------------------------------------------------------------------| 80
+width 80
+|--------------------------------------| 40
+width 40
+|----------------------| 24
+width 24
+|----------| 12
+width 12
+|---| 5
+width 5
+(unbounded)
+no width
+== list
+|------------------------------------------------------------------------------| 80
+[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+|--------------------------------------| 40
+[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+|----------------------| 24
+[ 1
+, 2
+, 3
+, 4
+, 5
+, 6
+, 7
+, 8
+, 9
+, 10
+, 11
+, 12 ]
+|----------| 12
+[ 1
+, 2
+, 3
+, 4
+, 5
+, 6
+, 7
+, 8
+, 9
+, 10
+, 11
+, 12 ]
+|---| 5
+[ 1
+, 2
+, 3
+, 4
+, 5
+, 6
+, 7
+, 8
+, 9
+, 10
+, 11
+, 12 ]
+(unbounded)
+[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+== list of lists
+|------------------------------------------------------------------------------| 80
+[ [1, 2, 3, 4, 5]
+, [100, 101, 102, 103, 104]
+, [10000, 10001, 10002, 10003, 10004] ]
+|--------------------------------------| 40
+[ [1, 2, 3, 4, 5]
+, [100, 101, 102, 103, 104]
+, [10000, 10001, 10002, 10003, 10004] ]
+|----------------------| 24
+[ [1, 2, 3, 4, 5]
+, [ 100
+, 101
+, 102
+, 103
+, 104 ]
+, [ 10000
+, 10001
+, 10002
+, 10003
+, 10004 ] ]
+|----------| 12
+[ [ 1
+, 2
+, 3
+, 4
+, 5 ]
+, [ 100
+, 101
+, 102
+, 103
+, 104 ]
+, [ 10000
+, 10001
+, 10002
+, 10003
+, 10004 ] ]
+|---| 5
+[ [ 1
+, 2
+, 3
+, 4
+, 5 ]
+, [ 100
+, 101
+, 102
+, 103
+, 104 ]
+, [ 10000
+, 10001
+, 10002
+, 10003
+, 10004 ] ]
+(unbounded)
+[[1, 2, 3, 4, 5], [100, 101, 102, 103, 104], [10000, 10001, 10002, 10003, 10004]]
+== tupled
+|------------------------------------------------------------------------------| 80
+(first, second, third)
+|--------------------------------------| 40
+(first, second, third)
+|----------------------| 24
+(first, second, third)
+|----------| 12
+( first
+, second
+, third )
+|---| 5
+( first
+, second
+, third )
+(unbounded)
+(first, second, third)
+== empty and single
+|------------------------------------------------------------------------------| 80
+[] () [x] (y)
+|--------------------------------------| 40
+[] () [x] (y)
+|----------------------| 24
+[] () [x] (y)
+|----------| 12
+[  ] (  ) [ x ] ( y )
+|---| 5
+[  ] (  ) [ x ] ( y )
+(unbounded)
+[] () [x] (y)
+== encloseSep
+|------------------------------------------------------------------------------| 80
+f<alpha; beta; gamma>
+|--------------------------------------| 40
+f<alpha; beta; gamma>
+|----------------------| 24
+f<alpha; beta; gamma>
+|----------| 12
+f<alpha
+; beta
+; gamma>
+|---| 5
+f<alpha
+; beta
+; gamma>
+(unbounded)
+f<alpha; beta; gamma>
+== punctuate
+|------------------------------------------------------------------------------| 80
+a, b, c  z
+|--------------------------------------| 40
+a, b, c  z
+|----------------------| 24
+a, b, c  z
+|----------| 12
+a, b, c  z
+|---| 5
+a, b, c  z
+(unbounded)
+a, b, c  z
+== symbols
+|------------------------------------------------------------------------------| 80
+(a) [b] {c} <d> 'e' "f" () [] {} <> ' " ; : , . / \ = | |
+|--------------------------------------| 40
+(a) [b] {c} <d> 'e' "f" () [] {} <> ' " ; : , . / \ = | |
+|----------------------| 24
+(a) [b] {c} <d> 'e' "f" () [] {} <> ' " ; : , . / \ = | |
+|----------| 12
+(a) [b] {c} <d> 'e' "f" () [] {} <> ' " ; : , . / \ = | |
+|---| 5
+(a) [b] {c} <d> 'e' "f" () [] {} <> ' " ; : , . / \ = | |
+(unbounded)
+(a) [b] {c} <d> 'e' "f" () [] {} <> ' " ; : , . / \ = | |
+== enclose, surround
+|------------------------------------------------------------------------------| 80
+<x> a.b
+|--------------------------------------| 40
+<x> a.b
+|----------------------| 24
+<x> a.b
+|----------| 12
+<x> a.b
+|---| 5
+<x> a.b
+(unbounded)
+<x> a.b
+== concatWith
+|------------------------------------------------------------------------------| 80
+usr/local/bin 
+|--------------------------------------| 40
+usr/local/bin 
+|----------------------| 24
+usr/local/bin 
+|----------| 12
+usr/local/bin 
+|---| 5
+usr/local/bin 
+(unbounded)
+usr/local/bin 
+== numbers
+|------------------------------------------------------------------------------| 80
+42 -7 9223372036854775807
+|--------------------------------------| 40
+42 -7 9223372036854775807
+|----------------------| 24
+42 -7 9223372036854775807
+|----------| 12
+42 -7 9223372036854775807
+|---| 5
+42 -7 9223372036854775807
+(unbounded)
+42 -7 9223372036854775807
+== others
+|------------------------------------------------------------------------------| 80
+True () c j  |
+|--------------------------------------| 40
+True () c j  |
+|----------------------| 24
+True () c j  |
+|----------| 12
+True () c j  |
+|---| 5
+True () c j  |
+(unbounded)
+True () c j  |
+== tuples
+|------------------------------------------------------------------------------| 80
+(1, two) (a, True, 3)
+|--------------------------------------| 40
+(1, two) (a, True, 3)
+|----------------------| 24
+(1, two) (a, True, 3)
+|----------| 12
+(1, two) ( a
+, True
+, 3 )
+|---| 5
+( 1
+, two ) ( a
+, True
+, 3 )
+(unbounded)
+(1, two) (a, True, 3)
+== lists of values
+|------------------------------------------------------------------------------| 80
+[1, 2, 3] [ab, cd] xy nonempty
+|--------------------------------------| 40
+[1, 2, 3] [ab, cd] xy nonempty
+|----------------------| 24
+[1, 2, 3] [ ab
+          , cd ] xy nonempty
+|----------| 12
+[ 1
+, 2
+, 3 ] [ ab
+      , cd ] xy nonempty
+|---| 5
+[ 1
+, 2
+, 3 ] [ ab
+      , cd ] xy nonempty
+(unbounded)
+[1, 2, 3] [ab, cd] xy nonempty
+== long list of values
+|------------------------------------------------------------------------------| 80
+[ 1000000
+, 1000001
+, 1000002
+, 1000003
+, 1000004
+, 1000005
+, 1000006
+, 1000007
+, 1000008
+, 1000009
+, 1000010
+, 1000011
+, 1000012 ]
+|--------------------------------------| 40
+[ 1000000
+, 1000001
+, 1000002
+, 1000003
+, 1000004
+, 1000005
+, 1000006
+, 1000007
+, 1000008
+, 1000009
+, 1000010
+, 1000011
+, 1000012 ]
+|----------------------| 24
+[ 1000000
+, 1000001
+, 1000002
+, 1000003
+, 1000004
+, 1000005
+, 1000006
+, 1000007
+, 1000008
+, 1000009
+, 1000010
+, 1000011
+, 1000012 ]
+|----------| 12
+[ 1000000
+, 1000001
+, 1000002
+, 1000003
+, 1000004
+, 1000005
+, 1000006
+, 1000007
+, 1000008
+, 1000009
+, 1000010
+, 1000011
+, 1000012 ]
+|---| 5
+[ 1000000
+, 1000001
+, 1000002
+, 1000003
+, 1000004
+, 1000005
+, 1000006
+, 1000007
+, 1000008
+, 1000009
+, 1000010
+, 1000011
+, 1000012 ]
+(unbounded)
+[1000000, 1000001, 1000002, 1000003, 1000004, 1000005, 1000006, 1000007, 1000008, 1000009, 1000010, 1000011, 1000012]
+== viaShow
+|------------------------------------------------------------------------------| 80
+Just [1,2] 'q' Red [Red, Green]
+|--------------------------------------| 40
+Just [1,2] 'q' Red [Red, Green]
+|----------------------| 24
+Just [1,2] 'q' Red [ Red
+                   , Green ]
+|----------| 12
+Just [1,2] 'q' Red [ Red
+                   , Green ]
+|---| 5
+Just [1,2] 'q' Red [ Red
+                   , Green ]
+(unbounded)
+Just [1,2] 'q' Red [Red, Green]
+== own instance
+|------------------------------------------------------------------------------| 80
+<n> [<a>, <b>] <m>
+|--------------------------------------| 40
+<n> [<a>, <b>] <m>
+|----------------------| 24
+<n> [<a>, <b>] <m>
+|----------| 12
+<n> [ <a>
+    , <b> ] <m>
+|---| 5
+<n> [ <a>
+    , <b> ] <m>
+(unbounded)
+<n> [<a>, <b>] <m>
+== plural
+|------------------------------------------------------------------------------| 80
+1 thing, 3 things
+|--------------------------------------| 40
+1 thing, 3 things
+|----------------------| 24
+1 thing, 3 things
+|----------| 12
+1 thing, 3 things
+|---| 5
+1 thing, 3 things
+(unbounded)
+1 thing, 3 things
+== annotate
+|------------------------------------------------------------------------------| 80
+a b c d e
+|--------------------------------------| 40
+a b c d e
+|----------------------| 24
+a b c d e
+|----------| 12
+a b c d e
+|---| 5
+a b
+c d e
+(unbounded)
+a b c d e
+== fmap
+|------------------------------------------------------------------------------| 80
+f g
+|--------------------------------------| 40
+f g
+|----------------------| 24
+f g
+|----------| 12
+f g
+|---| 5
+f g
+(unbounded)
+f g
+== expression
+|------------------------------------------------------------------------------| 80
+let compose = \f g x -> f (g x)
+    point = {x = 1, y = 20, label = show 300}
+in case lookup key table of
+  Nothing -> error message
+  Just value -> compose render (\v -> scale v 2) value
+|--------------------------------------| 40
+let compose = \f g x -> f (g x)
+    point = { x = 1
+    , y = 20
+    , label = show 300 }
+in case lookup key table of
+  Nothing -> error message
+  Just value -> compose
+                  render
+                  (\v -> scale v 2)
+                  value
+|----------------------| 24
+let compose = \f g x ->
+      f (g x)
+    point = { x = 1
+    , y = 20
+    , label = show 300 }
+in case lookup
+  key
+  table of
+  Nothing -> error
+               message
+  Just value -> compose
+                  render
+                  (\v ->
+                    scale
+                      v
+                      2)
+                  value
+|----------| 12
+let compose = \f g x ->
+      f
+        (g
+          x)
+    point = { x = 1
+    , y = 20
+    , label = show
+      300 }
+in case lookup
+  key
+  table of
+  Nothing -> error
+               message
+  Just value -> compose
+                  render
+                  (\v ->
+                    scale
+                      v
+                      2)
+                  value
+|---| 5
+let compose = \f g x ->
+      f
+        (g
+          x)
+    point = { x = 1
+    , y = 20
+    , label = show
+      300 }
+in case lookup
+  key
+  table of
+  Nothing -> error
+               message
+  Just value -> compose
+                  render
+                  (\v ->
+                    scale
+                      v
+                      2)
+                  value
+(unbounded)
+let compose = \f g x -> f (g x)
+    point = {x = 1, y = 20, label = show 300}
+in case lookup key table of
+  Nothing -> error message
+  Just value -> compose render (\v -> scale v 2) value
+== application
+|------------------------------------------------------------------------------| 80
+function argument (another 1 2 3) {field = 1, other = value}
+|--------------------------------------| 40
+function
+  argument
+  (another 1 2 3)
+  {field = 1, other = value}
+|----------------------| 24
+function
+  argument
+  (another 1 2 3)
+  { field = 1
+  , other = value }
+|----------| 12
+function
+  argument
+  (another
+    1
+    2
+    3)
+  { field = 1
+  , other = value }
+|---| 5
+function
+  argument
+  (another
+    1
+    2
+    3)
+  { field = 1
+  , other = value }
+(unbounded)
+function argument (another 1 2 3) {field = 1, other = value}
+== record
+|------------------------------------------------------------------------------| 80
+{alpha = 1, beta = 2, gamma = 3, delta = 4}
+|--------------------------------------| 40
+{ alpha = 1
+, beta = 2
+, gamma = 3
+, delta = 4 }
+|----------------------| 24
+{ alpha = 1
+, beta = 2
+, gamma = 3
+, delta = 4 }
+|----------| 12
+{ alpha = 1
+, beta = 2
+, gamma = 3
+, delta = 4 }
+|---| 5
+{ alpha = 1
+, beta = 2
+, gamma = 3
+, delta = 4 }
+(unbounded)
+{alpha = 1, beta = 2, gamma = 3, delta = 4}
+== function call, pretty and smart
+|--------------------------------------| 40
+fun[abcdef, ghijklm]([abcdef, ghijklm])
+~
+fun[abcdef, ghijklm]([abcdef, ghijklm])
+|----------------------| 24
+fun[ abcdef
+   , ghijklm ]([ abcdef
+               , ghijklm ])
+~
+fun[ abcdef
+   , ghijklm ]([ abcdef
+               , ghijklm ])
+|----------| 12
+fun[ abcdef
+   , ghijklm ]([ abcdef
+               , ghijklm ])
+~
+fun[ abcdef
+   , ghijklm ]([ abcdef
+               , ghijklm ])
+== nested calls, pretty and smart
+|--------------------------------------| 40
+outer(
+  inner(
+    first argument,
+    second argument)
+  )
+~
+outer(
+  inner(
+    first argument,
+    second argument)
+  )
+|----------------------| 24
+outer(
+  inner(
+    first argument,
+    second argument)
+  )
+~
+outer(
+  inner(
+    first argument,
+    second argument)
+  )
+|----------| 12
+outer(
+  inner(
+    first argument,
+    second argument)
+  )
+~
+outer(
+  inner(
+    first argument,
+    second argument)
+  )
+== expression, pretty and smart
+|--------------------------------------| 40
+let compose = \f g x -> f (g x)
+    point = { x = 1
+    , y = 20
+    , label = show 300 }
+in case lookup key table of
+  Nothing -> error message
+  Just value -> compose
+                  render
+                  (\v -> scale v 2)
+                  value
+~
+let compose = \f g x -> f (g x)
+    point = { x = 1
+    , y = 20
+    , label = show 300 }
+in case lookup key table of
+  Nothing -> error message
+  Just value -> compose
+                  render
+                  (\v -> scale v 2)
+                  value
+|----------------------| 24
+let compose = \f g x ->
+      f (g x)
+    point = { x = 1
+    , y = 20
+    , label = show 300 }
+in case lookup
+  key
+  table of
+  Nothing -> error
+               message
+  Just value -> compose
+                  render
+                  (\v ->
+                    scale
+                      v
+                      2)
+                  value
+~
+let compose = \f g x ->
+      f (g x)
+    point = { x = 1
+    , y = 20
+    , label = show 300 }
+in case lookup
+  key
+  table of
+  Nothing -> error
+               message
+  Just value -> compose
+                  render
+                  (\v ->
+                    scale
+                      v
+                      2)
+                  value
+|----------| 12
+let compose = \f g x ->
+      f
+        (g
+          x)
+    point = { x = 1
+    , y = 20
+    , label = show
+      300 }
+in case lookup
+  key
+  table of
+  Nothing -> error
+               message
+  Just value -> compose
+                  render
+                  (\v ->
+                    scale
+                      v
+                      2)
+                  value
+~
+let compose = \f g x ->
+      f
+        (g
+          x)
+    point = { x = 1
+    , y = 20
+    , label = show
+      300 }
+in case lookup
+  key
+  table of
+  Nothing -> error
+               message
+  Just value -> compose
+                  render
+                  (\v ->
+                    scale
+                      v
+                      2)
+                  value
+as text
+  indented
+"a few\nshort\nwords in a\nrow"
+shown [a, b]
+default width 80
