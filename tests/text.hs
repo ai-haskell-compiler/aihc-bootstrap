@@ -50,6 +50,10 @@ main = do
   print (T.lines "one\n\nthree\n", T.lines "no newline", T.lines "", T.words "  two  words\there ", T.unlines ["a", "b"], T.unwords ["a", "b"])
   print (T.split (== ',') "a,,b,", T.split (== ',') "", T.any (== '€') mixed, T.all (< '€') mixed, T.find (> 'x') mixed, T.elem 'q' mixed)
   print (T.takeEnd 2 mixed, T.dropEnd 2 mixed, T.strip "  é  ", T.cons 'é' "x", T.snoc "x" '€', T.replicate 2 "é", T.concatMap (\c -> T.pack [c, c]) "aé")
+  -- A long text: only its start is looked at.
+  let long = T.replicate 200 mixed
+  print (take 7 (T.unpack long), T.findIndex (== 'z') long, T.findIndex (== 'q') long, T.length long, T.foldl' (\n c -> if c == 'z' then n + 1 else n) (0 :: Int) long)
+  print (T.unpack (T.drop 995 long), T.foldr (:) [] (T.take 3 long), T.zip long "xy", T.filter (== '€') (T.take 12 long))
   where
     describe :: Text -> String
     describe text = case text of

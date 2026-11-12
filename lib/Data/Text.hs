@@ -105,8 +105,20 @@ scanBack test bytes offset =
 pack :: String -> Text
 pack string = Text (bytesFromString string)
 
+-- A short text becomes a list in one step. A long one becomes a list as
+-- far as the list is looked at: it may be the rest of a file of which
+-- only the start is wanted.
 unpack :: Text -> String
-unpack (Text bytes) = bytesToString bytes
+unpack (Text bytes) =
+  if B.length bytes <= 256 then bytesToString bytes else characters 0
+  where
+    end = B.length bytes
+    characters offset =
+      if offset >= end
+        then []
+        else
+          let c = charAt bytes offset
+           in c : characters (offset + width c)
 
 empty :: Text
 empty = Text B.empty
@@ -272,7 +284,15 @@ filter :: (Char -> Bool) -> Text -> Text
 filter keep text = pack (P.filter keep (unpack text))
 
 findIndex :: (Char -> Bool) -> Text -> Maybe Int
-findIndex wanted text = List.findIndex wanted (unpack text)
+findIndex wanted (Text bytes) = search 0 0
+  where
+    end = B.length bytes
+    search n offset =
+      if offset >= end
+        then Nothing
+        else
+          let c = charAt bytes offset
+           in if wanted c then Just n else search (n + 1) (offset + width c)
 
 find :: (Char -> Bool) -> Text -> Maybe Char
 find wanted (Text bytes) =
