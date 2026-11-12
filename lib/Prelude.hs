@@ -10,6 +10,7 @@ module Prelude
     userError,
     foldr1,
     foldl1,
+    scanl,
     Read (..),
     ReadS,
     reads,
@@ -24,7 +25,7 @@ where
 import Control.Exception (ErrorCall (..), throw)
 import Data.Char (isSpace)
 import System.IO (appendFile, hPutStr, hPutStrLn, readFile, stdout, writeFile)
-import Data.List (foldl1, foldr1)
+import Data.List (foldl1, foldr1, scanl)
 import Data.Ratio (rationalLiteral)
 import GHC.Float ()
 import System.IO.Error (IOError, ioError, userError)

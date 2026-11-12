@@ -3,7 +3,7 @@ module Data.Vector where
 -- A vector that is not changed: a part of an array.
 
 import Control.Monad.ST (ST (..))
-import Data.Vector.Generic.Mutable (MVector (..))
+import Data.Vector.Mutable (MVector (..))
 import Interpreter.Array (MutableArray)
 import qualified Interpreter.Array as A
 import Prelude hiding (length, null)

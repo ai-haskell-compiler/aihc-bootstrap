@@ -1,4 +1,4 @@
-module Data.Foldable (module Data.Foldable, module Prelude, forM_, foldM, msum) where
+module Data.Foldable (module Data.Foldable, module Prelude, forM_, foldM, msum, find) where
 
 import Control.Monad (foldM, forM_, msum)
 import Data.List (find)

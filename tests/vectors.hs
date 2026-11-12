@@ -13,6 +13,7 @@ import Data.Primitive.ByteArray (ByteArray (..), copyByteArray, moveByteArray, n
 import Data.Primitive.MutVar (modifyMutVar', newMutVar, readMutVar, writeMutVar)
 import Data.Primitive.PrimArray (newPrimArray, readPrimArray, setPrimArray, writePrimArray)
 import qualified Data.Vector as V
+import qualified Data.Vector.Generic.Mutable as MG
 import qualified Data.Vector.Mutable as MV
 import qualified Data.Vector.Unboxed as U
 import qualified Data.Vector.Unboxed.Mutable as MU
@@ -79,6 +80,17 @@ chunk = runST (do
   ByteArray frozen <- unsafeFreezeByteArray bytes
   pure (first : B.unpack (B.take 7 (fromShort (SBS frozen)))))
 
+-- A function for every kind of vector, as AIHC's object writer has.
+fill :: MG.MVector v Int => v s Int -> ST s Int
+fill vector = do
+  MG.set vector 7
+  MG.unsafeWrite vector 1 5
+  larger <- MG.unsafeGrow vector 2
+  MG.set (MG.unsafeSlice 3 2 larger) 9
+  a <- MG.unsafeRead larger 1
+  b <- MG.unsafeRead larger 4
+  pure (a * 100 + b * 10 + MG.length larger)
+
 main :: IO ()
 main = do
   print (squares 10)
@@ -89,3 +101,4 @@ main = do
   print chunk
   let vector = U.fromList "vector"
   print (U.length vector, U.unsafeIndex vector 2, U.length (U.empty :: U.Vector Int), V.toList (V.fromList [1, 2, 3 :: Int]))
+  print (runST (MU.new 3 >>= fill), runST (MV.replicate 3 0 >>= fill), runST (MG.replicate 3 0 >>= fill . MV.take 3))

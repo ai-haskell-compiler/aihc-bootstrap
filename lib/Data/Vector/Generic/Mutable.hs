@@ -1,104 +1,44 @@
 module Data.Vector.Generic.Mutable where
 
--- A vector that is changed in place: a part of an array. Upstream has a
--- class of such vectors (boxed, unboxed, ...) that work in any monad with
--- state; here there is one kind, in ST.
+-- Functions that work on every kind of vector that is changed in place.
+-- Upstream has a class of such vectors with an instance for each kind
+-- (boxed, unboxed, ...). Here there is one kind, so the class only says
+-- that a vector is that kind. It has the functions AIHC uses.
+--
+-- Upstream's class has the type of the elements as a second parameter:
+-- MVector v a. The interpreter has no classes with two parameters, and it
+-- does not look at the constraints of a signature, so a signature that
+-- says MVector v a is fine where this class is used.
 
-import Control.Monad.ST (ST (..))
-import Interpreter.Array (MutableArray)
-import qualified Interpreter.Array as A
-import Prelude hiding (drop, foldr, length, read, replicate, take)
-import qualified Prelude as P
+import Control.Monad.ST (ST)
+import qualified Data.Vector.Mutable as M
+import Prelude hiding (length, replicate)
 
--- Where the part starts, how long it is, and the array.
-data MVector s a = MVector Int Int (MutableArray a)
+class MVector v where
+  toVector :: v s a -> M.MVector s a
+  fromVector :: M.MVector s a -> v s a
 
-length :: MVector s a -> Int
-length (MVector _ count _) = count
+instance MVector M.MVector where
+  toVector vector = vector
+  fromVector vector = vector
 
-null :: MVector s a -> Bool
-null vector = length vector == 0
+length :: MVector v => v s a -> Int
+length vector = M.length (toVector vector)
 
-replicate :: Int -> a -> ST s (MVector s a)
-replicate count a = ST (fmap (MVector 0 (max 0 count)) (A.new (max 0 count) a))
+replicate :: MVector v => Int -> a -> ST s (v s a)
+replicate count a = fmap fromVector (M.replicate count a)
 
--- The elements are not to be read before they are written.
-new :: Int -> ST s (MVector s a)
-new count = replicate count A.uninitialised
+unsafeRead :: MVector v => v s a -> Int -> ST s a
+unsafeRead vector = M.unsafeRead (toVector vector)
 
-unsafeNew :: Int -> ST s (MVector s a)
-unsafeNew = new
+unsafeWrite :: MVector v => v s a -> Int -> a -> ST s ()
+unsafeWrite vector = M.unsafeWrite (toVector vector)
 
-read :: MVector s a -> Int -> ST s a
-read (MVector start count elements) i =
-  if i < 0 || i >= count
-    then error "Data.Vector.Mutable.read: the index is out of range"
-    else ST (A.read elements (start + i))
+set :: MVector v => v s a -> a -> ST s ()
+set vector = M.set (toVector vector)
 
-write :: MVector s a -> Int -> a -> ST s ()
-write (MVector start count elements) i a =
-  if i < 0 || i >= count
-    then error "Data.Vector.Mutable.write: the index is out of range"
-    else ST (A.write elements (start + i) a)
+unsafeSlice :: MVector v => Int -> Int -> v s a -> v s a
+unsafeSlice from count vector = fromVector (M.unsafeSlice from count (toVector vector))
 
-unsafeRead :: MVector s a -> Int -> ST s a
-unsafeRead = read
-
-unsafeWrite :: MVector s a -> Int -> a -> ST s ()
-unsafeWrite = write
-
-modify :: MVector s a -> (a -> a) -> Int -> ST s ()
-modify vector f i = read vector i >>= \a -> write vector i (f a)
-
-modify' :: MVector s a -> (a -> a) -> Int -> ST s ()
-modify' vector f i = read vector i >>= \a -> let b = f a in seq b (write vector i b)
-
-swap :: MVector s a -> Int -> Int -> ST s ()
-swap vector i j = read vector i >>= \a -> read vector j >>= \b -> write vector i b >> write vector j a
-
--- Every element becomes the value.
-set :: MVector s a -> a -> ST s ()
-set vector a = mapM_ (\i -> write vector i a) [0 .. length vector - 1]
-
--- A part of the vector. It shares the elements.
-slice :: Int -> Int -> MVector s a -> MVector s a
-slice from count (MVector start _ elements) = MVector (start + from) count elements
-
-unsafeSlice :: Int -> Int -> MVector s a -> MVector s a
-unsafeSlice = slice
-
-take :: Int -> MVector s a -> MVector s a
-take n vector = slice 0 (max 0 (min n (length vector))) vector
-
-drop :: Int -> MVector s a -> MVector s a
-drop n vector = let k = max 0 (min n (length vector)) in slice k (length vector - k) vector
-
--- A new vector with the same elements and room for that many more, which
--- are not to be read before they are written.
-grow :: MVector s a -> Int -> ST s (MVector s a)
-grow (MVector start count elements) more = ST (do
-  larger <- A.new (count + more) A.uninitialised
-  A.copy elements start larger 0 count
-  pure (MVector 0 (count + more) larger))
-
-unsafeGrow :: MVector s a -> Int -> ST s (MVector s a)
-unsafeGrow = grow
-
-clone :: MVector s a -> ST s (MVector s a)
-clone (MVector start count elements) = ST (fmap (MVector 0 count) (A.clone elements start count))
-
--- copy target source
-copy :: MVector s a -> MVector s a -> ST s ()
-copy (MVector to _ target) (MVector from count source) = ST (A.copy source from target to count)
-
-unsafeCopy :: MVector s a -> MVector s a -> ST s ()
-unsafeCopy = copy
-
-toList :: MVector s a -> ST s [a]
-toList vector = mapM (read vector) [0 .. length vector - 1]
-
-foldr :: (a -> b -> b) -> b -> MVector s a -> ST s b
-foldr f end vector = fmap (P.foldr f end) (toList vector)
-
-foldl' :: (b -> a -> b) -> b -> MVector s a -> ST s b
-foldl' f start vector = fmap (P.foldl' f start) (toList vector)
+unsafeGrow :: MVector v => v s a -> Int -> ST s (v s a)
+unsafeGrow vector more = fmap fromVector (M.unsafeGrow (toVector vector) more)

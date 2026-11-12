@@ -149,7 +149,9 @@ struct Binding {
 
     /* The rest is for a variable bound by let or where. */
     Expr **definition;   /* where its definition is kept, else NULL */
-    int is_function;     /* defined with parameters: f x = ... */
+    int is_function;     /* defined by name: f x = ... or f = ..., not by a
+                            pattern */
+    int has_parameters;  /* f x = ... */
     int signature_start; /* the tokens of its type signature, or 0 and 0 */
     int signature_end;
     Scheme *scheme;      /* its type if it is polymorphic, else NULL */
@@ -223,8 +225,9 @@ struct Expr {
     Constructor *constructor;  /* E_CONSTRUCTOR */
     long number;               /* E_INT, E_CHAR */
     int big;                   /* E_INT: see Token.big */
-    int is_plain_string;       /* E_STRING: a String even where string
-                                  literals are overloaded */
+    int is_plain_string;       /* E_STRING: a String. Otherwise the module
+                                  it is written in has OverloadedStrings,
+                                  and it has any string type */
     const char *string;        /* E_STRING */
     Expr *function;            /* E_APP; E_RECORD: the C or e before { */
     Expr *argument;            /* E_APP */
@@ -292,6 +295,8 @@ struct Pattern {
     Expr *literal;            /* P_LITERAL; P_VIEW: the function */
     Expr *equals;             /* P_LITERAL: == at the type of the literal;
                                  set by the type pass */
+    int type_start;           /* (pattern :: type): the tokens of the type; */
+    int type_end;             /* both 0 if there is none */
 };
 
 /* One alternative of a case expression:
@@ -323,6 +328,8 @@ struct Guard {
 struct Qualifier {
     Pattern *pattern; /* NULL for a condition */
     Expr *expr;
+    Expr *let;        /* in place of the two above: `let` bindings, an E_LET
+                         without a body, in scope in what follows */
     Qualifier *next;
 };
 

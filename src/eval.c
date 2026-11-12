@@ -264,6 +264,10 @@ static void note_expr(Expr *owner, const Expr *expr)
             for (guard = alternative->guards; guard != NULL; guard = guard->next) {
                 for (qualifier = guard->qualifiers; qualifier != NULL;
                      qualifier = qualifier->next) {
+                    if (qualifier->let != NULL) {
+                        note_expr(owner, qualifier->let);
+                        continue;
+                    }
                     if (qualifier->pattern != NULL) {
                         note_pattern(owner, qualifier->pattern);
                     }
@@ -489,8 +493,13 @@ static int guard_holds(const Guard *guard, Env **env)
 
     for (qualifier = guard->qualifiers; qualifier != NULL;
          qualifier = qualifier->next) {
-        Value *value = delay(qualifier->expr, *env);
+        Value *value;
 
+        if (qualifier->let != NULL) {
+            *env = bind_let(qualifier->let, *env);
+            continue;
+        }
+        value = delay(qualifier->expr, *env);
         if (qualifier->pattern != NULL) {
             if (!matches(qualifier->pattern, value, env)) {
                 return 0;

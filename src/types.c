@@ -649,17 +649,46 @@ static Scheme *instance_method_scheme(Global *global)
                                  &instance->head));
 }
 
+/* The type of a field of a constructor. A forall at its start is part of
+   the type, not of a signature: the field holds a value that works at
+   every type. */
+static Type *parse_field_type(Module *module, int start, int end,
+                              Binding ***variables, int *count)
+{
+    TypeParser parser;
+    Type *type;
+
+    if (!token_is(&module->tokens[start], T_VARID, "forall")) {
+        return parse_type(module, start, end, variables, count, 0);
+    }
+    parser.module = module;
+    parser.tokens = module->tokens;
+    parser.position = start;
+    parser.end = end;
+    parser.variables = variables;
+    parser.count = count;
+    parser.open = 0;
+    type = parse_forall(&parser);
+    if (parser.position != parser.end) {
+        TODO_AT(&parser.tokens[parser.position], "type syntax");
+    }
+    return type;
+}
+
 /* The scheme of a record field used as a function:
    forall parameters. T parameters -> field type */
 static Scheme *selector_scheme(const Global *global)
 {
     TypeCon *type_constructor = global->selector;
-    Binding **variables = type_constructor->parameters;
     int count = type_constructor->parameter_count;
+    /* A copy: reading the field's type may add to it. */
+    Binding **variables = xmalloc((size_t)count * sizeof(Binding *) + 1);
     Type *record = new_type_constructor(type_constructor);
     int i;
     int k;
 
+    memcpy(variables, type_constructor->parameters,
+           (size_t)count * sizeof(Binding *));
     for (i = 0; i < count; i++) {
         record = new_type_application(record, new_rigid(variables[i]));
     }
@@ -669,11 +698,27 @@ static Scheme *selector_scheme(const Global *global)
         for (k = 0; k < constructor->arity; k++) {
             if (constructor->field_names[k] != NULL
                 && strcmp(constructor->field_names[k], global->name) == 0) {
-                Type *field = parse_type(constructor->module,
-                                         constructor->field_starts[k],
-                                         constructor->field_ends[k],
-                                         &variables, &count, 0);
+                Type *field = parse_field_type(constructor->module,
+                                               constructor->field_starts[k],
+                                               constructor->field_ends[k],
+                                               &variables, &count);
 
+                if (field->kind == TY_FORALL) {
+                    /* field :: forall b. type. As with any function whose
+                       result has a forall, the variables are the
+                       selector's: forall parameters b. T parameters ->
+                       type. */
+                    Binding **all = xmalloc(
+                        (size_t)(count + field->variable_count)
+                        * sizeof(Binding *));
+
+                    memcpy(all, variables, (size_t)count * sizeof(Binding *));
+                    memcpy(all + count, field->variables,
+                           (size_t)field->variable_count * sizeof(Binding *));
+                    variables = all;
+                    count += field->variable_count;
+                    field = field->body;
+                }
                 return new_scheme(count, variables, function_type(record, field));
             }
         }
@@ -757,10 +802,10 @@ Scheme *constructor_scheme(Constructor *constructor)
                 /* A tuple: each field has the type of one parameter. */
                 field = new_rigid(variables[i]);
             } else {
-                field = parse_type(constructor->module,
-                                   constructor->field_starts[i],
-                                   constructor->field_ends[i],
-                                   &variables, &count, 0);
+                field = parse_field_type(constructor->module,
+                                         constructor->field_starts[i],
+                                         constructor->field_ends[i],
+                                         &variables, &count);
             }
 
             type = function_type(field, type);

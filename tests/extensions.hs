@@ -1,17 +1,20 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE ViewPatterns #-}
 
 module Main where
 
+import Control.Applicative ((<|>))
 import Data.Char (isDigit, toUpper)
 import Data.List (sortOn, stripPrefix)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
 import Data.Maybe (mapMaybe)
+import Text.Read (readMaybe)
 
 -- ---- LambdaCase ----
 
@@ -151,6 +154,50 @@ build = (NE.:|)
 firstOf :: NonEmpty a -> a
 firstOf (a NE.:| _) = a
 
+-- ---- More that can be in a guard and in a let ----
+
+-- A let in a guard with a function and with several definitions.
+verdict :: Int -> String
+verdict score
+  | let scale n = n * 2
+        limit = 50,
+    scale score > limit,
+    let rest = scale score - limit =
+      "over by " ++ show rest
+  | otherwise = "under"
+
+-- A pattern with a type, defined by guards. A ~ in front of a pattern.
+split :: Int -> (Int, [Int])
+split n =
+  let (mode, parts) :: (Int, [Int])
+        | n == 0 = (0, [])
+        | n < 10 = (1, [n])
+        | otherwise = (2, [n `div` 10, n `mod` 10])
+      ~(total, count) = (sum parts, length parts)
+   in (mode + total, parts ++ [count])
+
+-- A type in a pattern says which type is meant.
+readAll :: [String] -> [Int]
+readAll strings = [n | Just (n :: Int) <- map readMaybe strings]
+
+-- A do block ends at an operator in the column of its statements.
+orElse :: Maybe Int -> Maybe Int -> Maybe Int
+orElse a b =
+  do
+    x <- a
+    Just (x + 1)
+  <|> do
+    y <- b
+    Just (y * 2)
+  <|> Just 0
+
+-- A local function made without naming its parameter, used at two types.
+smallOnes :: ([(Int, Bool)], [(Int, Char)]) -> ([(Int, Bool)], [(Int, Char)])
+smallOnes (a, b) = (small a, small b)
+  where
+    limit = 2
+    small = filter (\(n, _) -> n < limit)
+
 main :: IO ()
 main = do
   print (map describe [Nothing, Just 0, Just (-3), Just 3])
@@ -175,3 +222,7 @@ main = do
   print (map pick [1, 8, 14, 15, 22])
   print (firstOf (build 9 []), NE.toList (0 NE.:| [1]))
   print (sortOn negate (mapMaybe (\case (n, True) -> Just n; _ -> Nothing) (map (,True) [3, 1, 2 :: Int])))
+  print (map verdict [10, 30], map split [0, 7, 42])
+  print (readAll ["1", "x", "30"])
+  print (orElse (Just 1) Nothing, orElse Nothing (Just 4), orElse Nothing Nothing)
+  print (smallOnes ([(1, True), (5, False)], [(3, 'a'), (0, 'b')]))

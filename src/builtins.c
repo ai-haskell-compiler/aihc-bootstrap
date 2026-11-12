@@ -345,7 +345,7 @@ static const Builtin builtins[] = {
     { "currentDirectory", 1, builtin_currentDirectory },
     { "realPath", 2, builtin_realPath },
     { "temporaryFile", 2, builtin_temporaryFile },
-    { "runProcess", 7, builtin_runProcess },
+    { "runProcess", 9, builtin_runProcess },
     { "sleepMicroseconds", 2, builtin_sleepMicroseconds },
     { "monotonicNanoseconds", 1, builtin_monotonicNanoseconds },
     { "deepForce", 2, builtin_deepForce },

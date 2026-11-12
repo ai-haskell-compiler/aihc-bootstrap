@@ -50,6 +50,23 @@ data Entry = EntryInternal String Int Bool
 pattern Entry :: String -> Int -> Entry
 pattern Entry {entryName, entrySize} <- EntryInternal entryName entrySize _
 
+-- A value kept packed, seen as a record with separate fields. Its fields
+-- can be used to build it, to change it and to take it apart.
+data Packed = Packed String Int deriving (Show)
+
+pattern Span :: String -> Int -> Int -> Packed
+pattern Span {spanFile, spanLine, spanColumn} <- Packed spanFile (unpack -> (spanLine, spanColumn))
+  where
+    Span file line column = Packed file (line * 1000 + column)
+
+unpack :: Int -> (Int, Int)
+unpack n = (n `div` 1000, n `mod` 1000)
+
+showSpan :: Packed -> String
+showSpan packed =
+  let Span {spanFile = file, spanLine = line, spanColumn} = packed
+   in file ++ ":" ++ show line ++ ":" ++ show spanColumn
+
 -- An operator, and one that looks into a string.
 pattern (:>) :: [a] -> a -> [a]
 pattern xs :> x <- (unsnoc -> Just (xs, x))
@@ -118,3 +135,6 @@ main = do
   print (map entrySize [entry, EntryInternal "x" 0 False])
   print [n | Lookup n <- [Map.fromList [("key", 1)], Map.empty, Map.fromList [("key", 3), ("k", 0)]]]
   print (case [1, 2, 3 :: Int] of (_ :> a) :> b -> (a, b); _ -> (0, 0))
+  let start = Span {spanFile = "a.hs", spanLine = 3, spanColumn = 7}
+      next = start {spanLine = spanLine start + 1, spanColumn = 1}
+  print (start, next, spanColumn next, showSpan next)

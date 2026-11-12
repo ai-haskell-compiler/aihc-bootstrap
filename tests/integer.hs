@@ -1,6 +1,6 @@
 module Main where
 
-import Data.Bits (complement, shiftL, shiftR, testBit, xor, (.&.), (.|.))
+import Data.Bits (complement, shiftL, shiftR, testBit, xor, (.&.), (.|.), popCount)
 import Data.Int (Int32, Int64, Int8)
 import Data.Word (Word16, Word64, Word8)
 
@@ -58,3 +58,4 @@ main = do
   print (read "123456789012345678901234567890" :: Integer, read "-18446744073709551616" :: Integer, read "0xFFFFFFFFFFFFFFFFFF" :: Integer)
   print (length (show (factorial 200)), sum (map (\c -> fromEnum c - 48) (show (factorial 200))), factorial 200 `mod` 1000000007)
   print (showsPrec 7 (negate (2 ^ (80 :: Int)) :: Integer) "", [2 ^ (64 :: Int) .. 2 ^ (64 :: Int) + 3 :: Integer])
+  print (popCount (0 :: Integer), popCount (2 ^ 100 - 1 :: Integer), popCount (2 ^ 70 + 5 :: Integer), popCount (-7 :: Integer))

@@ -79,6 +79,7 @@ main = do
   print =<< readProcessWithExitCode "sh" ["-c", "kill -9 $$"] ""
   print =<< readCreateProcessWithExitCode ((proc "ls" []) {cwd = Just (root </> "a")}) ""
   print =<< readCreateProcessWithExitCode (shell "echo $((6 * 7)) && false") ""
+  print =<< readCreateProcessWithExitCode ((shell "echo $GREETING $HOME.") {env = Just [("GREETING", "hello"), ("PATH", "/bin:/usr/bin")]}) ""
   putStr =<< readProcess "sh" ["-c", "cat; echo done"] "given\n"
   print =<< failsWith (readProcess "sh" ["-c", "exit 1"] "")
   print =<< failsWith (readProcessWithExitCode "no-such-program-anywhere" [] "")
