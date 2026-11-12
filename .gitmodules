@@ -1,0 +1,12 @@
+[submodule "vendor/aihc-parser"]
+	path = vendor/aihc-parser
+	url = https://github.com/ai-haskell-compiler/aihc-parser.git
+[submodule "vendor/aihc-cpp"]
+	path = vendor/aihc-cpp
+	url = https://github.com/ai-haskell-compiler/aihc-cpp.git
+[submodule "vendor/aihc-cabal-syntax"]
+	path = vendor/aihc-cabal-syntax
+	url = https://github.com/ai-haskell-compiler/aihc-cabal-syntax.git
+[submodule "vendor/aihc"]
+	path = vendor/aihc
+	url = https://github.com/ai-haskell-compiler/aihc.git

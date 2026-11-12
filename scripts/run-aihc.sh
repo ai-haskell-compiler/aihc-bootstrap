@@ -5,14 +5,22 @@
 # The source directories are those of the aihc library and its first-party
 # dependencies, with the hackage and pretty-ui flags off. A directory after
 # +OverloadedStrings has that extension on, as the package's .cabal file
-# says. AIHC is expected beside this repository in aihc, with aihc-parser, aihc-cpp and
-# aihc-cabal-syntax beside it; set AIHC to use another checkout.
+# says. AIHC and its three libraries are the submodules in vendor/, pinned
+# to one commit each (git submodule update --init); set AIHC to use another
+# checkout, with aihc-parser, aihc-cpp and aihc-cabal-syntax beside it.
+#
+# AIHC looks for its core libraries in core-libs/ of the directory it is
+# started in, and rewrites that directory's aihc.lock if there is one. So
+# it is started in a directory of its own, build/aihc-work, where core-libs
+# is a link to AIHC's. A file on the command line has to be given with its
+# whole path.
 set -eu
 
-# The script can be run from any directory: AIHC looks for its core
-# libraries from the directory it is started in.
 here=$(cd "$(dirname "$0")/.." && pwd)
-aihc=$(cd "${AIHC:-$here/../aihc}" && pwd)
+aihc=$(cd "${AIHC:-$here/vendor/aihc}" && pwd)
+mkdir -p "$here/build/aihc-work"
+ln -sfn "$aihc/core-libs" "$here/build/aihc-work/core-libs"
+cd "$here/build/aihc-work"
 directories="
 $here/lib
 $here/glue
