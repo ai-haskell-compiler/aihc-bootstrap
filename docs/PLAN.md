@@ -278,6 +278,23 @@ interpreter is about 130 times slower. Then come `aihc-prim` (27 modules)
 and `aihc-base` (280 modules), which AIHC built with GHC compiles in 4
 and 5 seconds.
 
+**They do not get through the lexer.** After seven minutes the interpreter
+has allocated 346 GB, with 58 MB in use, and every collection finds it at
+the same place:
+
+```text
+gc 1354: 58 MB in use, 256 MB handed out since the last
+  at .../Aihc/Parser/Lex/Types.hs:442 lib/Prelude.hs:403 .../Aihc/Parser/Lex.hs:139
+```
+
+That is `skipWhitespace`, which runs before every token. It asks for the
+length of the rest of the input in bytes (`lengthWord8`) and reads
+characters at byte offsets (`iter`). Both are one step for a `Text` that
+is bytes. Here a `Text` is a list of characters, so both walk the list:
+lexing a file takes time with the square of its length. The two packages
+are 2 MB of source. **`Text` as UTF-8 bytes is the next step**; see
+"Memory" below for what it takes.
+
 ### Comparing a build with the real one
 
 Build the same program with both into two stores, and `cmp` the files.
@@ -321,7 +338,9 @@ allocated keeps that alive. It has an allocator of its own, in cells of a
 few sizes, so that a word can be checked against what exists.
 
 `make test-gc` runs the tests with a collection after every 100 kB.
-`AIHC_GC_REPORT=1` prints a line for every collection.
+`AIHC_GC_REPORT=1` prints a line for every collection, and the lines of
+the program that the machine is at. A collection comes at no particular
+place, so many of them show where a program spends its time.
 
 Three things kept memory in use that a compiled program would have let go.
 All three had to be fixed before AIHC ran in constant memory, and
@@ -340,14 +359,26 @@ All three had to be fixed before AIHC ran in constant memory, and
 
 What is left, in the order it is likely to matter:
 
-1. **Types made while the program runs are never freed.** A type is made
+1. **`Text` as UTF-8 bytes**, as upstream. It is what stops AIHC now (see
+   "Running AIHC"), and as a list of characters it is also the largest
+   user of memory while AIHC lexes. A `Text` becomes a `ByteString`, which
+   is already a part of a block of bytes that can be cut in one step.
+   What has to be one step, or one pass, on that: `lengthWord8`, `iter`,
+   `null`, `uncons` and the pattern `:<`, `take`, `drop`, `splitAt`,
+   `takeWhile`, `dropWhile`, `span`, `break`, `isPrefixOf`, `stripPrefix`,
+   and comparing. Decoding a character at an offset, counting characters
+   and finding the offset of the nth character are best in C. Everything
+   that makes a new text anyway (`replace`, `splitOn`, `toUpper`,
+   `intercalate`, ...) can stay as it is, on the characters. Only
+   `lib/Data/Text.hs`, `Data/Text/Unsafe.hs`, `Data/Text/IO.hs` and
+   `Data/Text/Encoding.hs` look inside a `Text`.
+2. **Types made while the program runs are never freed.** A type is made
    whenever a type with variables is passed to a function. This is most of
-   the difference between 59 MB in use and 1 GB for the process.
-2. **Smaller values.** A `Value` is 120 bytes whatever it is. One struct
+   the difference between the memory in use and the memory of the process
+   (58 MB and 1.3 GB while AIHC lexes).
+3. **Smaller values.** A `Value` is 128 bytes whatever it is, and a thunk
+   also takes a cell of 32 bytes for each variable it keeps. One struct
    per kind, or an allocation that is only as long as the kind needs.
-3. **`Text` as UTF-8 bytes in C**, as upstream. As a list of characters it
-   is the largest user of memory while AIHC lexes, and `lengthWord8` of
-   the remaining input is linear.
 
 The megaparsec port takes more than linear time: 4,000 words parse in 2.5
 seconds and 16,000 in 11 (measured before the three fixes under "Where

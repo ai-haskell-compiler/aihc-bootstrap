@@ -52,6 +52,10 @@ static const size_t class_sizes[] = {
 
 static Block **chunks = NULL; /* sorted by base */
 static const char **chunk_bases = NULL; /* the base of each, in the same order */
+/* No chunk there has ever been starts below the one or ends above the
+   other. */
+static const char *lowest_base = NULL;
+static const char *highest_end = NULL;
 static int chunk_count = 0;
 static int chunk_capacity = 0;
 
@@ -119,6 +123,12 @@ static Block *add_chunk(size_t cell_size, size_t cell_count)
     }
     chunk->cell_size = cell_size;
     chunk->cell_count = cell_count;
+    if (lowest_base == NULL || chunk->base < lowest_base) {
+        lowest_base = chunk->base;
+    }
+    if (chunk->base + cell_size * cell_count > highest_end) {
+        highest_end = chunk->base + cell_size * cell_count;
+    }
     if (chunk_count == chunk_capacity) {
         chunk_capacity = chunk_capacity * 2 + 256;
         chunks = realloc(chunks, (size_t)chunk_capacity * sizeof(Block *));
@@ -155,9 +165,15 @@ static size_t pending_capacity = 0;
 
 void gc_mark(const void *pointer)
 {
-    Block *chunk = find_chunk(pointer);
+    Block *chunk;
     size_t index;
 
+    /* Most words are not addresses at all: zero, a small number. */
+    if ((const char *)pointer < lowest_base
+        || (const char *)pointer >= highest_end) {
+        return;
+    }
+    chunk = find_chunk(pointer);
     if (chunk == NULL) {
         return;
     }
@@ -295,6 +311,9 @@ void gc_collect(void)
         fprintf(stderr, "gc %lu: %lu MB in use, %lu MB handed out since the last\n",
                 collections, (unsigned long)(live / (1024 * 1024)),
                 (unsigned long)(allocated / (1024 * 1024)));
+        /* A collection comes at no particular place, so the lines of many
+           of them show where the program spends its time. */
+        print_position();
     }
     allocated = 0;
     /* Collect again when as much has been handed out as is in use now, so

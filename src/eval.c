@@ -722,6 +722,27 @@ void mark_roots(void)
     }
 }
 
+/* Prints the lines of the program that the innermost frames of the machine
+   are waiting at, the innermost first, each file once. */
+void print_position(void)
+{
+    const char *last = NULL;
+    int shown = 0;
+    int i;
+
+    fprintf(stderr, "  at");
+    for (i = stack_size - 1; i >= 0 && shown < 8; i--) {
+        const Expr *expr = stack[i].expr;
+
+        if (expr != NULL && expr->token != NULL && expr->token->file != last) {
+            last = expr->token->file;
+            fprintf(stderr, " %s:%d", last, expr->token->line);
+            shown++;
+        }
+    }
+    fprintf(stderr, "\n");
+}
+
 /* ---- Exceptions ---- */
 
 Value *catch_exception(Value *function, Value *argument, Value **exception)
