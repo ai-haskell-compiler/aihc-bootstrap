@@ -24,6 +24,11 @@ main = do
   print (Map.insertWith (++) 1 "new-" m, Map.insertWith (++) 5 "new-" m, Map.adjust (++ "!") 2 m)
   print (Map.fromListWith (++) [(1, "a"), (2, "b"), (1, "c")], Map.fromListWithKey (\k a b -> show k ++ a ++ b) [(1, "a"), (1, "b")])
   print (Map.union m (Map.fromList [(3, "THREE"), (4, "four")]), Map.unionWith (++) m (Map.fromList [(3, "+"), (4, "four")]))
+  -- The left map wins, and its value comes first, whichever map is larger.
+  let small = Map.fromList [(2, "s2"), (50, "s50")]
+      large = Map.fromList [(k, "l" ++ show k) | k <- [1 .. 6 :: Int]]
+  print (Map.union small large, Map.union large small)
+  print (Map.unionWith (++) small large, Map.unionWith (++) large small, Map.unions [small, large, small])
   print (Map.unions [m, Map.singleton 9 "nine", Map.singleton 1 "ignored"], Map.unionsWith (++) [m, Map.singleton 1 "+"])
   print (Map.difference m (Map.fromList [(1, ()), (7, ())]), Map.intersection m (Map.fromList [(1, ()), (7, ())]))
   print (Map.intersectionWith (,) m (Map.fromList [(2, 'x'), (3, 'y'), (8, 'z')]))

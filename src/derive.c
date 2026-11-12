@@ -50,8 +50,8 @@ static Type *field_type(Type *type, Constructor *constructor, int index)
         arguments[i] = type->argument;
         type = prune(type->function);
     }
-    fields = substitute(scheme->type, head->parameter_count, scheme->variables,
-                        arguments);
+    fields = temporary_substitute(scheme->type, head->parameter_count,
+                                  scheme->variables, arguments);
     for (i = 0; i <= index; i++) {
         if (!split_function_type(fields, &field, &rest)) {
             die("constructor %s has no field %d", constructor->name, index);
@@ -484,6 +484,127 @@ static Value *data_method(const char *name, Type *type)
     return apply(global_value(global), make_type(type));
 }
 
+/* ---- Functor, Foldable and Traversable ----
+
+   These are instances of T a, not of T a b: the last parameter of the type
+   is what the instance is about. The derived fmap, foldr and traverse are
+   written in lib/Interpreter/Derive.hs, with the two builtins here. */
+
+/* The constructors of Shape in lib/Interpreter/Derive.hs. */
+enum { SHAPE_SKIP, SHAPE_ELEMENT, SHAPE_INSIDE };
+
+static int mentions(Type *type, const Binding *variable)
+{
+    type = prune(type);
+    if (type->kind == TY_APP) {
+        return mentions(type->function, variable)
+            || mentions(type->argument, variable);
+    }
+    return type->kind == TY_RIGID && type->variable == variable;
+}
+
+/* Where the values of the type parameter `element` are in a field with the
+   declared type `field`. `arguments` are the types that the other
+   parameters of `head` stand for. */
+static Value *field_shape(Type *field, const TypeCon *head, Type **arguments)
+{
+    const Binding *element = head->parameters[head->parameter_count - 1];
+    Value *shape;
+
+    field = prune(field);
+    if (!mentions(field, element)) {
+        return make_con(SHAPE_SKIP, 0);
+    }
+    if (field->kind == TY_RIGID) {
+        return make_con(SHAPE_ELEMENT, 0);
+    }
+    if (mentions(field->function, element)) {
+        TODO("derived Functor, Foldable or Traversable where the last type "
+             "parameter is not in the last argument of a field's type");
+    }
+    /* G x: the traverse of G, and the shape of x. */
+    shape = make_con(SHAPE_INSIDE, 2);
+    shape->fields[0] = find_method(
+        prelude_method("traverse"),
+        temporary_substitute(field->function, head->parameter_count - 1,
+                             head->parameters, arguments));
+    shape->fields[1] = field_shape(field->argument, head, arguments);
+    return shape;
+}
+
+/* functorFields :: t a -> [(Shape, Any)]
+   The fields of the value, in order, each with its shape. */
+Value *builtin_functorFields(Value **arguments)
+{
+    Type *type = prune(force(arguments[0])->type);
+    TypeCon *head = type_head(type);
+    int count = head->parameter_count - 1;
+    Type **types = gc_alloc((size_t)count * sizeof(Type *) + 1);
+    Value *value = arguments[2];
+    Value **fields;
+    Constructor *constructor;
+    Type *declared;
+    Value *list = make_con(TAG_NIL, 0);
+    Value **last = &list;
+    int i;
+
+    /* t is T x y: what the parameters of T but the last one stand for. */
+    for (i = count - 1; i >= 0; i--) {
+        types[i] = type->argument;
+        type = prune(type->function);
+    }
+    /* The whole type is only needed to find the constructor. */
+    constructor = constructor_of(force(arguments[0])->type, &value, &fields);
+    declared = constructor_scheme(constructor)->type;
+    for (i = 0; i < constructor->arity; i++) {
+        Value *pair = make_con(0, 2);
+        Value *cell = make_con(TAG_CONS, 2);
+        Type *field;
+
+        split_function_type(declared, &field, &declared);
+        pair->fields[0] = field_shape(field, head, types);
+        pair->fields[1] = fields[i];
+        cell->fields[0] = pair;
+        cell->fields[1] = make_con(TAG_NIL, 0);
+        *last = cell;
+        last = &cell->fields[1];
+    }
+    return list;
+}
+
+/* functorRebuild :: t a -> [Any] -> t b
+   The value with its fields replaced by those of the list. */
+Value *builtin_functorRebuild(Value **arguments)
+{
+    Value *value = arguments[3];
+    Value *list = force(arguments[4]);
+    Value **fields;
+    Constructor *constructor =
+        constructor_of(force(arguments[0])->type, &value, &fields);
+    Value *result;
+    int i;
+
+    if (constructor->is_newtype) {
+        return force(list->fields[0]);
+    }
+    result = make_con(value->tag, constructor->arity);
+    for (i = 0; i < constructor->arity; i++) {
+        result->fields[i] = list->fields[0];
+        list = force(list->fields[1]);
+    }
+    return result;
+}
+
+/* The function of lib/Interpreter/Derive.hs that is the derived method, at
+   the type. */
+static Value *functor_method(const char *name, Type *type)
+{
+    Global *global =
+        library_entity("Interpreter.Derive", NS_VARIABLE, name)->global;
+
+    return apply(global_value(global), make_type(type));
+}
+
 /* ---- Choosing the method ---- */
 
 static const Builtin eq_builtin = { "derivedEq", 3, derived_eq };
@@ -595,10 +716,21 @@ Value *derived_method(const Instance *instance, Global *method, Type *type)
         }
         TODO("derived method of Data other than gmapT, gmapQ and gmapM");
     }
-    if (strcmp(class_name, "Read") == 0 || strcmp(class_name, "Functor") == 0
-        || strcmp(class_name, "Foldable") == 0
-        || strcmp(class_name, "Traversable") == 0) {
-        TODO("derived instance of Read, Functor, Foldable or Traversable");
+    /* The other methods of these three are the class's defaults. */
+    if (strcmp(class_name, "Functor") == 0) {
+        return strcmp(name, "fmap") == 0
+            ? functor_method("derivedFmap", type) : NULL;
+    }
+    if (strcmp(class_name, "Foldable") == 0) {
+        return strcmp(name, "foldr") == 0
+            ? functor_method("derivedFoldr", type) : NULL;
+    }
+    if (strcmp(class_name, "Traversable") == 0) {
+        return strcmp(name, "traverse") == 0
+            ? functor_method("derivedTraverse", type) : NULL;
+    }
+    if (strcmp(class_name, "Read") == 0) {
+        TODO("derived instance of Read");
     }
     return NULL;
 }

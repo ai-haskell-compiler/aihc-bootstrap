@@ -77,6 +77,11 @@ static void prepare_family_instance(FamilyInstance *instance)
                                &instance->variable_count, 1);
 }
 
+/* Whether the types that are made are for the running program, and so
+   the collector's: see new_type in types.c. Finding the instance for a
+   method call is; inference is not. */
+static int at_run_time = 0;
+
 Type *reduce_family(Type *type)
 {
     FamilyInstance *instance;
@@ -106,9 +111,13 @@ Type *reduce_family(Type *type)
             && match_type(instance->lhs->argument, type->argument,
                           instance->variable_count, instance->variables,
                           bound)) {
-            return reduce_family(substitute(instance->rhs,
-                                            instance->variable_count,
-                                            instance->variables, bound));
+            return reduce_family(
+                at_run_time
+                    ? temporary_substitute(instance->rhs,
+                                           instance->variable_count,
+                                           instance->variables, bound)
+                    : substitute(instance->rhs, instance->variable_count,
+                                 instance->variables, bound));
         }
     }
     return type;
@@ -116,19 +125,38 @@ Type *reduce_family(Type *type)
 
 /* ---- Classes ---- */
 
+/* The type constructor that the type is an application of, or NULL. */
+static TypeCon *head_constructor(Type *type)
+{
+    type = prune(type);
+    while (type->kind == TY_APP) {
+        type = prune(type->function);
+    }
+    return type->kind == TY_CON ? type->constructor : NULL;
+}
+
+/* Whether every type that the first instance is for, the second one is
+   for too: Cbor [Char] and Cbor [a], or anything and C a. */
+static int is_more_specific(const Instance *instance, const Instance *other)
+{
+    return match_type(other->head, instance->head, other->variable_count,
+                      other->variables, new_bound(other->variable_count));
+}
+
 /* Adds the instances that have come since the last time to the class's
-   own list, in front of it and in their order. */
+   own list. An instance comes before every instance that is for all its
+   types and more, so that the first one that matches a type is the most
+   specific one, which is the one Haskell means. */
 static void collect_instances(Class *class)
 {
     Instance *oldest = class->seen;
-    Instance *older = class->instances;
-    Instance **place = &class->instances;
     Instance *instance;
 
     class->seen = all_instances;
     for (instance = all_instances; instance != oldest; instance = instance->next) {
         const Token *token = &instance->module->tokens[instance->class_token];
         const char *qualifier;
+        Instance **place = &class->instances;
 
         /* Compare the names first, so that instances of other classes are
            never looked at more closely. */
@@ -139,19 +167,26 @@ static void collect_instances(Class *class)
         if (instance->class != class) {
             continue;
         }
-        instance->next_of_class = older;
+        instance->head_constructor = head_constructor(instance->head);
+        while (*place != NULL && !is_more_specific(instance, *place)) {
+            place = &(*place)->next_of_class;
+        }
+        instance->next_of_class = *place;
         *place = instance;
-        place = &instance->next_of_class;
     }
 }
 
 /* The first instance of the class that the type matches, or NULL.
-   Overlapping instances are not handled: the first match wins. One case
-   is: an instance for every type (instance C a) is only used if no other
-   instance matches. */
+
+   This is done for every call of a method, and a class such as Ord has
+   hundreds of instances. So an instance for another type constructor is
+   passed over without looking closer, and an instance for one type, such
+   as Ord Int, moves to the front of the list when it is used: it cannot
+   be for the types of another instance. */
 static Instance *find_instance(Class *class, Type *type, Type ***bound)
 {
-    Instance *for_every_type = NULL;
+    TypeCon *wanted = head_constructor(type);
+    Instance **place;
     Instance *instance;
 
     /* Preparing an instance can load a module, with instances of its
@@ -159,23 +194,25 @@ static Instance *find_instance(Class *class, Type *type, Type ***bound)
     while (class->seen != all_instances) {
         collect_instances(class);
     }
-    for (instance = class->instances; instance != NULL;
-         instance = instance->next_of_class) {
-        if (prune(instance->head)->kind == TY_RIGID) {
-            for_every_type = instance;
+    for (place = &class->instances; *place != NULL;
+         place = &(*place)->next_of_class) {
+        instance = *place;
+        if (wanted != NULL && instance->head_constructor != NULL
+            && instance->head_constructor != wanted) {
             continue;
         }
         *bound = new_bound(instance->variable_count);
         if (match_type(instance->head, type, instance->variable_count,
                        instance->variables, *bound)) {
+            if (instance->variable_count == 0) {
+                *place = instance->next_of_class;
+                instance->next_of_class = class->instances;
+                class->instances = instance;
+            }
             return instance;
         }
     }
-    if (for_every_type != NULL) {
-        *bound = new_bound(for_every_type->variable_count);
-        (*bound)[0] = type;
-    }
-    return for_every_type;
+    return NULL;
 }
 
 Value *find_method(Global *method, Type *type)
@@ -186,14 +223,18 @@ Value *find_method(Global *method, Type *type)
     Value *value;
     int i;
 
+    at_run_time = 1;
     type = reduce_family(type);
     instance = find_instance(method->class, type, &bound);
+    at_run_time = 0;
     if (instance == NULL) {
         /* The instance may be in a module that nothing has needed so far. */
         while (load_all_imports()) {
         }
+        at_run_time = 1;
         type = reduce_family(type);
         instance = find_instance(method->class, type, &bound);
+        at_run_time = 0;
     }
     if (instance == NULL) {
         fflush(stdout);

@@ -1,0 +1,11 @@
+(Chain 10 [('+',20),('*',30)],6,[1,2,3],3)
+(Just (Chain 1 [('+',2),('*',3)]),Nothing)
+(Node (Node Leaf "1" Leaf) "2" (Node Leaf "3" Leaf),[1,2,3],3,True,True)
+[Node Leaf 1 (Node Leaf 2 Leaf),Node Leaf 1 (Node Leaf 12 Leaf),Node Leaf 11 (Node Leaf 2 Leaf),Node Leaf 11 (Node Leaf 12 Leaf)]
+[Circle 'x',Labelled "l" False,Both (Just True) (Right False),Both Nothing (Left 'n'),Many [[False],[],[True,False]]]
+[[],[1],[2,3],[],[4,5,6]]
+(Just (Many [[1,2],[3]]),Nothing)
+(Wrap (Just 2),"c",Nothing,Chain 7 [('+',7),('*',7)])
+1
+2
+3

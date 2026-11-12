@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror -g
+CFLAGS = -std=c89 -pedantic -Wall -Wextra -Werror -g -O2
 
 SOURCES = src/util.c src/lexer.c src/module.c src/parse.c src/resolve.c \
           src/types.c src/infer.c src/instances.c src/derive.c src/gc.c src/eval.c src/numbers.c src/integer.c src/bytes.c src/files.c src/sha256.c src/md5.c src/unicode.c src/posix.c src/builtins.c src/elaborate.c src/survey.c src/main.c
