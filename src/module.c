@@ -539,6 +539,8 @@ static Entity *add_entity(Module *module, enum Namespace namespace,
     return entity;
 }
 
+Global *all_globals = NULL;
+
 static Global *new_global(Module *module, const char *name)
 {
     Global *global = xmalloc(sizeof(Global));
@@ -546,6 +548,8 @@ static Global *new_global(Module *module, const char *name)
     memset(global, 0, sizeof(Global));
     global->name = name;
     global->module = module;
+    global->all_next = all_globals;
+    all_globals = global;
     return global;
 }
 

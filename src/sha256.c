@@ -93,7 +93,7 @@ Value *builtin_sha256(Value **arguments)
         0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u
     };
     unsigned char last[128];
-    unsigned char *digest = xmalloc(32);
+    unsigned char *digest = gc_alloc_bytes(32);
     unsigned long whole = length / 64 * 64;
     unsigned long rest = length - whole;
     unsigned long padded = rest < 56 ? 64 : 128;

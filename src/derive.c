@@ -39,7 +39,7 @@ static Type *field_type(Type *type, Constructor *constructor, int index)
     TypeCon *head = constructor->type;
     Scheme *scheme = constructor_scheme(constructor);
     Type **arguments =
-        xmalloc((size_t)head->parameter_count * sizeof(Type *) + 1);
+        gc_alloc((size_t)head->parameter_count * sizeof(Type *) + 1);
     Type *fields;
     Type *field = NULL;
     Type *rest;

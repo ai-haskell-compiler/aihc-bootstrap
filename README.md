@@ -81,6 +81,7 @@ are therefore never looked at.
 | `src/posix.c` | Everything that needs POSIX: directories, running programs |
 | `src/elaborate.c` | The pipeline for one declaration; new passes are added here |
 | `src/eval.c` | The evaluator: a machine with an explicit stack |
+| `src/gc.c` | Memory for what the program makes, freed when nothing refers to it |
 | `src/builtins.c` | C functions reachable through `foreign import prim` |
 | `src/survey.c` | Survey mode: what is unsupported, without running |
 | `lib/TopHandler.hs` | What runs `main` and handles exceptions it does not catch |
@@ -92,7 +93,11 @@ are therefore never looked at.
 
 ```sh
 make test
+make test-gc
 ```
+
+`make test-gc` runs the same tests with a garbage collection after every
+100 kB that is allocated.
 
 Write the expected output with GHC, so that the interpreter is always compared
 against a real compiler:

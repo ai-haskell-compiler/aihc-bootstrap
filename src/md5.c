@@ -90,7 +90,7 @@ Value *builtin_md5(Value **arguments)
     unsigned long length = (unsigned long)input->number;
     Word state[4] = { 0x67452301u, 0xefcdab89u, 0x98badcfeu, 0x10325476u };
     unsigned char last[128];
-    unsigned char *digest = xmalloc(16);
+    unsigned char *digest = gc_alloc_bytes(16);
     unsigned long whole = length / 64 * 64;
     unsigned long rest = length - whole;
     unsigned long padded = rest < 56 ? 64 : 128;

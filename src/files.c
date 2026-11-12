@@ -122,7 +122,7 @@ Value *builtin_handleRead(Value **arguments)
     while ((c = getc(file)) != EOF && !(line && c == '\n')) {
         if (length == capacity) {
             capacity = capacity * 2 + 64;
-            bytes = xrealloc(bytes, (size_t)capacity);
+            bytes = gc_realloc(bytes, (size_t)capacity, 1);
         }
         bytes[length++] = (unsigned char)c;
     }

@@ -12,7 +12,7 @@
 
    --survey runs nothing. It prepares every definition the program could
    reach and reports what the interpreter does not support (survey.c). */
-static int interpret(int argc, char **argv)
+static int interpret_program(int argc, char **argv)
 {
     const char *file = NULL;
     Module *module;
@@ -68,6 +68,16 @@ static int interpret(int argc, char **argv)
     /* An IO action is a function from a world token; see eval.h. */
     apply(action, make_con(TAG_UNIT, 0));
     return 0;
+}
+
+/* Everything that runs the program is called from here, so the collector
+   finds every C local that holds a value between here and where it is. */
+static int interpret(int argc, char **argv)
+{
+    int bottom = 0;
+
+    gc_start(&bottom);
+    return interpret_program(argc, argv);
 }
 
 /* The interpreter evaluates a value inside a value with a C call inside a

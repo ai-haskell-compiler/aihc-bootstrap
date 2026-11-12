@@ -41,7 +41,7 @@ static int match_type(Type *pattern, Type *type, int variable_count,
 
 static Type **new_bound(int count)
 {
-    Type **bound = xmalloc((size_t)count * sizeof(Type *) + 1);
+    Type **bound = gc_alloc((size_t)count * sizeof(Type *) + 1);
     int i;
 
     for (i = 0; i < count; i++) {

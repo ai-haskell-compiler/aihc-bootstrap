@@ -131,7 +131,7 @@ Value *builtin_realPath(Value **arguments)
 Value *builtin_temporaryFile(Value **arguments)
 {
     char *directory = c_string(arguments[0], NULL);
-    char *path = xmalloc(strlen(directory) + 32);
+    char *path = gc_alloc_bytes(strlen(directory) + 32);
     int descriptor;
 
     sprintf(path, "%s/aihc-bootstrap-XXXXXX", directory);
@@ -150,11 +150,11 @@ static char **string_array(char *first, Value *list)
     char **array = NULL;
     int count = 0;
 
-    array = xrealloc(array, 2 * sizeof(char *));
+    array = gc_realloc(array, 2 * sizeof(char *), 0);
     array[count++] = first;
     list = force(list);
     while (list->tag == TAG_CONS) {
-        array = xrealloc(array, ((size_t)count + 2) * sizeof(char *));
+        array = gc_realloc(array, ((size_t)count + 2) * sizeof(char *), 0);
         array[count++] = c_string(list->fields[0], NULL);
         list = force(list->fields[1]);
     }
