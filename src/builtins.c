@@ -359,6 +359,8 @@ static const Builtin builtins[] = {
     { "monotonicNanoseconds", 1, builtin_monotonicNanoseconds },
     { "deepForce", 2, builtin_deepForce },
     { "dataFields", 2, builtin_dataFields },
+    { "functorFields", 3, builtin_functorFields },
+    { "functorRebuild", 5, builtin_functorRebuild },
     { "dataRebuild", 3, builtin_dataRebuild },
     { "numAdd", 3, builtin_numAdd },
     { "numSub", 3, builtin_numSub },

@@ -174,6 +174,8 @@ Value *builtin_floatConvert(Value **arguments);
 Value *derived_method(const Instance *instance, Global *method, Type *type);
 Value *builtin_deepForce(Value **arguments);
 Value *builtin_dataFields(Value **arguments);
+Value *builtin_functorFields(Value **arguments);
+Value *builtin_functorRebuild(Value **arguments);
 Value *builtin_dataRebuild(Value **arguments);
 
 /* bytes.c: ByteString, and reading and writing files. */

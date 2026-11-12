@@ -593,17 +593,23 @@ void prepare_instance(Instance *instance)
         unresolved(instance->module, token, token->text);
     }
     if (instance->derived_type != NULL) {
-        /* deriving on T a b: the head is T a b. */
+        /* deriving on T a b: the head is T a b. For a class of types that
+           hold values, it is T a: the instance is about b. */
         TypeCon *type = instance->derived_type;
+        int count = type->parameter_count;
         int i;
 
+        if (strcmp(name, "Functor") == 0 || strcmp(name, "Foldable") == 0
+            || strcmp(name, "Traversable") == 0) {
+            count--;
+        }
         instance->head = new_type_constructor(type);
-        for (i = 0; i < type->parameter_count; i++) {
+        for (i = 0; i < count; i++) {
             instance->head = new_type_application(
                 instance->head, new_rigid(type->parameters[i]));
         }
         instance->variables = type->parameters;
-        instance->variable_count = type->parameter_count;
+        instance->variable_count = count;
     } else {
         instance->head = parse_type(instance->module, instance->head_start,
                                     instance->head_end, &instance->variables,

@@ -1076,6 +1076,24 @@ instance Traversable [] where
   traverse _ [] = pure []
   traverse f (a : rest) = liftA2 (:) (f a) (traverse f rest)
 
+-- A pair holds its second part.
+instance Functor ((,) c) where
+  fmap f (c, a) = (c, f a)
+
+instance Foldable ((,) c) where
+  foldr f end (_, a) = f a end
+
+instance Traversable ((,) c) where
+  traverse f (c, a) = fmap (\b -> (c, b)) (f a)
+
+instance Foldable (Either e) where
+  foldr _ end (Left _) = end
+  foldr f end (Right a) = f a end
+
+instance Traversable (Either e) where
+  traverse _ (Left e) = pure (Left e)
+  traverse f (Right a) = fmap Right (f a)
+
 instance Traversable Maybe where
   traverse _ Nothing = pure Nothing
   traverse f (Just a) = fmap Just (f a)
