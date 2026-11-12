@@ -6,6 +6,7 @@ module Main where
 import Data.Text (Text, pattern Empty, pattern (:<), pattern (:>))
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import qualified Data.Text.Unsafe as TU
 
 sample :: Text
 sample = "  Hello, wide world!  "
@@ -35,6 +36,24 @@ main = do
   TIO.putStrLn ""
   print (map describe ["", "a", "abc"])
   print ('x' :< "yz", "xy" :> 'z', Empty == T.empty)
+  -- Characters of one to four bytes. An offset counts bytes.
+  let mixed = "aé€😀z" :: Text
+      iterAt i = case TU.iter mixed i of TU.Iter c d -> (c, d)
+  print (T.length mixed, TU.lengthWord8 mixed, map iterAt [0, 1, 3, 6, 10])
+  print (T.take 2 mixed, T.drop 3 mixed, T.splitAt 4 mixed, T.take 9 mixed, T.drop 9 mixed, T.take (-1) mixed)
+  print (TU.takeWord8 3 mixed, TU.dropWord8 6 mixed, TU.unsafeHead (TU.dropWord8 1 mixed), TU.unsafeTail (TU.dropWord8 3 mixed))
+  print (T.unsnoc mixed, T.last mixed, T.init mixed, T.index mixed 3, T.reverse mixed, T.unsnoc "")
+  print (T.dropWhileEnd (> 'm') mixed, T.takeWhileEnd (> 'm') mixed, T.span (< 'z') mixed, T.dropWhile (/= '€') mixed)
+  print (T.breakOn "€" mixed, T.breakOnEnd "é" (mixed <> mixed), T.splitOn "😀" (mixed <> mixed), T.isInfixOf "€😀" mixed)
+  print (T.stripSuffix "😀z" mixed, T.stripPrefix "aé" mixed, T.isSuffixOf "z" mixed, T.isPrefixOf "é" mixed)
+  print (compare ("é" :: Text) "z", compare ("😀" :: Text) "€", ("a" :: Text) < "ab", maximum ["b", "é", "a" :: Text])
+  print (T.lines "one\n\nthree\n", T.lines "no newline", T.lines "", T.words "  two  words\there ", T.unlines ["a", "b"], T.unwords ["a", "b"])
+  print (T.split (== ',') "a,,b,", T.split (== ',') "", T.any (== '€') mixed, T.all (< '€') mixed, T.find (> 'x') mixed, T.elem 'q' mixed)
+  print (T.takeEnd 2 mixed, T.dropEnd 2 mixed, T.strip "  é  ", T.cons 'é' "x", T.snoc "x" '€', T.replicate 2 "é", T.concatMap (\c -> T.pack [c, c]) "aé")
+  -- A long text: only its start is looked at.
+  let long = T.replicate 200 mixed
+  print (take 7 (T.unpack long), T.findIndex (== 'z') long, T.findIndex (== 'q') long, T.length long, T.foldl' (\n c -> if c == 'z' then n + 1 else n) (0 :: Int) long)
+  print (T.unpack (T.drop 995 long), T.foldr (:) [] (T.take 3 long), T.zip long "xy", T.filter (== '€') (T.take 12 long))
   where
     describe :: Text -> String
     describe text = case text of

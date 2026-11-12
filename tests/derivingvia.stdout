@@ -1,0 +1,3 @@
+Totals [1,2,3] (fromList [("x",1),("y",2),("z",3)]) "abc"
+Totals [] (fromList []) ""
+(True,True,True)
