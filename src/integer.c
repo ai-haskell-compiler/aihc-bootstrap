@@ -40,7 +40,7 @@ static Big new_big(int count)
 
     big.sign = 1;
     big.count = count;
-    big.limbs = xmalloc((size_t)count * sizeof(Limb) + 1);
+    big.limbs = gc_alloc_bytes((size_t)count * sizeof(Limb) + 1);
     for (i = 0; i < count; i++) {
         big.limbs[i] = 0;
     }
@@ -413,7 +413,7 @@ Value *integer_shift(Value *value, long count, int left)
 /* The number as `count` limbs in two's complement. */
 static Limb *twos_complement(Big a, int count)
 {
-    Limb *limbs = xmalloc((size_t)count * sizeof(Limb) + 1);
+    Limb *limbs = gc_alloc_bytes((size_t)count * sizeof(Limb) + 1);
     unsigned long carry = 1;
     int i;
 
@@ -481,7 +481,7 @@ char *integer_show(Value *value)
 {
     Big a = big_of(value);
     /* Ten digits are more than enough for each limb, plus the sign. */
-    char *text = xmalloc((size_t)a.count * 10 + 3);
+    char *text = gc_alloc_bytes((size_t)a.count * 10 + 3);
     char *end = text + a.count * 10 + 2;
     char *p = end;
     Big ten = big_from_magnitude(1000000000ul, 1);

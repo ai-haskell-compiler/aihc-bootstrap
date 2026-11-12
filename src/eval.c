@@ -23,6 +23,16 @@ typedef struct Frame {
     Env *env;
 } Frame;
 
+/* A catch_exception that is waiting for its function to return. */
+typedef struct Handler {
+    jmp_buf jump;
+    int stack_size; /* of the machine's stack when it started */
+    struct Handler *outer;
+} Handler;
+
+static Handler *handlers = NULL;
+static Value *raised; /* the exception that raise_exception was given */
+
 static Frame *stack = NULL;
 static int stack_size = 0;
 static int stack_capacity = 0;
@@ -42,9 +52,8 @@ static void push(enum FrameKind kind, Value *value)
 
 static Value *new_value(enum ValueKind kind)
 {
-    Value *value = xmalloc(sizeof(Value));
+    Value *value = gc_alloc(sizeof(Value));
 
-    memset(value, 0, sizeof(Value));
     value->kind = kind;
     return value;
 }
@@ -71,7 +80,7 @@ Value *make_con(int tag, int field_count)
 
     value->tag = tag;
     value->field_count = field_count;
-    value->fields = xmalloc((size_t)field_count * sizeof(Value *) + 1);
+    value->fields = gc_alloc((size_t)field_count * sizeof(Value *) + 1);
     return value;
 }
 
@@ -137,7 +146,7 @@ Value *make_string(const char *string)
 
 static Env *extend(Env *outer, Binding *binding, Value *value)
 {
-    Env *env = xmalloc(sizeof(Env));
+    Env *env = gc_alloc(sizeof(Env));
 
     env->binding = binding;
     env->value = value;
@@ -154,6 +163,165 @@ static Value *lookup(const Env *env, const Binding *binding)
     }
     die("variable %s is not in the environment", binding->name);
     return NULL;
+}
+
+/* ---- What an expression needs of its environment ---- */
+
+/* An expression that is kept for later (a thunk, a lambda) is kept with
+   only the variables it mentions. If it were kept with everything in
+   scope, one value that nobody has looked at yet would keep every value
+   that was in scope where it was made in use, and those keep others: a
+   program that runs in constant memory would not.
+
+   The variables an expression mentions are worked out the first time it is
+   kept. The list also has the variables that are bound inside the
+   expression; those are not in the environment, and are skipped. */
+
+static void note_expr(Expr *owner, const Expr *expr);
+
+static void note_variable(Expr *owner, Binding *binding)
+{
+    int i;
+
+    for (i = 0; i < owner->needed_count; i++) {
+        if (owner->needed[i] == binding) {
+            return;
+        }
+    }
+    owner->needed = xrealloc(owner->needed, (size_t)(owner->needed_count + 1)
+                                                * sizeof(Binding *));
+    owner->needed[owner->needed_count++] = binding;
+}
+
+/* The same types as close_type looks into. */
+static void note_type(Expr *owner, Type *type)
+{
+    type = prune(type);
+    if (type->kind == TY_RIGID) {
+        note_variable(owner, type->variable);
+    } else if (type->kind == TY_APP) {
+        note_type(owner, type->function);
+        note_type(owner, type->argument);
+    }
+}
+
+static void note_pattern(Expr *owner, const Pattern *pattern)
+{
+    int i;
+
+    if (pattern->literal != NULL) {
+        note_expr(owner, pattern->literal);
+    }
+    if (pattern->equals != NULL) {
+        note_expr(owner, pattern->equals);
+    }
+    if (pattern->inner != NULL) {
+        note_pattern(owner, pattern->inner);
+    }
+    for (i = 0; i < pattern->argument_count; i++) {
+        note_pattern(owner, pattern->arguments[i]);
+    }
+}
+
+static void note_expr(Expr *owner, const Expr *expr)
+{
+    const Alternative *alternative;
+    const Guard *guard;
+    const Qualifier *qualifier;
+    int i;
+
+    switch (expr->kind) {
+    case E_LOCAL:
+        note_variable(owner, expr->local);
+        break;
+    case E_APP:
+        note_expr(owner, expr->function);
+        note_expr(owner, expr->argument);
+        break;
+    case E_LAMBDA:
+    case E_ANNOTATION:
+        note_expr(owner, expr->body);
+        break;
+    case E_LET:
+        for (i = 0; i < expr->binding_count; i++) {
+            note_expr(owner, expr->values[i]);
+        }
+        if (expr->body != NULL) {
+            note_expr(owner, expr->body);
+        }
+        break;
+    case E_CASE:
+        note_expr(owner, expr->scrutinee);
+        for (alternative = expr->alternatives; alternative != NULL;
+             alternative = alternative->next) {
+            note_pattern(owner, alternative->pattern);
+            if (alternative->where != NULL) {
+                note_expr(owner, alternative->where);
+            }
+            if (alternative->body != NULL) {
+                note_expr(owner, alternative->body);
+            }
+            for (guard = alternative->guards; guard != NULL; guard = guard->next) {
+                for (qualifier = guard->qualifiers; qualifier != NULL;
+                     qualifier = qualifier->next) {
+                    if (qualifier->pattern != NULL) {
+                        note_pattern(owner, qualifier->pattern);
+                    }
+                    note_expr(owner, qualifier->expr);
+                }
+                note_expr(owner, guard->body);
+            }
+        }
+        break;
+    case E_TYPE:
+    case E_METHOD:
+        note_type(owner, expr->type);
+        break;
+    default:
+        break;
+    }
+}
+
+/* An environment with just the variables that the expression mentions. */
+static Env *keep_needed(Expr *expr, Env *env)
+{
+    Env *kept = NULL;
+    int i;
+
+    if (!expr->needed_known) {
+        note_expr(expr, expr);
+        expr->needed_known = 1;
+    }
+    for (i = 0; i < expr->needed_count; i++) {
+        const Env *cell = env;
+
+        while (cell != NULL && cell->binding != expr->needed[i]) {
+            cell = cell->outer;
+        }
+        if (cell != NULL) {
+            kept = extend(kept, expr->needed[i], cell->value);
+        }
+    }
+    return kept;
+}
+
+/* The value of the expression, to be worked out when something needs it.
+   A variable and a lambda need no working out. Neither does a type that
+   is a type variable: a function that calls itself passes its own type
+   on, and nothing ever looks at it, so a thunk for it would refer to the
+   thunk of the call before, and that to the one before it. */
+static Value *delay(Expr *expr, Env *env)
+{
+    if (expr->kind == E_LOCAL) {
+        return lookup(env, expr->local);
+    }
+    if (expr->kind == E_TYPE && prune(expr->type)->kind == TY_RIGID) {
+        return lookup(env, prune(expr->type)->variable);
+    }
+    if (expr->kind == E_LAMBDA) {
+        return make_closure(expr, keep_needed(expr, env));
+    }
+    return make_thunk(expr, keep_needed(expr, env));
 }
 
 /* The type with its type variables replaced by the types they stand for in
@@ -193,7 +361,7 @@ static Value *make_constructor(const Constructor *constructor)
 static Value *apply_partial(const Value *function, Value *argument)
 {
     int count = function->argument_count;
-    Value **arguments = xmalloc((size_t)(count + 1) * sizeof(Value *));
+    Value **arguments = gc_alloc((size_t)(count + 1) * sizeof(Value *));
     Value *result;
 
     if (count > 0) {
@@ -250,8 +418,8 @@ static int matches(const Pattern *pattern, Value *value, Env **env)
     case P_CHAR:
         return force(value)->number == pattern->number;
     case P_LITERAL: {
-        Value *equals = make_thunk(pattern->equals, *env);
-        Value *literal = make_thunk(pattern->literal, *env);
+        Value *equals = delay(pattern->equals, *env);
+        Value *literal = delay(pattern->literal, *env);
 
         return apply(apply(equals, value), literal)->tag == TAG_TRUE;
     }
@@ -281,7 +449,7 @@ static int matches(const Pattern *pattern, Value *value, Env **env)
         return matches(pattern->inner, force(value), env);
     case P_VIEW:
         return matches(pattern->inner,
-                       apply(make_thunk(pattern->literal, *env), value), env);
+                       apply(delay(pattern->literal, *env), value), env);
     case P_RECORD:
         break;
     }
@@ -292,15 +460,22 @@ static int matches(const Pattern *pattern, Value *value, Env **env)
    is a thunk that can see all the bindings, itself included. */
 static Env *bind_let(const Expr *let, Env *env)
 {
-    Env **cells = xmalloc((size_t)let->binding_count * sizeof(Env *) + 1);
+    Env **cells = gc_alloc((size_t)let->binding_count * sizeof(Env *) + 1);
     int i;
 
     for (i = 0; i < let->binding_count; i++) {
         env = extend(env, let->bindings[i], NULL);
         cells[i] = env;
     }
+    /* A definition may mention any of the bindings, so all of them get
+       their value before any of them gets its environment. */
     for (i = 0; i < let->binding_count; i++) {
-        cells[i]->value = make_thunk(let->values[i], env);
+        cells[i]->value = let->values[i]->kind == E_LAMBDA
+            ? make_closure(let->values[i], NULL)
+            : make_thunk(let->values[i], NULL);
+    }
+    for (i = 0; i < let->binding_count; i++) {
+        cells[i]->value->env = keep_needed(let->values[i], env);
     }
     return env;
 }
@@ -314,7 +489,7 @@ static int guard_holds(const Guard *guard, Env **env)
 
     for (qualifier = guard->qualifiers; qualifier != NULL;
          qualifier = qualifier->next) {
-        Value *value = make_thunk(qualifier->expr, *env);
+        Value *value = delay(qualifier->expr, *env);
 
         if (qualifier->pattern != NULL) {
             if (!matches(qualifier->pattern, value, env)) {
@@ -388,7 +563,7 @@ static Value *run(Expr *expr, Env *env, Value *value)
         if (expr != NULL) {
             switch (expr->kind) {
             case E_APP:
-                push(F_APPLY, make_thunk(expr->argument, env));
+                push(F_APPLY, delay(expr->argument, env));
                 expr = expr->function;
                 continue;
             case E_CASE:
@@ -396,7 +571,7 @@ static Value *run(Expr *expr, Env *env, Value *value)
                     /* The first pattern does not look at the value, so the
                        value is not evaluated: case e of _ -> ... */
                     expr = choose_alternative(
-                        expr, make_thunk(expr->scrutinee, env), &env);
+                        expr, delay(expr->scrutinee, env), &env);
                     continue;
                 }
                 push(F_CASE, NULL);
@@ -405,7 +580,7 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 expr = expr->scrutinee;
                 continue;
             case E_LAMBDA:
-                value = make_closure(expr, env);
+                value = make_closure(expr, keep_needed(expr, env));
                 break;
             case E_CONSTRUCTOR:
                 value = make_constructor(expr->constructor);
@@ -450,10 +625,28 @@ static Value *run(Expr *expr, Env *env, Value *value)
             }
             expr = NULL;
         } else if (value->kind == V_THUNK) {
-            push(F_UPDATE, value);
-            value->kind = V_BLACKHOLE;
             expr = value->expr;
             env = value->env;
+            if (stack[stack_size - 1].kind == F_UPDATE) {
+                /* The thunk on top of the stack is waiting for exactly
+                   this value, so this thunk shares its frame: it becomes
+                   that thunk. A loop that ends in a `seq` b, where b is a
+                   thunk, would otherwise leave a frame for every turn.
+                   The waiting thunk takes over the expression: that is
+                   what it is put back to if an exception passes, and it
+                   lets go of what its own expression could see. */
+                Value *waiting = stack[stack_size - 1].value;
+
+                waiting->expr = expr;
+                waiting->env = env;
+                value->kind = V_INDIRECTION;
+                value->result = waiting;
+                value->expr = NULL;
+                value->env = NULL;
+            } else {
+                push(F_UPDATE, value);
+                value->kind = V_BLACKHOLE;
+            }
         } else if (value->kind == V_INDIRECTION) {
             value = value->result;
         } else if (value->kind == V_BLACKHOLE) {
@@ -468,6 +661,10 @@ static Value *run(Expr *expr, Env *env, Value *value)
             case F_UPDATE:
                 frame.value->kind = V_INDIRECTION;
                 frame.value->result = value;
+                /* What the expression could see is no longer needed, and
+                   must not stay in use because of this. */
+                frame.value->expr = NULL;
+                frame.value->env = NULL;
                 break;
             case F_CASE:
                 env = frame.env;
@@ -502,17 +699,21 @@ Value *apply(Value *function, Value *argument)
     return run(NULL, NULL, function);
 }
 
+/* What the machine holds on to between allocations, for the collector:
+   its stack, an exception on its way to a handler, and the values of the
+   top-level variables. */
+void mark_roots(void)
+{
+    const Global *global;
+
+    gc_mark_range(stack, stack + stack_size);
+    gc_mark(raised);
+    for (global = all_globals; global != NULL; global = global->all_next) {
+        gc_mark(global->value);
+    }
+}
+
 /* ---- Exceptions ---- */
-
-/* A catch_exception that is waiting for its function to return. */
-typedef struct Handler {
-    jmp_buf jump;
-    int stack_size; /* of the machine's stack when it started */
-    struct Handler *outer;
-} Handler;
-
-static Handler *handlers = NULL;
-static Value *raised;
 
 Value *catch_exception(Value *function, Value *argument, Value **exception)
 {

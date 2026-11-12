@@ -248,6 +248,9 @@ struct Expr {
                                   type */
     int type_end;
     Type *type;                /* E_TYPE; E_METHOD: the class argument */
+    int needed_known;          /* set by the evaluator; see keep_needed */
+    int needed_count;
+    Binding **needed;          /* the variables the expression mentions */
 };
 
 /* A qualifier that makes a name refer to the Prelude whatever is in scope.
@@ -354,6 +357,7 @@ struct Global {
     int elaborating;
     int failed;           /* survey mode: elaborating it failed */
     struct Value *value;  /* NULL until first use */
+    Global *all_next;     /* every Global there is: see all_globals */
     Global *next;         /* the other definitions of the same instance */
 };
 
@@ -468,6 +472,7 @@ extern Constructor unit_constructor;      /* () */
 extern Constructor nil_constructor;       /* [] */
 extern Constructor cons_constructor;      /* : */
 extern Instance *all_instances;
+extern Global *all_globals; /* linked by all_next: their values are roots */
 extern FamilyInstance *all_family_instances;
 
 /* Tuples of 2 to MAX_TUPLE elements. The constructor and the type are both

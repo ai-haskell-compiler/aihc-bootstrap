@@ -262,28 +262,61 @@ the build plan and prints it, and starts to compile:
 build  aihc-rts-1.0.2 (no modules)
 ```
 
-That takes about 17 seconds. Then it compiles the first core library, and
-the interpreter's memory grows by about 60 MB a second: 8 GB after two
-minutes, when the run was stopped. Nothing is wrong with what it computes
-as far as it gets; it cannot finish because nothing is ever freed.
+With the collector (below) the run gets past that point in constant
+memory: 59 MB in use at the end, 1 GB at the most for the whole process,
+after 3 minutes and 17 seconds. It then reaches the next thing that is
+missing:
 
-## Memory: the next step
+```text
+type mismatch: MVector and v
+... Aihc/Native/Object.hs:239
+```
 
-Nothing is freed, and a `Value` is 120 bytes, allocated on its own. Two
-steps, in this order:
+`Aihc.Native.Object` is written for any mutable vector `v` of the class
+`MVector`. `lib/Data/Vector/Generic/Mutable.hs` has one vector type and no
+class. That is the next step of the loop.
 
-1. **A garbage collector.** The machine is always inside nested C calls
-   (`force` inside a builtin inside `run`), and C locals hold values. The
-   simplest collector that is correct here is mark and sweep that does not
-   move values and scans the C stack conservatively. It needs an allocator
-   of its own, so that a word found on the stack can be checked against
-   the objects that exist.
-2. **Smaller values.** One struct per kind instead of one flat struct, or
-   at least an allocation that is only as long as the kind needs.
+## Memory
 
-`Text` as a list of characters is the largest single user of memory while
-AIHC lexes, and `lengthWord8` of the remaining input is linear. Making
-`Text` UTF-8 bytes in C, as upstream, fixes both.
+`src/gc.c` frees what the program no longer refers to. The machine is
+always inside nested C calls (`force` inside a builtin inside `run`), and
+C locals hold values, so the collector does not move anything and reads
+the C stack as it is: every word that is the address of something
+allocated keeps that alive. It has an allocator of its own, in cells of a
+few sizes, so that a word can be checked against what exists.
+
+`make test-gc` runs the tests with a collection after every 100 kB.
+`AIHC_GC_REPORT=1` prints a line for every collection.
+
+Three things kept memory in use that a compiled program would have let go.
+All three had to be fixed before AIHC ran in constant memory, and
+`tests/memory.hs` runs into each of them:
+
+1. **A thunk or a closure kept everything that was in scope** where it was
+   made. It now keeps only the variables its expression mentions
+   (`keep_needed` in `src/eval.c`).
+2. **A thunk in tail position left a frame behind**: ``a `seq` b`` gives
+   back `b`, which is a thunk, so a strict loop grew the stack by a frame
+   for every turn. Such a thunk now shares the frame of the thunk that is
+   waiting for it.
+3. **A function that calls itself passed its type on as a thunk**, which
+   referred to the thunk of the call before. A type that is a type
+   variable is now passed as it is.
+
+What is left, in the order it is likely to matter:
+
+1. **Types made while the program runs are never freed.** A type is made
+   whenever a type with variables is passed to a function. This is most of
+   the difference between 59 MB in use and 1 GB for the process.
+2. **Smaller values.** A `Value` is 120 bytes whatever it is. One struct
+   per kind, or an allocation that is only as long as the kind needs.
+3. **`Text` as UTF-8 bytes in C**, as upstream. As a list of characters it
+   is the largest user of memory while AIHC lexes, and `lengthWord8` of
+   the remaining input is linear.
+
+The megaparsec port takes more than linear time: 4,000 words parse in 2.5
+seconds and 16,000 in 11. AIHC's own inputs are small enough for that not
+to matter yet.
 
 ## Language backlog
 

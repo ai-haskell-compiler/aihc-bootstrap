@@ -59,12 +59,12 @@ char *c_string(Value *list, long *length)
     while (list->tag == TAG_CONS) {
         if (used + 5 > capacity) {
             capacity = capacity * 2 + 64;
-            text = xrealloc(text, (size_t)capacity);
+            text = gc_realloc(text, (size_t)capacity, 1);
         }
         used += utf8_encode_exact(force(list->fields[0])->number, text + used);
         list = force(list->fields[1]);
     }
-    text = xrealloc(text, (size_t)used + 1);
+    text = gc_realloc(text, (size_t)used + 1, 1);
     text[used] = '\0';
     if (length != NULL) {
         *length = used;
@@ -103,7 +103,7 @@ static unsigned char *read_whole_file(const char *path, long *length)
     fseek(file, 0, SEEK_END);
     *length = ftell(file);
     fseek(file, 0, SEEK_SET);
-    bytes = xmalloc((size_t)*length + 1);
+    bytes = gc_alloc_bytes((size_t)*length + 1);
     if (fread(bytes, 1, (size_t)*length, file) != (size_t)*length) {
         fclose(file);
         return NULL;
@@ -136,7 +136,7 @@ Value *builtin_bytesPack(Value **arguments)
     while (list->tag == TAG_CONS) {
         if (length == capacity) {
             capacity = capacity * 2 + 64;
-            bytes = xrealloc(bytes, (size_t)capacity);
+            bytes = gc_realloc(bytes, (size_t)capacity, 1);
         }
         bytes[length++] = (unsigned char)force(list->fields[0])->number;
         list = force(list->fields[1]);
@@ -216,7 +216,7 @@ Value *builtin_bytesConcat(Value **arguments)
 
         if (length + bytes->number > capacity) {
             capacity = (length + bytes->number) * 2 + 64;
-            result = xrealloc(result, (size_t)capacity);
+            result = gc_realloc(result, (size_t)capacity, 1);
         }
         if (bytes->number > 0) {
             memcpy(result + length, bytes->bytes, (size_t)bytes->number);
@@ -267,7 +267,7 @@ Value *builtin_bytesFind(Value **arguments)
 Value *builtin_bytesNew(Value **arguments)
 {
     long length = force(arguments[0])->number;
-    unsigned char *bytes = xmalloc((size_t)(length < 0 ? 0 : length) + 1);
+    unsigned char *bytes = gc_alloc_bytes((size_t)(length < 0 ? 0 : length) + 1);
 
     if (length > 0) {
         memset(bytes, 0, (size_t)length);

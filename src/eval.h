@@ -100,6 +100,25 @@ Value *apply(Value *function, Value *argument);
 Value *catch_exception(Value *function, Value *argument, Value **exception);
 void raise_exception(Value *exception);
 
+/* gc.c: memory that is freed when nothing refers to it any more. Everything
+   the running program makes is allocated here, zeroed. gc_alloc_bytes is
+   for memory that holds no pointers: bytes, digits, C strings.
+
+   A collection can happen in any of the three allocating functions, so a
+   pointer to collected memory must be where the collector looks when one
+   of them is called: in a C local, in collected memory that is itself
+   reachable, or in what mark_roots names. Memory from xmalloc is not
+   looked into. */
+void *gc_alloc(size_t size);
+void *gc_alloc_bytes(size_t size);
+void *gc_realloc(void *old, size_t size, int bytes);
+void gc_start(const void *bottom);
+void gc_collect(void);
+void gc_mark(const void *pointer);
+void gc_mark_range(const void *start, const void *end);
+/* eval.c: marks what the machine itself holds on to. */
+void mark_roots(void);
+
 /* integer.c: Integer beyond a C long. A value with this tag is one; see
    integer.c for what is in it. The arguments of these functions are
    Integers, big or not, and so are their results. */
