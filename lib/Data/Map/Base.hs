@@ -358,8 +358,14 @@ union = unionWith const
 unionWith :: Ord k => (a -> a -> a) -> Map k a -> Map k a -> Map k a
 unionWith f = unionWithKey (\_ a b -> f a b)
 
+-- The entries of the smaller map are put into the larger one, so that
+-- adding a few entries to a large map, on either side, takes time with the
+-- few. The function gets the value of the left map first either way.
 unionWithKey :: Ord k => (k -> a -> a -> a) -> Map k a -> Map k a -> Map k a
-unionWithKey f left right = foldlWithKey (\m k a -> insertWithKey f k a m) right left
+unionWithKey f left right =
+  if size left <= size right
+    then foldlWithKey' (\m k a -> insertWithKey f k a m) right left
+    else foldlWithKey' (\m k b -> insertWithKey (\key new old -> f key old new) k b m) left right
 
 unions :: Ord k => [Map k a] -> Map k a
 unions = P.foldl' union empty
