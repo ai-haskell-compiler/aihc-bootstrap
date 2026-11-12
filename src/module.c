@@ -1225,6 +1225,7 @@ static int add_class_declaration(Module *module, int start, int end)
         return 0;
     }
     class = xmalloc(sizeof(Class));
+    memset(class, 0, sizeof(Class));
     class->name = tokens[i].text;
     class->module = module;
     class->variable = new_binding(tokens[i + 1].text);

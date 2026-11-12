@@ -105,6 +105,12 @@ struct Class {
     const char *name;
     Module *module;
     Binding *variable;
+    /* The instances of this class among the instances up to `seen` in
+       all_instances, newest first, linked by `next_of_class`. Looking
+       through all instances of all classes for every method call is most
+       of what the interpreter would otherwise do. */
+    Instance *instances;
+    Instance *seen;
 };
 
 /* instance C (T a b) where ...
@@ -121,6 +127,7 @@ struct Instance {
     Type *head;
     Global *methods; /* the method definitions, linked by `next` */
     Instance *next;  /* all instances of all loaded modules */
+    Instance *next_of_class; /* see Class */
     /* An instance from a `deriving` clause has no definitions. Its head is
        the type the clause is on, and its methods are made by derive.c. */
     TypeCon *derived_type; /* that type, else NULL */

@@ -325,14 +325,15 @@ Done, each with a test compared against GHC:
 | Feature | Test |
 | --- | --- |
 | Associated types of classes | `tests/families.hs` |
-| `\case`, view patterns, tuple sections, named field puns, `let` in guards, bang patterns in clauses, operators defined between their parameters, qualified constructor operators | `tests/extensions.hs` |
+| `\case`, view patterns, tuple sections, named field puns, `let` in guards (with functions and several definitions), bang patterns in clauses, operators defined between their parameters, qualified constructor operators, a pattern binding with a type and guards, `~` in front of a let pattern, `(pattern :: type)`, a `do` block that ends at an operator, a local function made without naming its parameter and used at two types | `tests/extensions.hs` |
 | Local functions that call each other, without signatures | `tests/recursion.hs` |
-| Pattern synonyms: both directions, with a `where` clause, with fields, as operators | `tests/patsyn.hs` |
+| Pattern synonyms: both directions, with a `where` clause, with fields (also to build, to update and in a `let`), as operators | `tests/patsyn.hs` |
 | Export lists that hide a module's own definitions; pattern synonyms exported as part of a type | `tests/exports.hs` |
 | Type applications (`f @T`), with the type variables of a signature in scope in its body; type variables of their own in expression annotations | `tests/typeapp.hs` |
 | A pattern that is a variable or `_` does not evaluate what it is matched with | `tests/laziness.hs` |
-| `forall` inside a type: an argument that works at every type | `tests/rankn.hs` |
-| Derived `Data` (`gmapT`, `gmapQ`, `gmapM`) | `tests/data.hs` |
+| `forall` inside a type: an argument that works at every type, and a record field that does | `tests/rankn.hs` |
+| Derived `Data` (`gmapT`, `gmapQ`, `gmapM`); `eqT`, and a match on `Refl` | `tests/data.hs` |
+| A pattern in a `do` block that does not match is the monad's `fail` | `tests/dofail.hs` |
 
 How the less obvious ones work:
 
@@ -349,7 +350,19 @@ How `forall` inside a type works: where a function's parameter has the
 type `forall a. t`, the argument is inferred with `a` standing for itself
 and becomes a function of `a`; each use of the parameter gives it a type.
 A `forall` on the result of a function is moved to the front of the
-signature, which means the same.
+signature, which means the same. That is also how a record field with a
+`forall` type is used as a function: its type variables are the
+selector's.
+
+How `eqT` works: every type is at hand when the program runs, so `eqT @a
+@b` compares the two. A match on its `Refl` is where the program relies on
+the answer, and the type pass has to as well: inside that alternative, a
+type variable that does not fit is tried as the type it was shown to be
+(the given types in `src/infer.c`).
+
+What the type pass does not check: the constraints of a signature. A class
+with two parameters, of which only the first decides the instance, can so
+be written with one (`MVector v a` in `lib/Data/Vector/Generic/Mutable.hs`).
 
 Still missing, as the survey shows them:
 

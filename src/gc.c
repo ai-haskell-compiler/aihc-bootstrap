@@ -68,12 +68,22 @@ static void out_of_memory(void)
     die("out of memory");
 }
 
+/* The chunk that find_chunk found last. It is tried first: the free cells
+   of a size are in the order of their chunks, so one allocation after
+   another is in the same chunk. */
+static Block *last_found = NULL;
+
 /* The chunk the address is inside, or NULL. */
 static Block *find_chunk(const char *address)
 {
     int low = 0;
     int high = chunk_count - 1;
 
+    if (last_found != NULL && address >= last_found->base
+        && address < last_found->base
+                         + last_found->cell_size * last_found->cell_count) {
+        return last_found;
+    }
     while (low <= high) {
         int middle = (low + high) / 2;
         Block *chunk = chunks[middle];
@@ -83,6 +93,7 @@ static Block *find_chunk(const char *address)
         } else if (address >= chunk->base + chunk->cell_size * chunk->cell_count) {
             low = middle + 1;
         } else {
+            last_found = chunk;
             return chunk;
         }
     }
@@ -216,6 +227,7 @@ static size_t sweep(void)
     for (k = 0; k < CLASS_COUNT; k++) {
         free_cells[k] = NULL;
     }
+    last_found = NULL; /* its chunk may be freed below */
     for (i = 0; i < chunk_count; i++) {
         Block *chunk = chunks[i];
         size_t index;
