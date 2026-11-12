@@ -319,6 +319,8 @@ static const Builtin builtins[] = {
     { "bytesFind", 2, builtin_bytesFind },
     { "textCharAt", 2, builtin_textCharAt },
     { "textCount", 1, builtin_textCount },
+    { "textWidthAt", 2, builtin_textWidthAt },
+    { "textScan", 4, builtin_textScan },
     { "textOffset", 2, builtin_textOffset },
     { "bytesFromString", 1, builtin_bytesFromString },
     { "bytesNew", 2, builtin_bytesNew },

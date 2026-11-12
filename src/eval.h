@@ -22,28 +22,37 @@ enum ValueKind {
     V_INDIRECTION  /* a thunk that has been evaluated; see `result` */
 };
 
-/* Every kind uses only some of the fields, as with Expr. Everything is boxed:
-   there are no unboxed values anywhere in the interpreter. */
+/* Every kind uses only some of the fields, as with Expr. Everything is
+   boxed: there are no unboxed values anywhere in the interpreter.
+
+   A value only has the memory for the fields its kind uses: the fields are
+   in such an order that the kinds there are most of need only the first
+   ones (new_value in eval.c). A number is 16 bytes, a closure 32, a thunk
+   40, a constructed value 56. So a field must not be looked at before the
+   kind says that the value has it. */
 struct Value {
     enum ValueKind kind;
-    long number;            /* V_INT, V_CHAR */
-    int tag;                /* V_CON: index of the constructor in its type */
+    int tag;                /* V_CON: index of the constructor in its type;
+                               V_INT: INTEGER_BIG or 0 */
+    long number;            /* V_INT, V_CHAR; V_BYTES: how many bytes */
+    /* A number ends here. */
+    Expr *expr;             /* V_THUNK; V_CLOSURE: the lambda */
+    Env *env;               /* V_CLOSURE, V_THUNK */
+    /* A closure ends here. */
+    Value *result;          /* V_INDIRECTION */
+    /* A thunk ends here: it becomes an indirection. */
     int field_count;        /* V_CON */
-    Value **fields;         /* V_CON */
     int is_deep;            /* V_CON: every field is evaluated, all the way
                                down (deepForce). A builtin that changes a
                                field takes it away. */
-    Binding *parameter;     /* V_CLOSURE */
-    Expr *body;             /* V_CLOSURE */
-    Expr *expr;             /* V_THUNK */
-    Env *env;               /* V_CLOSURE, V_THUNK */
+    Value **fields;         /* V_CON */
+    /* A constructed value ends here. */
     const Builtin *builtin; /* V_BUILTIN */
     const Constructor *constructor; /* V_PARTIAL_CON */
     int argument_count;     /* V_BUILTIN, V_PARTIAL_CON */
     Value **arguments;      /* V_BUILTIN, V_PARTIAL_CON */
-    Value *result;          /* V_INDIRECTION */
     Type *type;             /* V_TYPE: has no TY_RIGID in it */
-    const unsigned char *bytes; /* V_BYTES */
+    const unsigned char *bytes; /* V_BYTES; V_INT that is INTEGER_BIG */
 };
 
 /* The values of the local variables in scope, innermost first. */
@@ -78,6 +87,7 @@ struct Builtin {
 #define TAG_JUST 1
 
 Value *make_int(long number);
+Value *make_bytes(const unsigned char *bytes, long length);
 Value *make_char(long code);
 Value *make_con(int tag, int field_count);
 Value *make_thunk(Expr *expr, Env *env);
@@ -189,6 +199,8 @@ Value *builtin_bytesCompare(Value **arguments);
 Value *builtin_bytesFind(Value **arguments);
 Value *builtin_textCharAt(Value **arguments);
 Value *builtin_textCount(Value **arguments);
+Value *builtin_textWidthAt(Value **arguments);
+Value *builtin_textScan(Value **arguments);
 Value *builtin_textOffset(Value **arguments);
 Value *builtin_bytesFromString(Value **arguments);
 Value *builtin_bytesNew(Value **arguments);

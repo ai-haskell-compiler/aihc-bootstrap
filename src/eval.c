@@ -50,11 +50,35 @@ static void push(enum FrameKind kind, Value *value)
     stack_size++;
 }
 
+/* A value of the kind, with the memory for the fields that the kind uses:
+   see struct Value. */
 static Value *new_value(enum ValueKind kind)
 {
-    Value *value = gc_alloc(sizeof(Value));
+    size_t size = sizeof(Value);
+    Value *value;
 
+    if (kind == V_INT || kind == V_CHAR) {
+        size = offsetof(Value, expr);
+    } else if (kind == V_CLOSURE) {
+        size = offsetof(Value, result);
+    } else if (kind == V_THUNK) {
+        size = offsetof(Value, field_count);
+    } else if (kind == V_CON) {
+        size = offsetof(Value, builtin);
+    }
+    value = gc_alloc(size);
     value->kind = kind;
+    return value;
+}
+
+/* A ByteString: `length` bytes at `bytes`. An Integer beyond a C long is
+   made from one as well (integer.c): it has all the fields. */
+Value *make_bytes(const unsigned char *bytes, long length)
+{
+    Value *value = new_value(V_BYTES);
+
+    value->number = length;
+    value->bytes = bytes;
     return value;
 }
 
@@ -121,8 +145,7 @@ static Value *make_closure(Expr *lambda, Env *env)
 {
     Value *value = new_value(V_CLOSURE);
 
-    value->parameter = lambda->local;
-    value->body = lambda->body;
+    value->expr = lambda;
     value->env = env;
     return value;
 }
@@ -681,8 +704,8 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 break;
             case F_APPLY:
                 if (value->kind == V_CLOSURE) {
-                    env = extend(value->env, value->parameter, frame.value);
-                    expr = value->body;
+                    env = extend(value->env, value->expr->local, frame.value);
+                    expr = value->expr->body;
                 } else if (value->kind == V_BUILTIN
                            || value->kind == V_PARTIAL_CON) {
                     value = apply_partial(value, frame.value);

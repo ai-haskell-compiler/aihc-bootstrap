@@ -75,13 +75,10 @@ from = B.drop
 
 -- The offset of the first character from `offset` on that the test does
 -- not hold for, or `end`.
-scan :: (Char -> Bool) -> ByteString -> Int -> Int -> Int
-scan test bytes end offset =
-  if offset >= end
-    then end
-    else
-      let c = charAt bytes offset
-       in if test c then scan test bytes end (offset + width c) else offset
+foreign import prim "textScan" scan :: (Char -> Bool) -> ByteString -> Int -> Int -> Int
+
+-- How many bytes the character that starts at the offset takes.
+foreign import prim "textWidthAt" widthAt :: ByteString -> Int -> Int
 
 -- Where the character before the offset starts. The bytes of a character
 -- after its first are 10xxxxxx.
@@ -142,8 +139,7 @@ uncons (Text bytes) =
   if B.null bytes
     then Nothing
     else
-      let c = charAt bytes 0
-       in Just (c, Text (from (width c) bytes))
+      Just (charAt bytes 0, Text (from (widthAt bytes 0) bytes))
 
 unsnoc :: Text -> Maybe (Text, Char)
 unsnoc (Text bytes) =
