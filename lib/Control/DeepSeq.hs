@@ -8,6 +8,10 @@ class NFData a where
   rnf :: a -> ()
   rnf = deepForce
 
+-- Every type is an instance. An instance that a program gives for a type
+-- of its own comes first.
+instance NFData a
+
 deepseq :: a -> b -> b
 deepseq a b = seq (deepForce a) b
 
