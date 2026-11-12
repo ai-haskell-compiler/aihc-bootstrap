@@ -1,37 +1,39 @@
 module Data.Text.IO where
 
--- Files are read and written as UTF-8.
+-- Files are read and written as UTF-8, which is what a Text is.
 
-import Data.Text (Text (..))
+import qualified Data.ByteString as B
+import Data.Text (Text (..), pack, unpack)
+import Data.Text.Encoding (decodeUtf8)
 import System.IO (Handle)
 import qualified System.IO as IO
 
 readFile :: FilePath -> IO Text
-readFile path = fmap Text (IO.readFile path)
+readFile path = fmap decodeUtf8 (B.readFile path)
 
 writeFile :: FilePath -> Text -> IO ()
-writeFile path (Text string) = IO.writeFile path string
+writeFile path (Text bytes) = B.writeFile path bytes
 
 appendFile :: FilePath -> Text -> IO ()
-appendFile path (Text string) = IO.appendFile path string
+appendFile path text = IO.appendFile path (unpack text)
 
 putStr :: Text -> IO ()
-putStr (Text string) = IO.hPutStr IO.stdout string
+putStr = hPutStr IO.stdout
 
 putStrLn :: Text -> IO ()
-putStrLn (Text string) = IO.hPutStrLn IO.stdout string
+putStrLn = hPutStrLn IO.stdout
 
 hPutStr :: Handle -> Text -> IO ()
-hPutStr handle (Text string) = IO.hPutStr handle string
+hPutStr handle (Text bytes) = B.hPut handle bytes
 
 hPutStrLn :: Handle -> Text -> IO ()
-hPutStrLn handle (Text string) = IO.hPutStrLn handle string
+hPutStrLn handle text = hPutStr handle text >> IO.hPutStr handle "\n"
 
 hGetLine :: Handle -> IO Text
-hGetLine handle = fmap Text (IO.hGetLine handle)
+hGetLine handle = fmap pack (IO.hGetLine handle)
 
 hGetContents :: Handle -> IO Text
-hGetContents handle = fmap Text (IO.hGetContents handle)
+hGetContents handle = fmap pack (IO.hGetContents handle)
 
 getLine :: IO Text
 getLine = hGetLine IO.stdin

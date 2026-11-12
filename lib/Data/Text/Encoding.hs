@@ -12,13 +12,14 @@ instance Show UnicodeException where
 
 instance Exception UnicodeException
 
+-- A Text is its characters in UTF-8, so these two only look at the bytes.
 encodeUtf8 :: Text -> ByteString
-encodeUtf8 (Text string) = bytesFromString string
+encodeUtf8 (Text bytes) = bytes
 
 decodeUtf8' :: ByteString -> Either UnicodeException Text
 decodeUtf8' bytes =
   if bytesValidUtf8 bytes
-    then Right (Text (bytesToString bytes))
+    then Right (Text bytes)
     else Left (DecodeError "Cannot decode input: invalid UTF-8 stream")
 
 decodeUtf8 :: ByteString -> Text
@@ -31,15 +32,11 @@ decodeUtf8 bytes = case decodeUtf8' bytes of
 decodeUtf8With :: (String -> Maybe a -> Maybe Char) -> ByteString -> Text
 decodeUtf8With _ bytes =
   if bytesValidUtf8 bytes
-    then Text (bytesToString bytes)
+    then Text bytes
     else interpreterTodo "Data.Text.Encoding.decodeUtf8With on bytes that are not UTF-8"
 
 decodeUtf8Lenient :: ByteString -> Text
 decodeUtf8Lenient = decodeUtf8With (\_ _ -> Just '\65533')
-
-foreign import prim "bytesFromString" bytesFromString :: String -> ByteString
-
-foreign import prim "bytesToString" bytesToString :: ByteString -> String
 
 foreign import prim "bytesValidUtf8" bytesValidUtf8 :: ByteString -> Bool
 

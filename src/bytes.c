@@ -180,6 +180,68 @@ Value *builtin_bytesIndex(Value **arguments)
     return make_int(bytes->bytes[index]);
 }
 
+/* ---- Text: bytes that are UTF-8 ----
+
+   A Text is a ByteString that is known to be UTF-8 (lib/Data/Text.hs).
+   An offset into it is in bytes, and is always where a character
+   starts. */
+
+/* textCharAt :: ByteString -> Int -> Char
+   The character that starts at the offset. */
+Value *builtin_textCharAt(Value **arguments)
+{
+    Value *bytes = bytes_argument(arguments[0]);
+    long offset = force(arguments[1])->number;
+    const char *p;
+
+    if (offset < 0 || offset >= bytes->number) {
+        die("Text offset %ld is out of range (%ld bytes)", offset,
+            bytes->number);
+    }
+    p = (const char *)bytes->bytes + offset;
+    return make_char(utf8_decode(&p));
+}
+
+/* Whether a character starts with the byte: the bytes after the first one
+   of a character are 10xxxxxx. */
+static int starts_character(unsigned char byte)
+{
+    return (byte & 0xC0) != 0x80;
+}
+
+/* textCount :: ByteString -> Int
+   How many characters there are. */
+Value *builtin_textCount(Value **arguments)
+{
+    Value *bytes = bytes_argument(arguments[0]);
+    long count = 0;
+    long i;
+
+    for (i = 0; i < bytes->number; i++) {
+        count += starts_character(bytes->bytes[i]);
+    }
+    return make_int(count);
+}
+
+/* textOffset :: ByteString -> Int -> Int
+   The offset after that many characters: where the next one starts, or
+   the length if there are no more than that. */
+Value *builtin_textOffset(Value **arguments)
+{
+    Value *bytes = bytes_argument(arguments[0]);
+    long count = force(arguments[1])->number;
+    long i = 0;
+
+    while (i < bytes->number && count > 0) {
+        i++;
+        while (i < bytes->number && !starts_character(bytes->bytes[i])) {
+            i++;
+        }
+        count--;
+    }
+    return make_int(i);
+}
+
 /* bytesSlice :: Int -> Int -> ByteString -> ByteString
    `length` bytes from `offset`, as far as they exist. */
 Value *builtin_bytesSlice(Value **arguments)
