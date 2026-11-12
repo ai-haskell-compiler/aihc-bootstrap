@@ -104,10 +104,6 @@ comes from a table made with GHC by `scripts/gen-unicode.hs`
 The interpreter runs on a stack of 4 GB of address space (`src/posix.c`),
 because evaluating a value inside a value is a C call inside a C call.
 
-Known to be slow: `Data.Text.Unsafe.lengthWord8` walks the whole text, and
-the lexer of `aihc-parser` asks for the length of the remaining input at
-every token. If lexing a large file takes too long, `Text` becomes UTF-8
-bytes in C, as upstream; that also saves most of its memory.
 
 Left over from phase 2:
 
@@ -168,10 +164,14 @@ Nothing else works without these.
 
 ## Phase 2: text, bytes and containers
 
-- **`Text` is a newtype over `String`.** AIHC converts between the two
-  constantly (878 calls to `pack` and `unpack`), and with a newtype those
-  cost nothing. All 65 functions are list functions. If memory becomes the
-  problem, the representation changes inside `lib/Data/Text.hs` only.
+- **`Text` is a `ByteString` that is UTF-8**, as upstream. It was a
+  newtype over `String` first; the lexer of `aihc-parser` works with byte
+  offsets and the length in bytes at every token, which that made far too
+  slow. A part of a `Text` shares the bytes of the whole. What only looks
+  at a text works on the bytes; what makes a new text anyway (`map`,
+  `filter`, `reverse`) goes through the list of characters. Three
+  primitives are in C: the character at an offset, the number of
+  characters, the offset after n characters.
 - **`ByteString` is a packed array in C.** `index` and `length` are used in
   ways that expect constant time, and the contents are whole object files.
   About 15 builtins; the rest is Haskell. A lazy `ByteString` is a newtype
@@ -279,22 +279,22 @@ interpreter is about 130 times slower. Then come `aihc-prim` (27 modules)
 and `aihc-base` (280 modules), which AIHC built with GHC compiles in 4
 and 5 seconds.
 
-**They do not get through the lexer.** After seven minutes the interpreter
-has allocated 346 GB, with 58 MB in use, and every collection finds it at
-the same place:
+Both libraries, 2 MB of source, are lexed and parsed in about 20 minutes.
+Then AIHC resolves the names of `aihc-prim`, which is where it is now.
+Three things were found on the way, each by looking at where the
+collections find the program (`AIHC_GC_REPORT=1`):
 
-```text
-gc 1354: 58 MB in use, 256 MB handed out since the last
-  at .../Aihc/Parser/Lex/Types.hs:442 lib/Prelude.hs:403 .../Aihc/Parser/Lex.hs:139
-```
-
-That is `skipWhitespace`, which runs before every token. It asks for the
-length of the rest of the input in bytes (`lengthWord8`) and reads
-characters at byte offsets (`iter`). Both are one step for a `Text` that
-is bytes. Here a `Text` is a list of characters, so both walk the list:
-lexing a file takes time with the square of its length. The two packages
-are 2 MB of source. **`Text` as UTF-8 bytes is the next step**; see
-"Memory" below for what it takes.
+- **The lexer took time with the square of a file's length.** Before every
+  token it asks for the length of the rest of the input in bytes
+  (`lengthWord8`) and reads characters at byte offsets (`iter`). A `Text`
+  was a list of characters, so both walked the list. A `Text` is now its
+  characters in UTF-8, and both are one step.
+- **`T.unpack` of the rest of a file**, of which only the start is looked
+  at (`findIndex` in the scanner for string literals). A long `Text` is
+  now unpacked as far as the list is looked at.
+- **A union of maps took time with the left map**, which is the large one
+  when a program adds a little to what it has: `acc <> new`. A union now
+  puts the smaller map into the larger one (`Data.Map`, `Data.MonoidMap`).
 
 ### Comparing a build with the real one
 
@@ -364,28 +364,18 @@ All three had to be fixed before AIHC ran in constant memory, and
    referred to the thunk of the call before. A type that is a type
    variable is now passed as it is.
 
-What is left, in the order it is likely to matter:
+Types made while the program runs are freed too. A type is made
+whenever a type with variables is passed to a function, and those types
+are only referred to by values. They are allocated by the collector; the
+types of the program itself (signatures, what inference finds) are not,
+and must never refer to one that is (`new_type` in `src/types.c`).
 
-1. **`Text` as UTF-8 bytes**, as upstream. It is what stops AIHC now (see
-   "Running AIHC"), and as a list of characters it is also the largest
-   user of memory while AIHC lexes. A `Text` becomes a `ByteString`, which
-   is already a part of a block of bytes that can be cut in one step.
-   What has to be one step, or one pass, on that: `lengthWord8`, `iter`,
-   `null`, `uncons` and the pattern `:<`, `take`, `drop`, `splitAt`,
-   `takeWhile`, `dropWhile`, `span`, `break`, `isPrefixOf`, `stripPrefix`,
-   and comparing. Decoding a character at an offset, counting characters
-   and finding the offset of the nth character are best in C. Everything
-   that makes a new text anyway (`replace`, `splitOn`, `toUpper`,
-   `intercalate`, ...) can stay as it is, on the characters. Only
-   `lib/Data/Text.hs`, `Data/Text/Unsafe.hs`, `Data/Text/IO.hs` and
-   `Data/Text/Encoding.hs` look inside a `Text`.
-2. **Types made while the program runs are never freed.** A type is made
-   whenever a type with variables is passed to a function. This is most of
-   the difference between the memory in use and the memory of the process
-   (58 MB and 1.3 GB while AIHC lexes).
-3. **Smaller values.** A `Value` is 128 bytes whatever it is, and a thunk
-   also takes a cell of 32 bytes for each variable it keeps. One struct
-   per kind, or an allocation that is only as long as the kind needs.
+What is left:
+
+- **Smaller values.** A `Value` is 128 bytes whatever it is, and a thunk
+  also takes a cell of 32 bytes for each variable it keeps. One struct
+  per kind, or an allocation that is only as long as the kind needs.
+  While AIHC parses the two libraries the process grows to about 4 GB.
 
 The megaparsec port takes more than linear time: 4,000 words parse in 2.5
 seconds and 16,000 in 11 (measured before the three fixes under "Where
@@ -408,6 +398,8 @@ Done, each with a test compared against GHC:
 | `forall` inside a type: an argument that works at every type, and a record field that does | `tests/rankn.hs` |
 | Derived `Data` (`gmapT`, `gmapQ`, `gmapM`); `eqT`, and a match on `Refl` | `tests/data.hs` |
 | A pattern in a `do` block that does not match is the monad's `fail` | `tests/dofail.hs` |
+| Derived `Functor`, `Foldable` and `Traversable` | `tests/derivefunctor.hs` |
+| `deriving (Semigroup, Monoid) via Generically T` | `tests/derivingvia.hs` |
 
 How the less obvious ones work:
 
@@ -428,6 +420,14 @@ signature, which means the same. That is also how a record field with a
 `forall` type is used as a function: its type variables are the
 selector's.
 
+How derived `Functor`, `Foldable` and `Traversable` work: all three go
+through the values of the last type parameter in the fields of a value.
+The interpreter says where those are in each field (a field `[(op, a)]`:
+inside the list, inside the pair), and one function in
+`lib/Interpreter/Derive.hs` does the walk as `traverse`. `fmap` and
+`foldr` are that `traverse` with an `Applicative` that only applies the
+function, or only collects the values.
+
 How `eqT` works: every type is at hand when the program runs, so `eqT @a
 @b` compares the two. A match on its `Refl` is where the program relies on
 the answer, and the type pass has to as well: inside that alternative, a
@@ -440,7 +440,8 @@ be written with one (`MVector v a` in `lib/Data/Vector/Generic/Mutable.hs`).
 
 Still missing, as the survey shows them:
 
-- Derived `Read`; `deriving via`. (`Read` is there for numbers,
+- Derived `Read`; `deriving via` for anything but `Semigroup` and `Monoid`
+  via `Generically`. (`Read` is there for numbers,
   characters, strings, lists and a few small types: `tests/read.hs`.)
 - The methods of `Data` other than `gmapT`, `gmapQ` and `gmapM`, for a
   derived instance. `Generic` is a class with nothing in it.
