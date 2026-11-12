@@ -22,6 +22,7 @@ main = do
   print (T.uncons "abc", T.uncons "", T.cons 'x' "yz", T.head "abc", T.last "abc", T.tail "abc", T.any (== 'b') "abc", T.all (== 'b') "abc")
   print (T.splitOn "," "a,b,,c", T.splitOn "::" "a::b:c", T.splitOn "," "", T.splitOn "ab" "ababab")
   print (T.breakOn "::" "key::value::more", T.breakOn "x" "none", T.replace "an" "AN" "banana", T.count "an" "banana")
+  print (T.breakOnEnd "::" "key::value::more", T.breakOnEnd "x" "none", T.breakOnEnd "-" "aihc-base-4.21", T.breakOnEnd "ab" "ab")
   print (T.intercalate ", " ["a", "b", "c"], T.concat ["x", "y"], T.concatMap (\c -> T.pack [c, c]) "abc", T.replicate 3 "ab")
   print (T.isPrefixOf "ab" "abc", T.isSuffixOf "bc" "abc", T.isInfixOf "x" "abc", T.isInfixOf "" "abc")
   print (T.stripPrefix "ab" "abc", T.stripPrefix "x" "abc", T.stripSuffix "bc" "abc", T.stripSuffix "x" "abc")

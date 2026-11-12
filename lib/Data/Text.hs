@@ -231,6 +231,16 @@ breakOn (Text needle) (Text string) =
     else case breakString needle string of
       (front, back) -> (Text front, Text back)
 
+-- The same from the end: the text up to and including the last occurrence
+-- of the needle, and the text after it. If the needle does not occur,
+-- nothing and the whole text.
+breakOnEnd :: Text -> Text -> (Text, Text)
+breakOnEnd (Text needle) (Text string) =
+  if P.null needle
+    then error "Data.Text.breakOnEnd: empty input"
+    else case breakString (P.reverse needle) (P.reverse string) of
+      (back, front) -> (Text (P.reverse front), Text (P.reverse back))
+
 breakString :: String -> String -> (String, String)
 breakString _ [] = ([], [])
 breakString needle string@(c : rest) =

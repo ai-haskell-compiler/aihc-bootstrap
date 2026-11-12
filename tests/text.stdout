@@ -8,6 +8,7 @@
 (Just ('a',"bc"),Nothing,"xyz",'a','c',"bc",True,False)
 (["a","b","","c"],["a","b:c"],[""],["","","",""])
 (("key","::value::more"),("none",""),"bANANa",2)
+(("key::value::","more"),("","none"),("aihc-base-","4.21"),("ab",""))
 ("a, b, c","xy","aabbcc","ababab")
 (True,True,False,True)
 (Just "c",Nothing,Just "a",Nothing)

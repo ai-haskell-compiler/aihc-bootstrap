@@ -262,19 +262,46 @@ the build plan and prints it, and starts to compile:
 build  aihc-rts-1.0.2 (no modules)
 ```
 
-With the collector (below) the run gets past that point in constant
-memory: 59 MB in use at the end, 1 GB at the most for the whole process,
-after 3 minutes and 17 seconds. It then reaches the next thing that is
-missing:
+The runtime system is the first package. AIHC compiles its seven LIR
+sources to object files, and those are **byte for byte the files that
+AIHC built with GHC writes**:
 
 ```text
-type mismatch: MVector and v
-... Aihc/Native/Object.hs:239
+identical  native_aihc_gc.o (90408 bytes)
+identical  native_aihc_heap_regions.o (6320 bytes)
+identical  native_aihc_host_posix.o (14528 bytes)
+identical  native_aihc_limbs.o (1656 bytes)
+identical  native_aihc_profile.o (10128 bytes)
+identical  native_aihc_runtime.o (78008 bytes)
+built  aihc-rts-1.0.2 in 2 min 27 s
 ```
 
-`Aihc.Native.Object` is written for any mutable vector `v` of the class
-`MVector`. `lib/Data/Vector/Generic/Mutable.hs` has one vector type and no
-class. That is the next step of the loop.
+AIHC built with GHC takes 1.1 seconds for that package, so the
+interpreter is about 130 times slower. Then come `aihc-prim` (27 modules)
+and `aihc-base` (280 modules), which AIHC built with GHC compiles in 10
+and 14 seconds.
+
+To compare a build with the real one, build the same program with both
+into two stores and `cmp` the files:
+
+```sh
+cd ../aihc
+sh ../aihc-bootstrap/scripts/run-aihc.sh build Main.hs --build-root /tmp/a/target --store /tmp/a/store
+cabal run aihc -- build Main.hs --build-root /tmp/b/target --store /tmp/b/store
+```
+
+AIHC writes the lock file `aihc.lock` of the directory it runs in.
+
+### Where the time goes
+
+`sample` on the running interpreter shows it. Three things were most of
+the time of a build, and each took a few lines to fix:
+
+| What | Share | Now |
+| --- | ---: | --- |
+| Looking through all instances of all classes for every method call | 60% | Each class has a list of its instances (`collect_instances`) |
+| Finding the block of a cell that is being allocated | 16% | The block of the last cell of that size is tried first |
+| Finding the block of a word while marking | 40% of what was left | The search looks only at the bases of the blocks, in one array |
 
 ## Memory
 
@@ -315,8 +342,9 @@ What is left, in the order it is likely to matter:
    the remaining input is linear.
 
 The megaparsec port takes more than linear time: 4,000 words parse in 2.5
-seconds and 16,000 in 11. AIHC's own inputs are small enough for that not
-to matter yet.
+seconds and 16,000 in 11 (measured before the three fixes under "Where
+the time goes"). AIHC's own inputs are small enough for that not to
+matter yet.
 
 ## Language backlog
 
