@@ -60,7 +60,8 @@ replacing those packages instead of running them.
 | `forall` in types, `Data`, `Read`, `Numeric` | done | 12,273 of 12,499 |
 | `Integer` of any size, `Rational`, `Double`, `Float` | done | 12,965 of 13,143 |
 | Handles, Unicode, SHA-256, times | done | 13,125 of 13,211 |
-| 7 Data formats | next | |
+| 7 Data formats: JSON, MD5 | done | |
+| Running AIHC | in progress: see below | |
 
 Left over from phase 1, each stopping with a `TODO` when reached:
 
@@ -248,19 +249,41 @@ thread is a stack, and a blocked `takeMVar` switches stacks.
 upstream package is C too). Sized after the survey shows which of them a
 build actually reaches.
 
-## Alongside: memory
+## Running AIHC
 
-Nothing is freed today, and a `Value` is over 100 bytes. A `String` costs a
-few hundred bytes for each character. Compiling AIHC with AIHC will not fit
-in memory like this. Two steps, in this order, as soon as a real compilation
-is attempted:
+`scripts/run-aihc.sh` now runs AIHC itself. Run from AIHC's repository,
+`aihc build Main.hs` reads its options, finds the core libraries, solves
+the build plan and prints it, and starts to compile:
 
-1. **A garbage collector.** `main` runs inside `catchAny`, so the machine is
-   always inside a nested call and C locals always hold values. The simplest
-   collector that is correct here is mark and sweep that does not move
-   values and scans the C stack conservatively. The alternative is to remove
-   every nested call of the machine first.
-2. **Smaller values.** One struct per kind instead of one flat struct.
+```text
+  aihc-prim-0.13.0
+  aihc-base-4.21.2.0
+  Main (executable)
+build  aihc-rts-1.0.2 (no modules)
+```
+
+That takes about 17 seconds. Then it compiles the first core library, and
+the interpreter's memory grows by about 60 MB a second: 8 GB after two
+minutes, when the run was stopped. Nothing is wrong with what it computes
+as far as it gets; it cannot finish because nothing is ever freed.
+
+## Memory: the next step
+
+Nothing is freed, and a `Value` is 120 bytes, allocated on its own. Two
+steps, in this order:
+
+1. **A garbage collector.** The machine is always inside nested C calls
+   (`force` inside a builtin inside `run`), and C locals hold values. The
+   simplest collector that is correct here is mark and sweep that does not
+   move values and scans the C stack conservatively. It needs an allocator
+   of its own, so that a word found on the stack can be checked against
+   the objects that exist.
+2. **Smaller values.** One struct per kind instead of one flat struct, or
+   at least an allocation that is only as long as the kind needs.
+
+`Text` as a list of characters is the largest single user of memory while
+AIHC lexes, and `lengthWord8` of the remaining input is linear. Making
+`Text` UTF-8 bytes in C, as upstream, fixes both.
 
 ## Language backlog
 

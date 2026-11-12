@@ -5,13 +5,17 @@
 # The source directories are those of the aihc library and its first-party
 # dependencies, with the hackage and pretty-ui flags off. A directory after
 # +OverloadedStrings has that extension on, as the package's .cabal file
-# says. AIHC is expected in ../aihc, with aihc-parser, aihc-cpp and
+# says. AIHC is expected beside this repository in aihc, with aihc-parser, aihc-cpp and
 # aihc-cabal-syntax beside it; set AIHC to use another checkout.
 set -eu
 
-aihc="${AIHC:-../aihc}"
+# The script can be run from any directory: AIHC looks for its core
+# libraries from the directory it is started in.
+here=$(cd "$(dirname "$0")/.." && pwd)
+aihc=$(cd "${AIHC:-$here/../aihc}" && pwd)
 directories="
-lib
+$here/lib
+$here/glue
 +OverloadedStrings
 $aihc/bin/aihc/src
 $aihc/bin/aihc/prim-wiring
@@ -27,6 +31,7 @@ $aihc/bin/aihc/compiler/wasm/src
 $aihc/bin/aihc/hackage/disabled
 $aihc/bin/aihc/pretty-ui/disabled
 $aihc/tooling/aihc-package-plan/src
+$aihc/tooling/aihc-package-plan/src-not-embedded
 -OverloadedStrings
 $aihc/components/aihc-resolve/src
 $aihc/components/aihc-tc/src
@@ -35,6 +40,10 @@ $aihc/../aihc-parser/src
 $aihc/../aihc-cpp/src
 $aihc/../aihc-cabal-syntax/src
 "
+
+# AIHC looks for its data files (run-time sources, linker scripts) here.
+aihc_datadir="$aihc/bin/aihc"
+export aihc_datadir
 
 # Build the command line back to front, so that it ends up in this order.
 set -- "$aihc/bin/aihc/exe/Main.hs" "$@"
@@ -50,4 +59,4 @@ for directory in $reversed; do
 	esac
 done
 # shellcheck disable=SC2086
-exec ./build/aihc-bootstrap ${AIHC_BOOTSTRAP_FLAGS:-} "$@"
+exec "$here/build/aihc-bootstrap" ${AIHC_BOOTSTRAP_FLAGS:-} "$@"

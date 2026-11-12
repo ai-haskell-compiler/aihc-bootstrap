@@ -6,14 +6,19 @@ module Data.List (module Data.List, module Prelude) where
 
 infix 5 \\
 
-foldl1 :: (a -> a -> a) -> [a] -> a
-foldl1 f (first : rest) = foldl f first rest
-foldl1 _ [] = error "foldl1: empty list"
+-- Of anything that can be folded, as in GHC's Prelude.
+foldl1 :: Foldable t => (a -> a -> a) -> t a -> a
+foldl1 f container = case toList container of
+  first : rest -> foldl f first rest
+  [] -> error "foldl1: empty structure"
 
-foldr1 :: (a -> a -> a) -> [a] -> a
-foldr1 _ [a] = a
-foldr1 f (first : rest) = f first (foldr1 f rest)
-foldr1 _ [] = error "foldr1: empty list"
+foldr1 :: Foldable t => (a -> a -> a) -> t a -> a
+foldr1 f container = go (toList container)
+  where
+    go list = case list of
+      [a] -> a
+      first : rest -> f first (go rest)
+      [] -> error "foldr1: empty structure"
 
 singleton :: a -> [a]
 singleton a = [a]

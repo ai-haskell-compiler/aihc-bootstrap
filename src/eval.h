@@ -164,6 +164,7 @@ Value *builtin_bytesFind(Value **arguments);
 Value *builtin_bytesFromString(Value **arguments);
 Value *builtin_bytesNew(Value **arguments);
 Value *builtin_sha256(Value **arguments);
+Value *builtin_md5(Value **arguments);
 
 /* files.c: file handles. handle_stream gives the C stream of a handle. */
 FILE *handle_stream(long handle);

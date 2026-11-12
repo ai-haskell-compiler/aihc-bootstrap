@@ -70,7 +70,28 @@ charLiteral = label "literal character" (lookAhead (count' 1 10 anySingle) >>= \
     Just (c, r') -> fmap (const c) (skipCount (length r - length r') anySingle)
     Nothing -> unexpected (Tokens (head r :| [])))
 
-float :: MonadParsec m => m a
-float = interpreterTodo "Text.Megaparsec.Char.Lexer.float: floating point numbers"
-
-foreign import prim "interpreterTodo" interpreterTodo :: String -> a
+-- digits, then a fraction, an exponent or both: 1.5, 2e3, 1.5e-3. The
+-- number is the nearest one of its type.
+float :: (MonadParsec m, RealFloat a) => m a
+float = do
+  input <- getInput
+  whole <- fmap (number input 10) (takeWhile1P (Just "digit") Char.isDigit)
+  fmap fromRational (withFraction input whole <|> fmap (scaled whole) (exponentPart 0))
+  where
+    -- mantissa * 10^power, exactly.
+    scaled :: Integer -> Integer -> Rational
+    scaled mantissa power =
+      if power >= 0
+        then fromInteger (mantissa * 10 ^ power)
+        else fromInteger mantissa / fromInteger (10 ^ negate power)
+    withFraction input whole = do
+      void (C.char '.')
+      digits <- takeWhile1P (Just "digit") Char.isDigit
+      let places = toInteger (chunkLength (proxyOf input) digits)
+          mantissa = whole * 10 ^ places + number input 10 digits
+      power <- option (negate places) (try (exponentPart (negate places)))
+      pure (scaled mantissa power)
+    -- e or E, an optional sign, and digits, added to the power so far.
+    exponentPart power = do
+      void (C.char 'e' <|> C.char 'E')
+      fmap (+ power) (signed (pure ()) decimal)

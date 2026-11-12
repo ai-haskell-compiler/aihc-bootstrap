@@ -1193,6 +1193,14 @@ static Expr *parse_if(Parser *parser)
     Expr *no;
 
     parser->position++;
+    if (next_is(parser, T_RESERVED, "|")) {
+        /* if | guard -> a | guard -> b   is   case () of _ | guard -> a ... */
+        expr->scrutinee = new_constructor(token, "()");
+        expr->alternatives =
+            new_alternative(new_pattern(P_WILDCARD, token), NULL);
+        parse_rhs(parser, "->", expr->alternatives);
+        return expr;
+    }
     expr->scrutinee = parse_expression(parser);
     expect(parser, T_RESERVED, "then", "if without then");
     yes = parse_expression(parser);

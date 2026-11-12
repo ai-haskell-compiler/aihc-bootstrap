@@ -12,8 +12,8 @@ when condition action = if condition then action else pure ()
 unless :: Applicative f => Bool -> f () -> f ()
 unless condition action = if condition then pure () else action
 
-forM :: Monad m => [a] -> (a -> m b) -> m [b]
-forM list f = mapM f list
+forM :: (Traversable t, Monad m) => t a -> (a -> m b) -> m (t b)
+forM container f = mapM f container
 
 forM_ :: (Foldable t, Monad m) => t a -> (a -> m b) -> m ()
 forM_ container f = mapM_ f container

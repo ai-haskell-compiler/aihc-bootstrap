@@ -1,5 +1,6 @@
-module Data.Foldable (module Data.Foldable, module Prelude) where
+module Data.Foldable (module Data.Foldable, module Prelude, forM_, foldM, msum) where
 
+import Control.Monad (foldM, forM_, msum)
 import Data.List (find)
 
 fold :: (Foldable t, Monoid m) => t m -> m
@@ -10,9 +11,6 @@ foldMap' f = foldl' (\total a -> total <> f a) mempty
 
 for_ :: (Foldable t, Applicative f) => t a -> (a -> f b) -> f ()
 for_ container f = traverse_ f container
-
-forM_ :: (Foldable t, Monad m) => t a -> (a -> m b) -> m ()
-forM_ container f = mapM_ f container
 
 sequenceA_ :: (Foldable t, Applicative f) => t (f a) -> f ()
 sequenceA_ = foldr (\action rest -> action *> rest) (pure ())
