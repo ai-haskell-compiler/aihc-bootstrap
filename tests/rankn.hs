@@ -44,6 +44,26 @@ choose flag first second (n, c) = if flag then (first n, first c) else (second n
 newtype Wrapper = Wrapper Int
   deriving (Show)
 
+-- A field that works at every type: used as a function, taken out with a
+-- pattern, and kept by a record update.
+data Tools a = Tools
+  { name :: String,
+    each :: !(forall b. [b] -> a -> [(a, b)]),
+    twice :: forall c. c -> (c, c)
+  }
+
+tools :: Tools Int
+tools = Tools {name = "t", each = \list a -> map (\b -> (a, b)) list, twice = \c -> (c, c)}
+
+use :: Tools a -> a -> ([(a, Char)], [(a, Bool)])
+use t a = (each t "xy" a, each t [True] a)
+
+viaPattern :: Tools a -> (Int, String) -> ((Int, Int), (String, String))
+viaPattern (Tools _ _ dup) (n, s) = (dup n, dup s)
+
+viaRecord :: Tools a -> a -> [(a, Int)]
+viaRecord Tools {each = f} a = f [1, 2] a
+
 main :: IO ()
 main = do
   print (both length ([1, 2, 3], "four"))
@@ -55,3 +75,6 @@ main = do
   print (withCounter (\ref -> modifySTRef ref (+ 5)))
   print (collect show, collect (reverse . show))
   print (choose True id id (1, 'a'), choose False id (\x -> x) (2, 'b'))
+  print (use tools 1)
+  print (twice tools 'q', twice tools "s", viaPattern tools (3, "x"), viaRecord tools 0)
+  print (name tools {name = "renamed"}, each (tools {twice = \c -> (c, c)}) "z" 5)

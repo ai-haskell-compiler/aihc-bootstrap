@@ -61,6 +61,7 @@ static Expr *parse_local_bindings(Parser *parser, const Token *token);
 static void parse_rhs(Parser *parser, const char *separator,
                       Alternative *alternative);
 static void finish_let(Expr *let, Expr *body);
+static void skip_type(Parser *parser);
 
 static const Token *peek(const Parser *parser)
 {
@@ -142,6 +143,15 @@ static int next_item(Parser *parser, Block *block)
                || token_is(peek(parser), T_RESERVED, "else")) {
         /* These never start an item, whatever column they are in: they
            belong to something around the block. */
+        found = 0;
+    } else if (peek(parser)->kind == T_VARSYM
+               && strcmp(peek(parser)->text, "-") != 0
+               && strcmp(peek(parser)->text, "!") != 0) {
+        /* No item starts with an operator, so the block ends here and the
+           operator goes on with what the block is part of:
+               do a
+                  b
+               <|> c */
         found = 0;
     } else {
         found = peek(parser)->col == block->column
@@ -278,6 +288,35 @@ static Expr *new_lambda(const Token *token, Pattern *pattern, Expr *body)
 }
 
 /* ---- Patterns ---- */
+
+/* Whether a value might not match the pattern, as far as can be seen before
+   names are resolved: a constructor other than a tuple might have others
+   beside it. */
+static int pattern_may_fail(const Pattern *pattern)
+{
+    int i;
+
+    switch (pattern->kind) {
+    case P_VARIABLE:
+    case P_WILDCARD:
+        return 0;
+    case P_AS:
+    case P_BANG:
+        return pattern_may_fail(pattern->inner);
+    case P_CONSTRUCTOR:
+        if (pattern->name[0] != '(' || pattern->name[1] == ':') {
+            return 1;
+        }
+        for (i = 0; i < pattern->argument_count; i++) {
+            if (pattern_may_fail(pattern->arguments[i])) {
+                return 1;
+            }
+        }
+        return 0;
+    default:
+        return 1;
+    }
+}
 
 static int starts_pattern_atom(const Parser *parser)
 {
@@ -467,6 +506,13 @@ static Pattern *parse_pattern_atom(Parser *parser)
             pattern->name = "()";
         } else {
             pattern = parse_view_or_pattern(parser);
+            if (next_is(parser, T_RESERVED, "::")) {
+                /* (pattern :: type) */
+                parser->position++;
+                pattern->type_start = parser->position;
+                skip_type(parser);
+                pattern->type_end = parser->position;
+            }
             if (next_is(parser, T_SPECIAL, ",")) {
                 Pattern **elements = xmalloc(MAX_TUPLE * sizeof(Pattern *));
                 int count = 1;
@@ -935,6 +981,9 @@ static Expr *parse_atom(Parser *parser)
     } else if (next_is_kind(parser, T_STRING)) {
         expr = new_expr(E_STRING, token);
         expr->string = token->text;
+        /* Decided here, by the module the literal is written in: a pattern
+           synonym is read where it is used. */
+        expr->is_plain_string = !parser->overloaded_strings;
         parser->position++;
     } else if (next_is(parser, T_SPECIAL, "(")) {
         parser->position++;
@@ -1014,23 +1063,6 @@ static Expr *parse_lambda_rest(Parser *parser)
     }
     pattern = parse_pattern_atom(parser);
     return new_lambda(token, pattern, parse_lambda_rest(parser));
-}
-
-/* An expression that may be followed by `where` and local bindings. */
-static Expr *parse_body(Parser *parser)
-{
-    Expr *body = parse_expression(parser);
-
-    if (next_is(parser, T_RESERVED, "where")) {
-        const Token *token = peek(parser);
-        Expr *let;
-
-        parser->position++;
-        let = parse_local_bindings(parser, token);
-        finish_let(let, body);
-        return let;
-    }
-    return body;
 }
 
 /* case scrutinee of { pattern -> body; ... } */
@@ -1153,9 +1185,21 @@ static Expr *parse_statements(Parser *parser, Block *block)
     }
     rest = parse_statements(parser, block);
     if (pattern != NULL) {
+        Expr *lambda = new_lambda(token, pattern, rest);
+
+        if (pattern_may_fail(pattern)) {
+            /* A value that does not match is the monad's `fail`:
+               \x -> case x of { pattern -> rest; _ -> fail "..." } */
+            Expr *message = new_expr(E_STRING, token);
+
+            message->string = "pattern match failure in a do block";
+            message->is_plain_string = 1;
+            lambda->body->alternatives->next = new_alternative(
+                new_pattern(P_WILDCARD, token),
+                new_prelude_call(token, "fail", message, NULL, NULL));
+        }
         return new_application(
-            new_application(new_prelude_name(token, ">>="), expr),
-            new_lambda(token, pattern, rest));
+            new_application(new_prelude_name(token, ">>="), expr), lambda);
     }
     return new_application(
         new_application(new_prelude_name(token, ">>"), expr), rest);
@@ -1390,17 +1434,18 @@ static void parse_rhs(Parser *parser, const char *separator,
             parser->position++; /* the | or the comma */
             memset(qualifier, 0, sizeof(Qualifier));
             if (next_is(parser, T_RESERVED, "let")) {
-                /* let pattern = expression: as pattern <- expression, with
-                   a pattern that always matches. */
+                const Token *let = peek(parser);
+
                 parser->position++;
-                qualifier->pattern = parse_pattern(parser);
-                expect(parser, T_RESERVED, "=",
-                       "let in a guard other than let pattern = expression");
-            } else if (statement_is_bind(parser)) {
-                qualifier->pattern = parse_pattern(parser);
-                expect(parser, T_RESERVED, "<-", "pattern guard");
+                qualifier->let = parse_local_bindings(parser, let);
+                finish_let(qualifier->let, NULL);
+            } else {
+                if (statement_is_bind(parser)) {
+                    qualifier->pattern = parse_pattern(parser);
+                    expect(parser, T_RESERVED, "<-", "pattern guard");
+                }
+                qualifier->expr = parse_expression(parser);
             }
-            qualifier->expr = parse_expression(parser);
             *last = qualifier;
             last = &qualifier->next;
         } while (next_is(parser, T_SPECIAL, ","));
@@ -1598,6 +1643,24 @@ static void add_pattern_variables(Expr *let, const Pattern *whole,
     for (i = 0; i < pattern->argument_count; i++) {
         add_pattern_variables(let, whole, pattern->arguments[i], value);
     }
+    for (i = 0; i < pattern->field_count; i++) {
+        if (pattern->field_patterns[i] != NULL) {
+            add_pattern_variables(let, whole, pattern->field_patterns[i],
+                                  value);
+        } else {
+            /* C { f }: the variable f. It only exists once the resolver
+               has made the record pattern a constructor pattern, so it
+               is looked up by name. */
+            Expr *select = new_expr(E_CASE, pattern->token);
+
+            select->scrutinee = new_local(pattern->token, value);
+            select->alternatives = new_alternative(
+                (Pattern *)whole,
+                new_name(pattern->token, pattern->field_names[i]));
+            add_let_binding(
+                let, new_binding(pattern->field_names[i]), select);
+        }
+    }
 }
 
 /* If the item at the current position is a type signature `f, g :: type`,
@@ -1688,12 +1751,38 @@ static Expr *parse_local_bindings(Parser *parser, const Token *token)
                 (size_t)(local->clause_count + 1) * sizeof(Clause));
             parse_clause(parser, &local->clauses[local->clause_count++], -1);
         } else {
-            /* pattern = body */
-            Pattern *pattern = parse_pattern(parser);
+            /* pattern = body, or with a type and guards:
+                   pattern :: type
+                     | condition = body
+                     | condition = body
+               A ~ in front says that the pattern is only matched when one
+               of its variables is needed, which is so anyway. */
+            Pattern *pattern;
             Binding *value = new_binding("");
+            Expr *body = new_expr(E_CASE, first);
 
-            expect(parser, T_RESERVED, "=", "local binding");
-            add_let_binding(let, value, parse_body(parser));
+            if (next_is(parser, T_RESERVED, "~")) {
+                parser->position++;
+            }
+            pattern = parse_pattern(parser);
+            /* The guards are those of: case () of _ | condition -> body */
+            body->scrutinee = new_constructor(first, "()");
+            body->alternatives =
+                new_alternative(new_pattern(P_WILDCARD, first), NULL);
+            if (next_is(parser, T_RESERVED, "::")) {
+                Expr *annotation = new_expr(E_ANNOTATION, first);
+
+                parser->position++;
+                annotation->type_start = parser->position;
+                skip_type(parser);
+                annotation->type_end = parser->position;
+                annotation->body = body;
+                parse_rhs(parser, "=", body->alternatives);
+                body = annotation;
+            } else {
+                parse_rhs(parser, "=", body->alternatives);
+            }
+            add_let_binding(let, value, body);
             add_pattern_variables(let, pattern, pattern, value);
         }
     }
@@ -1704,7 +1793,8 @@ static Expr *parse_local_bindings(Parser *parser, const Token *token)
             die("%s:%d: %s has a type signature and no definition",
                 locals[i].token->file, locals[i].token->line, locals[i].name);
         }
-        binding->is_function = locals[i].clauses[0].count > 0;
+        binding->is_function = 1;
+        binding->has_parameters = locals[i].clauses[0].count > 0;
         binding->signature_start = locals[i].signature_start;
         binding->signature_end = locals[i].signature_end;
         add_let_binding(let, binding, clauses_to_expr(locals[i].clauses,

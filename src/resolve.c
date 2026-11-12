@@ -200,7 +200,11 @@ static const Scope *resolve_pattern(Module *module, const Scope *scope,
 {
     int i;
 
-    if (pattern->kind == P_RECORD || pattern->kind == P_CONSTRUCTOR) {
+    /* The pattern of `let pattern = e` is resolved once for each of its
+       variables. A constructor that is resolved is left as it is: if it
+       came from a pattern synonym, its name may mean nothing here. */
+    if (pattern->kind == P_RECORD
+        || (pattern->kind == P_CONSTRUCTOR && pattern->constructor == NULL)) {
         Entity *entity = constructor_entity(module, pattern->token,
                                             pattern->name, pattern->qualifier);
 
@@ -217,9 +221,11 @@ static const Scope *resolve_pattern(Module *module, const Scope *scope,
     case P_VARIABLE:
         return extend_scope(scope, pattern->variable);
     case P_CONSTRUCTOR:
-        pattern->constructor =
-            resolve_constructor(module, pattern->token, pattern->name,
-                                pattern->qualifier);
+        if (pattern->constructor == NULL) {
+            pattern->constructor =
+                resolve_constructor(module, pattern->token, pattern->name,
+                                    pattern->qualifier);
+        }
         for (i = 0; i < pattern->argument_count; i++) {
             scope = resolve_pattern(module, scope, pattern->arguments[i]);
         }
@@ -389,10 +395,35 @@ static void resolve_record_construction(Module *module, const Scope *scope,
                                         Expr *expr)
 {
     Expr *result = expr->function;
-    Constructor *constructor =
-        resolve_constructor(module, result->token, result->name, NULL);
+    Entity *entity =
+        constructor_entity(module, result->token, result->name, NULL);
+    Constructor *constructor = entity->constructor;
     int i;
 
+    if (entity->synonym != NULL) {
+        /* P { f = a, g = b } is P's function given a value for each of
+           P's parameters, which are its fields. */
+        const PatternSynonym *synonym = entity->synonym;
+
+        if (synonym->builder == NULL) {
+            TODO_AT(expr->token,
+                    "pattern synonym that cannot be used in an expression");
+        }
+        result = new_simple_expr(E_GLOBAL, expr->token);
+        result->global = synonym->builder;
+        for (i = 0; i < synonym->parameter_count; i++) {
+            Expr *value = record_field_value(module, scope, expr,
+                                             synonym->parameters[i]);
+
+            if (value == NULL) {
+                TODO_AT(expr->token,
+                        "pattern synonym record without all its fields");
+            }
+            result = new_simple_application(result, value);
+        }
+        *expr = *result;
+        return;
+    }
     result->constructor = constructor;
     for (i = 0; i < constructor->arity; i++) {
         const char *name = constructor->field_names != NULL
@@ -415,6 +446,49 @@ static void resolve_record_construction(Module *module, const Scope *scope,
     *expr = *result;
 }
 
+/* Rewrites e { f = a } in place, where f is a field of the pattern synonym
+   P, to
+
+       case e of P v1 v2 v3 -> P v1 a v3 */
+static void resolve_synonym_update(Module *module, const Scope *scope,
+                                   Expr *expr, const PatternSynonym *synonym)
+{
+    Expr *match = new_simple_expr(E_CASE, expr->token);
+    Pattern *pattern = new_simple_pattern(P_CONSTRUCTOR, expr->token);
+    Expr *body = new_simple_expr(E_GLOBAL, expr->token);
+    int count = synonym->parameter_count;
+    int i;
+
+    if (synonym->builder == NULL) {
+        TODO_AT(expr->token,
+                "pattern synonym that cannot be used in an expression");
+    }
+    body->global = synonym->builder;
+    pattern->name = synonym->name;
+    pattern->argument_count = count;
+    pattern->arguments = xmalloc((size_t)count * sizeof(Pattern *) + 1);
+    for (i = 0; i < count; i++) {
+        Expr *value =
+            record_field_value(module, scope, expr, synonym->parameters[i]);
+
+        pattern->arguments[i] = new_simple_pattern(P_VARIABLE, expr->token);
+        pattern->arguments[i]->variable = new_binding("");
+        if (value == NULL) {
+            value = new_simple_expr(E_LOCAL, expr->token);
+            value->local = pattern->arguments[i]->variable;
+        }
+        body = new_simple_application(body, value);
+    }
+    resolve_synonym_pattern(module, scope, pattern, synonym);
+    resolve_in_scope(module, scope, expr->function);
+    match->scrutinee = expr->function;
+    match->alternatives = xmalloc(sizeof(Alternative));
+    memset(match->alternatives, 0, sizeof(Alternative));
+    match->alternatives->pattern = pattern;
+    match->alternatives->body = body;
+    *expr = *match;
+}
+
 /* Rewrites e { f = a } in place to
 
        let u = a in case e of
@@ -433,6 +507,10 @@ static void resolve_record_update(Module *module, const Scope *scope, Expr *expr
     int i;
     int j;
 
+    if (entity != NULL && entity->global->synonym != NULL) {
+        resolve_synonym_update(module, scope, expr, entity->global->synonym);
+        return;
+    }
     if (entity == NULL || entity->global->selector == NULL) {
         unresolved(module, expr->token, expr->field_names[0]);
     }
@@ -535,6 +613,10 @@ static void resolve_alternative(Module *module, const Scope *scope,
 
         for (qualifier = guard->qualifiers; qualifier != NULL;
              qualifier = qualifier->next) {
+            if (qualifier->let != NULL) {
+                inner = resolve_bindings(module, inner, qualifier->let);
+                continue;
+            }
             resolve_in_scope(module, inner, qualifier->expr);
             if (qualifier->pattern != NULL) {
                 inner = resolve_pattern(module, inner, qualifier->pattern);

@@ -115,7 +115,10 @@ static Value *builtin_readRef(Value **arguments)
 /* writeRef :: Ref a -> a -> IO () */
 static Value *builtin_writeRef(Value **arguments)
 {
-    force(arguments[1])->fields[0] = arguments[2];
+    Value *ref = force(arguments[1]);
+
+    ref->fields[0] = arguments[2];
+    ref->is_deep = 0;
     return make_io_result(make_con(TAG_UNIT, 0));
 }
 
@@ -162,8 +165,10 @@ static Value *builtin_arrayRead(Value **arguments)
 static Value *builtin_arrayWrite(Value **arguments)
 {
     long index = force(arguments[2])->number;
+    Value *array = array_argument(arguments[1], index);
 
-    array_argument(arguments[1], index)->fields[index] = arguments[3];
+    array->fields[index] = arguments[3];
+    array->is_deep = 0;
     return make_io_result(make_con(TAG_UNIT, 0));
 }
 
@@ -201,6 +206,7 @@ static Value *builtin_arrayCopy(Value **arguments)
         array_argument(target, to + count - 1);
         memmove(target->fields + to, source->fields + from,
                 (size_t)count * sizeof(Value *));
+        target->is_deep = 0;
     }
     return make_io_result(make_con(TAG_UNIT, 0));
 }
@@ -345,7 +351,7 @@ static const Builtin builtins[] = {
     { "currentDirectory", 1, builtin_currentDirectory },
     { "realPath", 2, builtin_realPath },
     { "temporaryFile", 2, builtin_temporaryFile },
-    { "runProcess", 7, builtin_runProcess },
+    { "runProcess", 9, builtin_runProcess },
     { "sleepMicroseconds", 2, builtin_sleepMicroseconds },
     { "monotonicNanoseconds", 1, builtin_monotonicNanoseconds },
     { "deepForce", 2, builtin_deepForce },

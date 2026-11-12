@@ -30,6 +30,9 @@ struct Value {
     int tag;                /* V_CON: index of the constructor in its type */
     int field_count;        /* V_CON */
     Value **fields;         /* V_CON */
+    int is_deep;            /* V_CON: every field is evaluated, all the way
+                               down (deepForce). A builtin that changes a
+                               field takes it away. */
     Binding *parameter;     /* V_CLOSURE */
     Expr *body;             /* V_CLOSURE */
     Expr *expr;             /* V_THUNK */
@@ -118,6 +121,8 @@ void gc_mark(const void *pointer);
 void gc_mark_range(const void *start, const void *end);
 /* eval.c: marks what the machine itself holds on to. */
 void mark_roots(void);
+/* eval.c: prints where in the program the machine is. */
+void print_position(void);
 
 /* integer.c: Integer beyond a C long. A value with this tag is one; see
    integer.c for what is in it. The arguments of these functions are

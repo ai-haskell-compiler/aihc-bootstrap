@@ -143,6 +143,9 @@ Value *builtin_temporaryFile(Value **arguments)
     return make_io_result(make_string(path));
 }
 
+/* The variables of the environment, each as NAME=value. */
+extern char **environ;
+
 /* A Haskell list of strings as a NULL-terminated array, with `first` in
    front of it. */
 static char **string_array(char *first, Value *list)
@@ -174,12 +177,14 @@ static void redirect(const char *path, int flags, int target)
 }
 
 /* runProcess :: String -> [String] -> String -> String -> String -> String
-                 -> IO Int
+                 -> Bool -> [String] -> IO Int
    Runs the program with the arguments and waits for it. The program is
    looked up in PATH. The other strings are the directory to run it in
    ("" for the current one) and the files that are its standard input,
-   output and error; the output files are overwritten. The result is the
-   exit status, or minus the number of the signal that ended the program. */
+   output and error; the output files are overwritten. If the Bool is True,
+   the program's environment is the list of NAME=value, and not this
+   program's. The result is the exit status, or minus the number of the
+   signal that ended the program. */
 Value *builtin_runProcess(Value **arguments)
 {
     char *program = c_string(arguments[0], NULL);
@@ -188,6 +193,8 @@ Value *builtin_runProcess(Value **arguments)
     char *input = c_string(arguments[3], NULL);
     char *output = c_string(arguments[4], NULL);
     char *error = c_string(arguments[5], NULL);
+    int replace = force(arguments[6])->tag == TAG_TRUE;
+    char **variables = string_array(NULL, arguments[7]);
     int status = 0;
     pid_t child;
 
@@ -204,6 +211,9 @@ Value *builtin_runProcess(Value **arguments)
         redirect(input, O_RDONLY, 0);
         redirect(output, O_WRONLY | O_CREAT | O_TRUNC, 1);
         redirect(error, O_WRONLY | O_CREAT | O_TRUNC, 2);
+        if (replace) {
+            environ = variables + 1; /* past the NULL in front */
+        }
         execvp(program, argv);
         _exit(127);
     }
@@ -253,7 +263,6 @@ Value *builtin_processId(Value **arguments)
 
 /* environment :: IO [String]
    Every variable of the environment, as NAME=value. */
-extern char **environ;
 
 Value *builtin_environment(Value **arguments)
 {

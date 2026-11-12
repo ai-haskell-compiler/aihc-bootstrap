@@ -51,10 +51,19 @@ static const size_t class_sizes[] = {
 #define CHUNK_BYTES ((size_t)1024 * 1024)
 
 static Block **chunks = NULL; /* sorted by base */
+static const char **chunk_bases = NULL; /* the base of each, in the same order */
+/* No chunk there has ever been starts below the one or ends above the
+   other. */
+static const char *lowest_base = NULL;
+static const char *highest_end = NULL;
 static int chunk_count = 0;
 static int chunk_capacity = 0;
 
 static void *free_cells[CLASS_COUNT]; /* each cell holds the next one */
+/* The chunk that the last cell of each size came from. The free cells of a
+   size are in the order of their chunks, so the next one is mostly from
+   the same chunk. */
+static Block *class_chunk[CLASS_COUNT];
 
 static const char *stack_bottom = NULL; /* NULL: collecting is not on yet */
 static size_t allocated = 0;            /* bytes handed out since the last collection */
@@ -68,25 +77,34 @@ static void out_of_memory(void)
     die("out of memory");
 }
 
-/* The chunk the address is inside, or NULL. */
+/* The chunk the address is inside, or NULL. Marking asks this of every
+   word it sees, so the search only looks at the bases, which are together
+   in memory. */
 static Block *find_chunk(const char *address)
 {
+    Block *chunk;
     int low = 0;
-    int high = chunk_count - 1;
+    int high = chunk_count;
 
-    while (low <= high) {
+    /* The first chunk that starts after the address: the one before it is
+       the only one the address can be in. */
+    while (low < high) {
         int middle = (low + high) / 2;
-        Block *chunk = chunks[middle];
 
-        if (address < chunk->base) {
-            high = middle - 1;
-        } else if (address >= chunk->base + chunk->cell_size * chunk->cell_count) {
+        if (chunk_bases[middle] <= address) {
             low = middle + 1;
         } else {
-            return chunk;
+            high = middle;
         }
     }
-    return NULL;
+    if (low == 0) {
+        return NULL;
+    }
+    chunk = chunks[low - 1];
+    if (address >= chunk->base + chunk->cell_size * chunk->cell_count) {
+        return NULL;
+    }
+    return chunk;
 }
 
 /* A new chunk of `cell_count` cells, put in its place in the table. */
@@ -105,19 +123,30 @@ static Block *add_chunk(size_t cell_size, size_t cell_count)
     }
     chunk->cell_size = cell_size;
     chunk->cell_count = cell_count;
+    if (lowest_base == NULL || chunk->base < lowest_base) {
+        lowest_base = chunk->base;
+    }
+    if (chunk->base + cell_size * cell_count > highest_end) {
+        highest_end = chunk->base + cell_size * cell_count;
+    }
     if (chunk_count == chunk_capacity) {
         chunk_capacity = chunk_capacity * 2 + 256;
         chunks = realloc(chunks, (size_t)chunk_capacity * sizeof(Block *));
-        if (chunks == NULL) {
+        chunk_bases = realloc(chunk_bases,
+                              (size_t)chunk_capacity * sizeof(char *));
+        if (chunks == NULL || chunk_bases == NULL) {
             out_of_memory();
         }
     }
-    while (place < chunk_count && chunks[place]->base < chunk->base) {
+    while (place < chunk_count && chunk_bases[place] < chunk->base) {
         place++;
     }
     memmove(chunks + place + 1, chunks + place,
             (size_t)(chunk_count - place) * sizeof(Block *));
+    memmove(chunk_bases + place + 1, chunk_bases + place,
+            (size_t)(chunk_count - place) * sizeof(char *));
     chunks[place] = chunk;
+    chunk_bases[place] = chunk->base;
     chunk_count++;
     return chunk;
 }
@@ -136,9 +165,15 @@ static size_t pending_capacity = 0;
 
 void gc_mark(const void *pointer)
 {
-    Block *chunk = find_chunk(pointer);
+    Block *chunk;
     size_t index;
 
+    /* Most words are not addresses at all: zero, a small number. */
+    if ((const char *)pointer < lowest_base
+        || (const char *)pointer >= highest_end) {
+        return;
+    }
+    chunk = find_chunk(pointer);
     if (chunk == NULL) {
         return;
     }
@@ -216,6 +251,9 @@ static size_t sweep(void)
     for (k = 0; k < CLASS_COUNT; k++) {
         free_cells[k] = NULL;
     }
+    for (k = 0; k < CLASS_COUNT; k++) {
+        class_chunk[k] = NULL;
+    }
     for (i = 0; i < chunk_count; i++) {
         Block *chunk = chunks[i];
         size_t index;
@@ -231,6 +269,7 @@ static size_t sweep(void)
             if (chunk->state[0] & CELL_MARKED) {
                 chunk->state[0] &= (unsigned char)~CELL_MARKED;
                 live += chunk->cell_size;
+                chunk_bases[kept] = chunk->base;
                 chunks[kept++] = chunk;
             } else {
                 free(chunk->base);
@@ -251,6 +290,7 @@ static size_t sweep(void)
                 free_cells[size_class] = cell;
             }
         }
+        chunk_bases[kept] = chunk->base;
         chunks[kept++] = chunk;
     }
     chunk_count = kept;
@@ -271,6 +311,9 @@ void gc_collect(void)
         fprintf(stderr, "gc %lu: %lu MB in use, %lu MB handed out since the last\n",
                 collections, (unsigned long)(live / (1024 * 1024)),
                 (unsigned long)(allocated / (1024 * 1024)));
+        /* A collection comes at no particular place, so the lines of many
+           of them show where the program spends its time. */
+        print_position();
     }
     allocated = 0;
     /* Collect again when as much has been handed out as is in use now, so
@@ -319,7 +362,12 @@ static void *allocate(size_t size, int flags)
     }
     cell = free_cells[size_class];
     memcpy(&free_cells[size_class], cell, sizeof(void *));
-    chunk = find_chunk(cell);
+    chunk = class_chunk[size_class];
+    if (chunk == NULL || cell < chunk->base
+        || cell >= chunk->base + chunk->cell_size * chunk->cell_count) {
+        chunk = find_chunk(cell);
+        class_chunk[size_class] = chunk;
+    }
     index = (size_t)(cell - chunk->base) / chunk->cell_size;
     chunk->state[index] = (unsigned char)(CELL_USED | flags);
     memset(cell, 0, chunk->cell_size);

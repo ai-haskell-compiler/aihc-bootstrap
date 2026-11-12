@@ -18,7 +18,7 @@ instance Exception SomeException where
   fromException exception = Just exception
   displayException (SomeException e) = displayException e
 
-data IOException = IOError String
+data IOException = IOError {ioe_description :: String}
 
 instance Show IOException where
   show (IOError message) = message

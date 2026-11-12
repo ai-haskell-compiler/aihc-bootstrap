@@ -1,6 +1,6 @@
 module Data.Vector.Unboxed.Mutable
   ( module Data.Vector.Unboxed.Mutable,
-    module Data.Vector.Generic.Mutable,
+    module Data.Vector.Mutable,
   )
 where
 
@@ -9,8 +9,8 @@ where
 
 import Control.Monad.ST (ST)
 import Data.Int
-import Data.Vector.Generic.Mutable hiding (new, unsafeNew)
-import qualified Data.Vector.Generic.Mutable as G
+import Data.Vector.Mutable hiding (new, unsafeNew)
+import qualified Data.Vector.Mutable as G
 import Data.Word
 
 -- The types that can be in an unboxed vector, with the value that is all

@@ -62,18 +62,26 @@ static Type *fresh(const Inference *inference)
     return type;
 }
 
-/* Makes sure no TY_META in the type has a deeper level than `level`. */
-static void lower_levels(Type *type, int level)
+/* Before `meta` is made to stand for `type`: makes sure no TY_META in the
+   type has a deeper level than `meta`. Returns whether `meta` itself is
+   inside the type: that would be a type that contains itself. */
+static int lower_levels(Type *type, const Type *meta)
 {
     type = prune(type);
-    if (type->kind == TY_APP) {
-        lower_levels(type->function, level);
-        lower_levels(type->argument, level);
-    } else if (type->kind == TY_FORALL) {
-        lower_levels(type->body, level);
-    } else if (type->kind == TY_META && type->level > level) {
-        type->level = level;
+    if (type == meta) {
+        return 1;
     }
+    if (type->kind == TY_APP) {
+        return lower_levels(type->function, meta)
+            | lower_levels(type->argument, meta);
+    }
+    if (type->kind == TY_FORALL) {
+        return lower_levels(type->body, meta);
+    }
+    if (type->kind == TY_META && type->level > meta->level) {
+        type->level = meta->level;
+    }
+    return 0;
 }
 
 static void mismatch(Type *a, Type *b, const Token *token)
@@ -90,31 +98,114 @@ static void mismatch(Type *a, Type *b, const Token *token)
     TODO_AT(token, "type mismatch: the type pass is wrong or incomplete");
 }
 
+/* ---- Types that a match has shown to be the same ----
+
+   eqT says whether two types are the same type, and a match on its Refl is
+   where the program relies on it:
+
+       case eqT @a @Int of Just Refl -> [value]      (value :: a, as [Int])
+
+   Each such match adds the two types here, for as long as the alternative
+   of the match is being inferred. There, a type variable that does not fit
+   where it is used is tried as the type it was shown to be. And a type
+   that is still to be found out is never found to be that type variable,
+   but the type it was shown to be: the type may be used outside the
+   alternative as well (the [Int] above), where the two are different
+   types when the program runs. */
+
+typedef struct Given {
+    Type *left;
+    Type *right;
+    struct Given *next;
+} Given;
+
+static Given *givens = NULL;
+
+static void add_given(Type *left, Type *right)
+{
+    Given *given = xmalloc(sizeof(Given));
+
+    given->left = left;
+    given->right = right;
+    given->next = givens;
+    givens = given;
+}
+
+/* The type that the type variable was shown to be, or NULL. */
+static Type *given_type(const Type *variable)
+{
+    const Given *given;
+
+    for (given = givens; given != NULL; given = given->next) {
+        Type *left = prune(given->left);
+        Type *right = prune(given->right);
+
+        if (left->kind == TY_RIGID && left->variable == variable->variable) {
+            return right;
+        }
+        if (right->kind == TY_RIGID && right->variable == variable->variable) {
+            return left;
+        }
+    }
+    return NULL;
+}
+
+/* The type with every type variable that was shown to be another type
+   replaced by that type. */
+static Type *apply_givens(Type *type)
+{
+    type = prune(type);
+    if (type->kind == TY_RIGID) {
+        Type *given = given_type(type);
+
+        return given != NULL ? given : type;
+    }
+    if (type->kind == TY_APP) {
+        Type *function = apply_givens(type->function);
+        Type *argument = apply_givens(type->argument);
+
+        if (function != type->function || argument != type->argument) {
+            return new_type_application(function, argument);
+        }
+    }
+    return type;
+}
+
 /* Makes the two types equal by filling in TY_METAs. */
 static void unify(Type *a, Type *b, const Token *token)
 {
     a = prune(a);
     b = prune(b);
+    /* An associated type that is known stands for what it is: StreamOf
+       (ParsecT e s m) is s. */
+    if (is_family_application(a)) {
+        a = prune(reduce_family(a));
+    }
+    if (is_family_application(b)) {
+        b = prune(reduce_family(b));
+    }
     if (a == b) {
         return;
     }
-    if (a->kind == TY_META) {
-        lower_levels(b, a->level);
-        a->link = b;
-    } else if (b->kind == TY_META) {
-        lower_levels(a, b->level);
-        b->link = a;
-    } else if (is_family_application(a) || is_family_application(b)) {
-        /* An associated type is equal to whatever it is used as: the
-           program is known to be well typed. If it is known what it stands
-           for, that is used; otherwise it is found out when the program
-           runs. */
-        Type *known_a = reduce_family(a);
-        Type *known_b = reduce_family(b);
+    if (a->kind == TY_META || b->kind == TY_META) {
+        Type *meta = a->kind == TY_META ? a : b;
+        Type *type = a->kind == TY_META ? b : a;
 
-        if (known_a != a || known_b != b) {
-            unify(known_a, known_b, token);
+        if (givens != NULL) {
+            type = apply_givens(type);
+            if (type == meta) {
+                return;
+            }
         }
+        if (lower_levels(type, meta)) {
+            /* A type that contains itself. */
+            mismatch(meta, type, token);
+        }
+        meta->link = type;
+    } else if (is_family_application(a) || is_family_application(b)) {
+        /* An associated type that is not known yet is equal to whatever
+           it is used as: the program is known to be well typed. What it
+           stands for is found out when the program runs. */
     } else if (a->kind == TY_RIGID && b->kind == TY_RIGID
                && a->variable == b->variable) {
         return;
@@ -138,7 +229,24 @@ static void unify(Type *a, Type *b, const Token *token)
               substitute(b->body, b->variable_count, b->variables, same),
               token);
     } else {
-        mismatch(a, b, token);
+        static int following = 0; /* one step only: a may be given as b
+                                     and b as a */
+        Type *given = NULL;
+
+        if (!following && a->kind == TY_RIGID) {
+            given = given_type(a);
+            a = given != NULL ? given : a;
+        }
+        if (!following && given == NULL && b->kind == TY_RIGID) {
+            given = given_type(b);
+            b = given != NULL ? given : b;
+        }
+        if (given == NULL) {
+            mismatch(a, b, token);
+        }
+        following = 1;
+        unify(a, b, token);
+        following = 0;
     }
 }
 
@@ -301,8 +409,12 @@ static Type *string_type(void)
                                 prelude_type("Char"));
 }
 
-/* The type of the pattern. Gives each of its variables a type. */
-static Type *infer_pattern(Inference *inference, Pattern *pattern)
+static Type *annotation_type(Inference *inference, int start, int end);
+static Type *infer_pattern(Inference *inference, Pattern *pattern);
+
+/* The type of the pattern, from what it looks like. */
+
+static Type *infer_pattern_shape(Inference *inference, Pattern *pattern)
 {
     Type *type;
     int i;
@@ -340,6 +452,12 @@ static Type *infer_pattern(Inference *inference, Pattern *pattern)
                   pattern->token);
             type = result;
         }
+        if (strcmp(pattern->constructor->name, "Refl") == 0
+            && pattern->constructor->module != NULL
+            && strcmp(pattern->constructor->module->name, "Data.Typeable") == 0) {
+            /* Same a b: this match shows that a is b. */
+            add_given(type->function->argument, type->argument);
+        }
         return type;
     case P_AS:
         pattern->variable->type = infer_pattern(inference, pattern->inner);
@@ -360,6 +478,22 @@ static Type *infer_pattern(Inference *inference, Pattern *pattern)
         break;
     }
     return NULL;
+}
+
+/* The type of what the pattern matches. It gives its variables their
+   types. */
+static Type *infer_pattern(Inference *inference, Pattern *pattern)
+{
+    Type *type = infer_pattern_shape(inference, pattern);
+
+    if (pattern->type_end > pattern->type_start) {
+        /* (pattern :: type) */
+        unify(type,
+              annotation_type(inference, pattern->type_start,
+                              pattern->type_end),
+              pattern->token);
+    }
+    return type;
 }
 
 /* Turns every TY_META in the type that is deeper than `level` into a type
@@ -504,8 +638,11 @@ static void infer_binding(Inference *inference, Binding *binding)
             *binding->definition, binding->scheme->variable_count,
             binding->scheme->variables);
     } else if (binding->is_function) {
-        /* f x = ...: infer one level deeper, then generalise. */
+        /* f x = ... or f = ...: infer one level deeper, then
+           generalise. */
         Binding *leader;
+        Type *parameter;
+        Type *result;
 
         inference->level = binding->level + 1;
         inference->generalizing = binding;
@@ -527,6 +664,24 @@ static void infer_binding(Inference *inference, Binding *binding)
             binding->state = BINDING_PENDING;
             return;
         }
+        if (!binding->has_parameters && binding->member_count == 0
+            && !split_function_type(prune(binding->type), &parameter,
+                                    &result)) {
+            /* x = ..., and x is not a function: not generalised, as the
+               monomorphism restriction says. Haskell does generalise it
+               when no class is involved, which we cannot tell; where that
+               matters, x is a function made without naming its parameter:
+                   keep = Map.filter wanted
+               Then every use of x works it out again, which costs little
+               for a function. Its type belongs to the level of the let,
+               so that a function beside it does not generalise it. */
+            Type *outer = new_meta();
+
+            outer->level = binding->level;
+            lower_levels(binding->type, outer);
+            binding->state = BINDING_TYPED;
+            return;
+        }
         /* One list of type variables for the whole group. */
         generalize(binding->type, binding->level, &variables, &count);
         for (i = 0; i < binding->member_count; i++) {
@@ -539,9 +694,8 @@ static void infer_binding(Inference *inference, Binding *binding)
             binding->members[i]->state = BINDING_TYPED;
         }
     } else {
-        /* x = ...: not generalised, as the monomorphism restriction says.
-           (Haskell does generalise it when no class is involved; we cannot
-           tell.) */
+        /* pattern = ...: not generalised, as the monomorphism restriction
+           says. */
         inference->level = binding->level;
         unify(binding->type, infer(inference, *binding->definition), token);
         inference->level = saved_level;
@@ -627,6 +781,7 @@ static void infer_alternative(Inference *inference, Alternative *alternative,
 {
     Guard *guard;
     Qualifier *qualifier;
+    Given *outer_givens = givens;
 
     unify(infer_pattern(inference, alternative->pattern), scrutinee,
           alternative->pattern->token);
@@ -640,8 +795,13 @@ static void infer_alternative(Inference *inference, Alternative *alternative,
     for (guard = alternative->guards; guard != NULL; guard = guard->next) {
         for (qualifier = guard->qualifiers; qualifier != NULL;
              qualifier = qualifier->next) {
-            Type *type = infer(inference, qualifier->expr);
+            Type *type;
 
+            if (qualifier->let != NULL) {
+                infer_let_bindings(inference, qualifier->let);
+                continue;
+            }
+            type = infer(inference, qualifier->expr);
             if (qualifier->pattern != NULL) {
                 unify(infer_pattern(inference, qualifier->pattern), type,
                       qualifier->expr->token);
@@ -651,12 +811,15 @@ static void infer_alternative(Inference *inference, Alternative *alternative,
         }
         unify(infer(inference, guard->body), result, guard->body->token);
     }
+    givens = outer_givens;
 }
 
-/* Where a signature says a parameter has a forall type, the parameter gets
-   that type before the definition is inferred, so that every use of the
-   parameter can give it types of its own. Other parameters get their type
-   by inference, as always. */
+/* Where there is a signature, the parameters get their types from it
+   before the definition is inferred. For a parameter with a forall type
+   that is what lets every use of it give it types of its own. For the
+   others it means that a type variable of the signature is known as such
+   from the start, which a match on Refl relies on (see the given types
+   above). */
 static void give_parameter_types(Expr *expr, Type *type)
 {
     Type *parameter;
@@ -664,9 +827,7 @@ static void give_parameter_types(Expr *expr, Type *type)
 
     while (expr->kind == E_LAMBDA
            && split_function_type(prune(type), &parameter, &result)) {
-        if (prune(parameter)->kind == TY_FORALL) {
-            expr->local->type = prune(parameter);
-        }
+        expr->local->type = prune(parameter);
         expr = expr->body;
         type = result;
     }
@@ -743,7 +904,7 @@ static Type *infer(Inference *inference, Expr *expr)
     case E_CHAR:
         return prelude_type("Char");
     case E_STRING:
-        if (inference->module->overloaded_strings && !expr->is_plain_string) {
+        if (!expr->is_plain_string) {
             return infer_overloaded_literal(
                 inference, expr,
                 library_entity("Data.String", NS_VARIABLE, "fromString")->global,

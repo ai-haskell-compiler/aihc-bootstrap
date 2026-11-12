@@ -644,6 +644,9 @@ static void add_import_items(Import *import, const Token *tokens, int start,
                 item->is_pattern = 1;
                 if (in_sublist && parent_item != NULL) {
                     item->parent = parent_item->name;
+                } else if (tokens[i + 1].text[0] == ':') {
+                    /* A type that is an operator: (:~:) (Refl). */
+                    parent_item = item;
                 }
                 after_pattern = 0;
                 i += 2;
@@ -1222,6 +1225,7 @@ static int add_class_declaration(Module *module, int start, int end)
         return 0;
     }
     class = xmalloc(sizeof(Class));
+    memset(class, 0, sizeof(Class));
     class->name = tokens[i].text;
     class->module = module;
     class->variable = new_binding(tokens[i + 1].text);
@@ -1460,7 +1464,9 @@ static void add_declaration(Module *module, int start, int end)
         supported = add_instance_declaration(module, start, end);
     } else if (token_is(first, T_VARID, "pattern") && end - start > 2
                && (first[1].kind == T_CONID
-                   || (first[1].kind == T_VARID && first[2].kind == T_VARSYM
+                   || ((first[1].kind == T_VARID
+                        || token_is(&first[1], T_SPECIAL, "("))
+                       && first[2].kind == T_VARSYM
                        && first[2].text[0] == ':'))) {
         supported = add_pattern_synonym(module, start, end);
     } else {

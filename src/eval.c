@@ -264,6 +264,10 @@ static void note_expr(Expr *owner, const Expr *expr)
             for (guard = alternative->guards; guard != NULL; guard = guard->next) {
                 for (qualifier = guard->qualifiers; qualifier != NULL;
                      qualifier = qualifier->next) {
+                    if (qualifier->let != NULL) {
+                        note_expr(owner, qualifier->let);
+                        continue;
+                    }
                     if (qualifier->pattern != NULL) {
                         note_pattern(owner, qualifier->pattern);
                     }
@@ -489,8 +493,13 @@ static int guard_holds(const Guard *guard, Env **env)
 
     for (qualifier = guard->qualifiers; qualifier != NULL;
          qualifier = qualifier->next) {
-        Value *value = delay(qualifier->expr, *env);
+        Value *value;
 
+        if (qualifier->let != NULL) {
+            *env = bind_let(qualifier->let, *env);
+            continue;
+        }
+        value = delay(qualifier->expr, *env);
         if (qualifier->pattern != NULL) {
             if (!matches(qualifier->pattern, value, env)) {
                 return 0;
@@ -711,6 +720,27 @@ void mark_roots(void)
     for (global = all_globals; global != NULL; global = global->all_next) {
         gc_mark(global->value);
     }
+}
+
+/* Prints the lines of the program that the innermost frames of the machine
+   are waiting at, the innermost first, each file once. */
+void print_position(void)
+{
+    const char *last = NULL;
+    int shown = 0;
+    int i;
+
+    fprintf(stderr, "  at");
+    for (i = stack_size - 1; i >= 0 && shown < 8; i--) {
+        const Expr *expr = stack[i].expr;
+
+        if (expr != NULL && expr->token != NULL && expr->token->file != last) {
+            last = expr->token->file;
+            fprintf(stderr, " %s:%d", last, expr->token->line);
+            shown++;
+        }
+    }
+    fprintf(stderr, "\n");
 }
 
 /* ---- Exceptions ---- */

@@ -1,6 +1,8 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 
 module Main where
 
@@ -10,6 +12,7 @@ import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import Data.Text (Text)
+import Data.Typeable (eqT, (:~:) (Refl))
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
@@ -120,6 +123,21 @@ example =
 decl :: Decl
 decl = Decl (Name "main") example (Set.fromList [T.pack "export", T.pack "xx"])
 
+-- eqT: whether two types are the same type. Where they are, a value of
+-- the one is a value of the other.
+data Shrub = Bud Int | Fork Shrub String Shrub deriving (Data)
+
+everyInt :: forall value. (Data value) => value -> [Int]
+everyInt value =
+  case eqT @value @Int of
+    Just Refl -> [value]
+    Nothing -> concat (gmapQ everyInt value)
+
+sameType :: forall a b. (Data a, Data b) => a -> b -> Bool
+sameType _ _ = case eqT @a @b of
+  Just Refl -> True
+  Nothing -> False
+
 main :: IO ()
 main = do
   print (names example)
@@ -137,3 +155,6 @@ main = do
   print (gmapM (mkM (\n -> if n > (0 :: Int) then Just n else Nothing)) (1 :: Int, 2 :: Int), gmapM (mkM (\n -> if n > (0 :: Int) then Just n else Nothing)) (1 :: Int, 0 :: Int))
   print (gmapQ (const 'f') (Note "x" 1), gmapT (mkT (+ (1 :: Int))) (Note "x" 1), length (gmapQ (const ()) (Map.fromList [(1 :: Int, 'a'), (2, 'b')])))
   print (evalState (everywhereM (mkM (\(Name n) -> get >>= \k -> put (k + 1) >> pure (Name (n ++ show (k :: Int))))) [Name "a", Name "b", Name "c"]) 0)
+  print (everyInt (Fork (Bud 1) "x" (Fork (Bud 2) "y" (Bud 3))))
+  print (everyInt (5 :: Int), everyInt "none", everyInt [(1 :: Int, 'a'), (2, 'b')])
+  print (sameType 'a' 'b', sameType 'a' "b", sameType (1 :: Int) (2 :: Int))

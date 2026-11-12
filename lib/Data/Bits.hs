@@ -76,7 +76,11 @@ instance FiniteBits Int where
   finiteBitSize _ = 64
 
 instance Bits Integer where
-  popCount _ = error "Data.Bits.popCount at Integer"
+  popCount a = if a < 0 then negate (integerOnes (negate a)) else integerOnes a
+
+-- How many bits of a number that is not negative are 1.
+integerOnes :: Integer -> Int
+integerOnes n = if n == 0 then 0 else fromInteger (n `rem` 2) + integerOnes (n `quot` 2)
 
 instance Bits Word
 

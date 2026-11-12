@@ -34,6 +34,7 @@ Nothing
 (ExitFailure (-9),"","")
 (ExitSuccess,"b\ntwo.txt\n","")
 (ExitFailure 1,"42\n","")
+(ExitSuccess,"hello .\n","")
 given
 done
 True

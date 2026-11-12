@@ -13,3 +13,6 @@ App (Lit 2) [Lit 4,Var (Name "v")]
 (Just (1,2),Nothing)
 ("",Note "x" 1,1)
 [Name "a0",Name "b1",Name "c2"]
+[1,2,3]
+([5],[],[1,2])
+(True,False,True)

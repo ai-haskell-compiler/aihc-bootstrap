@@ -116,13 +116,17 @@ Type *reduce_family(Type *type)
 
 /* ---- Classes ---- */
 
-/* The first instance of the class that the type matches, or NULL.
-   Overlapping instances are not handled: the first match wins. */
-static Instance *find_instance(const Class *class, Type *type, Type ***bound)
+/* Adds the instances that have come since the last time to the class's
+   own list, in front of it and in their order. */
+static void collect_instances(Class *class)
 {
+    Instance *oldest = class->seen;
+    Instance *older = class->instances;
+    Instance **place = &class->instances;
     Instance *instance;
 
-    for (instance = all_instances; instance != NULL; instance = instance->next) {
+    class->seen = all_instances;
+    for (instance = all_instances; instance != oldest; instance = instance->next) {
         const Token *token = &instance->module->tokens[instance->class_token];
         const char *qualifier;
 
@@ -135,13 +139,43 @@ static Instance *find_instance(const Class *class, Type *type, Type ***bound)
         if (instance->class != class) {
             continue;
         }
+        instance->next_of_class = older;
+        *place = instance;
+        place = &instance->next_of_class;
+    }
+}
+
+/* The first instance of the class that the type matches, or NULL.
+   Overlapping instances are not handled: the first match wins. One case
+   is: an instance for every type (instance C a) is only used if no other
+   instance matches. */
+static Instance *find_instance(Class *class, Type *type, Type ***bound)
+{
+    Instance *for_every_type = NULL;
+    Instance *instance;
+
+    /* Preparing an instance can load a module, with instances of its
+       own. */
+    while (class->seen != all_instances) {
+        collect_instances(class);
+    }
+    for (instance = class->instances; instance != NULL;
+         instance = instance->next_of_class) {
+        if (prune(instance->head)->kind == TY_RIGID) {
+            for_every_type = instance;
+            continue;
+        }
         *bound = new_bound(instance->variable_count);
         if (match_type(instance->head, type, instance->variable_count,
                        instance->variables, *bound)) {
             return instance;
         }
     }
-    return NULL;
+    if (for_every_type != NULL) {
+        *bound = new_bound(for_every_type->variable_count);
+        (*bound)[0] = type;
+    }
+    return for_every_type;
 }
 
 Value *find_method(Global *method, Type *type)

@@ -338,7 +338,11 @@ static Value *derived_bound(Type *type, const char *method)
 
 /* deepForce :: a -> ()
    Evaluates the whole value. The last field is done in a loop, not a
-   nested call, so that a long list does not use the C stack. */
+   nested call, so that a long list does not use the C stack.
+
+   A value that has been evaluated like this says so (is_deep), and is not
+   walked again. A value is often a part of many others: the name of a
+   file is in every position of a syntax tree. */
 Value *builtin_deepForce(Value **arguments)
 {
     Value *value = arguments[1];
@@ -346,7 +350,8 @@ Value *builtin_deepForce(Value **arguments)
 
     for (;;) {
         value = force(value);
-        if (value->kind != V_CON || value->field_count == 0) {
+        if (value->kind != V_CON || value->field_count == 0
+            || value->is_deep) {
             break;
         }
         for (i = 0; i < value->field_count - 1; i++) {
@@ -356,6 +361,18 @@ Value *builtin_deepForce(Value **arguments)
             field_arguments[1] = value->fields[i];
             builtin_deepForce(field_arguments);
         }
+        value = value->fields[value->field_count - 1];
+    }
+    /* All of it is evaluated now, so every value along the last fields can
+       say so. */
+    value = arguments[1];
+    for (;;) {
+        value = force(value);
+        if (value->kind != V_CON || value->field_count == 0
+            || value->is_deep) {
+            break;
+        }
+        value->is_deep = 1;
         value = value->fields[value->field_count - 1];
     }
     return make_con(TAG_UNIT, 0);

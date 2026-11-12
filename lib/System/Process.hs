@@ -46,9 +46,6 @@ readCreateProcessWithExitCode process input = do
   let (program, arguments) = case cmdspec process of
         ShellCommand command -> ("/bin/sh", ["-c", command])
         RawCommand name list -> (name, list)
-  case env process of
-    Nothing -> pure ()
-    Just _ -> interpreterTodo "System.Process: running a program with another environment"
   found <- findExecutable program
   case found of
     Nothing -> throwIO (IOError (program ++ ": the program does not exist"))
@@ -58,7 +55,10 @@ readCreateProcessWithExitCode process input = do
   outputFile <- temporaryFile directory
   errorFile <- temporaryFile directory
   writeFile inputFile input
-  status <- runProcess program arguments (maybe "" id (cwd process)) inputFile outputFile errorFile
+  let (replace, variables) = case env process of
+        Nothing -> (False, [])
+        Just list -> (True, map (\(name, value) -> name ++ "=" ++ value) list)
+  status <- runProcess program arguments (maybe "" id (cwd process)) inputFile outputFile errorFile replace variables
   output <- readFile outputFile
   errors <- readFile errorFile
   mapM_ removeFile [inputFile, outputFile, errorFile]
@@ -99,6 +99,6 @@ foreign import prim "hPutStr" primitiveHPutStr :: Int -> String -> IO ()
 
 foreign import prim "temporaryFile" temporaryFile :: String -> IO String
 
-foreign import prim "runProcess" runProcess :: String -> [String] -> String -> String -> String -> String -> IO Int
+foreign import prim "runProcess" runProcess :: String -> [String] -> String -> String -> String -> String -> Bool -> [String] -> IO Int
 
 foreign import prim "interpreterTodo" interpreterTodo :: String -> a

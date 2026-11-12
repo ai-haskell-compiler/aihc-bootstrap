@@ -262,19 +262,71 @@ the build plan and prints it, and starts to compile:
 build  aihc-rts-1.0.2 (no modules)
 ```
 
-With the collector (below) the run gets past that point in constant
-memory: 59 MB in use at the end, 1 GB at the most for the whole process,
-after 3 minutes and 17 seconds. It then reaches the next thing that is
-missing:
+The runtime system is the first package. AIHC gives its six C sources to
+the C compiler, compiles `rts.lir` to an object file itself, and puts them
+in an archive. **Every file of the package is byte for byte what AIHC
+built with GHC writes**: the object file AIHC generates, the archive, and
+the manifest with the package's hash.
 
 ```text
-type mismatch: MVector and v
-... Aihc/Native/Object.hs:239
+built  aihc-rts-1.0.2 in 1 min 19 s
+aihc-rts: 11 identical, 0 different, 0 missing
 ```
 
-`Aihc.Native.Object` is written for any mutable vector `v` of the class
-`MVector`. `lib/Data/Vector/Generic/Mutable.hs` has one vector type and no
-class. That is the next step of the loop.
+AIHC built with GHC takes 0.6 seconds for that package, so the
+interpreter is about 130 times slower. Then come `aihc-prim` (27 modules)
+and `aihc-base` (280 modules), which AIHC built with GHC compiles in 4
+and 5 seconds.
+
+**They do not get through the lexer.** After seven minutes the interpreter
+has allocated 346 GB, with 58 MB in use, and every collection finds it at
+the same place:
+
+```text
+gc 1354: 58 MB in use, 256 MB handed out since the last
+  at .../Aihc/Parser/Lex/Types.hs:442 lib/Prelude.hs:403 .../Aihc/Parser/Lex.hs:139
+```
+
+That is `skipWhitespace`, which runs before every token. It asks for the
+length of the rest of the input in bytes (`lengthWord8`) and reads
+characters at byte offsets (`iter`). Both are one step for a `Text` that
+is bytes. Here a `Text` is a list of characters, so both walk the list:
+lexing a file takes time with the square of its length. The two packages
+are 2 MB of source. **`Text` as UTF-8 bytes is the next step**; see
+"Memory" below for what it takes.
+
+### Comparing a build with the real one
+
+Build the same program with both into two stores, and `cmp` the files.
+Three things have to be the same for the files to be:
+
+- **The sources of AIHC.** The interpreter runs AIHC's sources as they are
+  now; a binary is what they were when it was built. Use a copy of the
+  sources at the commit of the binary (`git archive COMMIT | tar -x -C
+  DIR`), run both in it, and point the binary at its data files with
+  `aihc_datadir=DIR/bin/aihc`.
+- **The compiler's identity.** AIHC puts a hash of its own executable into
+  the hash of every package. Set `AIHC_COMPILER_IDENTITY` to the same
+  value for both.
+- **The directory.** AIHC reads the core libraries from the directory it
+  runs in, and writes that directory's `aihc.lock`.
+
+```sh
+cd DIR
+AIHC_COMPILER_IDENTITY=x AIHC=DIR sh .../scripts/run-aihc.sh build Main.hs --build-root /tmp/a/target --store /tmp/a/store
+AIHC_COMPILER_IDENTITY=x aihc_datadir=DIR/bin/aihc aihc build Main.hs --build-root /tmp/b/target --store /tmp/b/store
+```
+
+### Where the time goes
+
+`sample` on the running interpreter shows it. Three things were most of
+the time of a build, and each took a few lines to fix:
+
+| What | Share | Now |
+| --- | ---: | --- |
+| Looking through all instances of all classes for every method call | 60% | Each class has a list of its instances (`collect_instances`) |
+| Finding the block of a cell that is being allocated | 16% | The block of the last cell of that size is tried first |
+| Finding the block of a word while marking | 40% of what was left | The search looks only at the bases of the blocks, in one array |
 
 ## Memory
 
@@ -286,7 +338,9 @@ allocated keeps that alive. It has an allocator of its own, in cells of a
 few sizes, so that a word can be checked against what exists.
 
 `make test-gc` runs the tests with a collection after every 100 kB.
-`AIHC_GC_REPORT=1` prints a line for every collection.
+`AIHC_GC_REPORT=1` prints a line for every collection, and the lines of
+the program that the machine is at. A collection comes at no particular
+place, so many of them show where a program spends its time.
 
 Three things kept memory in use that a compiled program would have let go.
 All three had to be fixed before AIHC ran in constant memory, and
@@ -305,18 +359,31 @@ All three had to be fixed before AIHC ran in constant memory, and
 
 What is left, in the order it is likely to matter:
 
-1. **Types made while the program runs are never freed.** A type is made
+1. **`Text` as UTF-8 bytes**, as upstream. It is what stops AIHC now (see
+   "Running AIHC"), and as a list of characters it is also the largest
+   user of memory while AIHC lexes. A `Text` becomes a `ByteString`, which
+   is already a part of a block of bytes that can be cut in one step.
+   What has to be one step, or one pass, on that: `lengthWord8`, `iter`,
+   `null`, `uncons` and the pattern `:<`, `take`, `drop`, `splitAt`,
+   `takeWhile`, `dropWhile`, `span`, `break`, `isPrefixOf`, `stripPrefix`,
+   and comparing. Decoding a character at an offset, counting characters
+   and finding the offset of the nth character are best in C. Everything
+   that makes a new text anyway (`replace`, `splitOn`, `toUpper`,
+   `intercalate`, ...) can stay as it is, on the characters. Only
+   `lib/Data/Text.hs`, `Data/Text/Unsafe.hs`, `Data/Text/IO.hs` and
+   `Data/Text/Encoding.hs` look inside a `Text`.
+2. **Types made while the program runs are never freed.** A type is made
    whenever a type with variables is passed to a function. This is most of
-   the difference between 59 MB in use and 1 GB for the process.
-2. **Smaller values.** A `Value` is 120 bytes whatever it is. One struct
+   the difference between the memory in use and the memory of the process
+   (58 MB and 1.3 GB while AIHC lexes).
+3. **Smaller values.** A `Value` is 128 bytes whatever it is, and a thunk
+   also takes a cell of 32 bytes for each variable it keeps. One struct
    per kind, or an allocation that is only as long as the kind needs.
-3. **`Text` as UTF-8 bytes in C**, as upstream. As a list of characters it
-   is the largest user of memory while AIHC lexes, and `lengthWord8` of
-   the remaining input is linear.
 
 The megaparsec port takes more than linear time: 4,000 words parse in 2.5
-seconds and 16,000 in 11. AIHC's own inputs are small enough for that not
-to matter yet.
+seconds and 16,000 in 11 (measured before the three fixes under "Where
+the time goes"). AIHC's own inputs are small enough for that not to
+matter yet.
 
 ## Language backlog
 
@@ -325,14 +392,15 @@ Done, each with a test compared against GHC:
 | Feature | Test |
 | --- | --- |
 | Associated types of classes | `tests/families.hs` |
-| `\case`, view patterns, tuple sections, named field puns, `let` in guards, bang patterns in clauses, operators defined between their parameters, qualified constructor operators | `tests/extensions.hs` |
+| `\case`, view patterns, tuple sections, named field puns, `let` in guards (with functions and several definitions), bang patterns in clauses, operators defined between their parameters, qualified constructor operators, a pattern binding with a type and guards, `~` in front of a let pattern, `(pattern :: type)`, a `do` block that ends at an operator, a local function made without naming its parameter and used at two types | `tests/extensions.hs` |
 | Local functions that call each other, without signatures | `tests/recursion.hs` |
-| Pattern synonyms: both directions, with a `where` clause, with fields, as operators | `tests/patsyn.hs` |
+| Pattern synonyms: both directions, with a `where` clause, with fields (also to build, to update and in a `let`), as operators | `tests/patsyn.hs` |
 | Export lists that hide a module's own definitions; pattern synonyms exported as part of a type | `tests/exports.hs` |
 | Type applications (`f @T`), with the type variables of a signature in scope in its body; type variables of their own in expression annotations | `tests/typeapp.hs` |
 | A pattern that is a variable or `_` does not evaluate what it is matched with | `tests/laziness.hs` |
-| `forall` inside a type: an argument that works at every type | `tests/rankn.hs` |
-| Derived `Data` (`gmapT`, `gmapQ`, `gmapM`) | `tests/data.hs` |
+| `forall` inside a type: an argument that works at every type, and a record field that does | `tests/rankn.hs` |
+| Derived `Data` (`gmapT`, `gmapQ`, `gmapM`); `eqT`, and a match on `Refl` | `tests/data.hs` |
+| A pattern in a `do` block that does not match is the monad's `fail` | `tests/dofail.hs` |
 
 How the less obvious ones work:
 
@@ -349,7 +417,19 @@ How `forall` inside a type works: where a function's parameter has the
 type `forall a. t`, the argument is inferred with `a` standing for itself
 and becomes a function of `a`; each use of the parameter gives it a type.
 A `forall` on the result of a function is moved to the front of the
-signature, which means the same.
+signature, which means the same. That is also how a record field with a
+`forall` type is used as a function: its type variables are the
+selector's.
+
+How `eqT` works: every type is at hand when the program runs, so `eqT @a
+@b` compares the two. A match on its `Refl` is where the program relies on
+the answer, and the type pass has to as well: inside that alternative, a
+type variable that does not fit is tried as the type it was shown to be
+(the given types in `src/infer.c`).
+
+What the type pass does not check: the constraints of a signature. A class
+with two parameters, of which only the first decides the instance, can so
+be written with one (`MVector v a` in `lib/Data/Vector/Generic/Mutable.hs`).
 
 Still missing, as the survey shows them:
 

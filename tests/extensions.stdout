@@ -19,3 +19,7 @@ Just (1,"second")
 [Just (10,1),Just (20,1),Nothing,Just (30,1),Nothing]
 (9,[0,1])
 [3,2,1]
+(["under","over by 10"],[(0,[0]),(8,[7,1]),(8,[4,2,2])])
+[1,30]
+(Just 2,Just 8,Just 0)
+([(1,True)],[(0,'b')])
