@@ -270,18 +270,32 @@ built with GHC writes**: the object file AIHC generates, the archive, and
 the manifest with the package's hash.
 
 ```text
-built  aihc-rts-1.0.2 in 1 min 19 s
+built  aihc-rts-1.0.2 in 11.7 s
 aihc-rts: 11 identical, 0 different, 0 missing
 ```
 
 AIHC built with GHC takes 0.6 seconds for that package, so the
-interpreter is about 130 times slower. Then come `aihc-prim` (27 modules)
-and `aihc-base` (280 modules), which AIHC built with GHC compiles in 4
-and 5 seconds.
+interpreter is about 20 times slower there. Then come `aihc-prim` (27
+modules) and `aihc-base` (280 modules), which AIHC built with GHC compiles
+in 4 and 5 seconds.
 
-Both libraries, 2 MB of source, are lexed and parsed in about 20 minutes.
-Then AIHC resolves the names of `aihc-prim`, which is where it is now.
-Three things were found on the way, each by looking at where the
+Both libraries, 2 MB of source, are lexed and parsed in under 10 minutes.
+AIHC then resolves the names of `aihc-prim` and writes what it found for
+each module, and **those files are what AIHC built with GHC writes**: 14
+of 15 byte for byte, and the last one but for the times of the files it
+lists. It is now in the type checker for `aihc-prim`, where it has not
+yet finished a unit: the checker walks the same kinds over and over, with
+a lookup in a map at every type variable, and that is what the
+interpreter is slowest at.
+
+To try a change, build `aihc-prim` alone. It gets to the type checker in
+9 minutes, without parsing `aihc-base`:
+
+```sh
+sh scripts/run-aihc.sh install core-libs/aihc-prim --immutable --build-root /tmp/p/target --store /tmp/p/store -v
+```
+
+Three things were found on the way to here, each by looking at where the
 collections find the program (`AIHC_GC_REPORT=1`):
 
 - **The lexer took time with the square of a file's length.** Before every
@@ -326,14 +340,26 @@ library the commit of the version that `vendor/aihc/cabal.project` names.
 
 ### Where the time goes
 
-`sample` on the running interpreter shows it. Three things were most of
-the time of a build, and each took a few lines to fix:
+`sample` on the running interpreter shows it. These were most of the time
+of a build, one after the other, and each took a few lines to fix:
 
 | What | Share | Now |
 | --- | ---: | --- |
 | Looking through all instances of all classes for every method call | 60% | Each class has a list of its instances (`collect_instances`) |
 | Finding the block of a cell that is being allocated | 16% | The block of the last cell of that size is tried first |
 | Finding the block of a word while marking | 40% of what was left | The search looks only at the bases of the blocks, in one array |
+| The C compiler was not asked to optimise | half | `-O2` |
+| Every value was 128 bytes | | A value has only the memory its kind needs: 16 bytes for a number, 32 for a closure, 40 for a thunk |
+| A function of n parameters made n closures to be called, each with a copy of its variables | | A lambda that is applied at once binds its argument |
+| A builtin given n arguments made n values | | It takes the arguments that are waiting at once |
+| A number, a constructor without fields or a type without variables was made anew wherever it was an argument | | It is made once and kept with the expression |
+| The instance of a method call was looked for among all instances of the class | | Instances for another type constructor are passed over; an instance for one type moves to the front |
+
+What a plain loop over a map costs now: 80,000 inserts and lookups take 2
+seconds and make 100 million small pieces of memory, three quarters of
+them cells that hold a variable of an environment. That is where the time
+is: every call binds each parameter in a cell of its own, and every thunk
+gets a copy of the variables it mentions.
 
 ## Memory
 
