@@ -77,6 +77,11 @@ static void prepare_family_instance(FamilyInstance *instance)
                                &instance->variable_count, 1);
 }
 
+/* Whether the types that are made are for the running program, and so
+   the collector's: see new_type in types.c. Finding the instance for a
+   method call is; inference is not. */
+static int at_run_time = 0;
+
 Type *reduce_family(Type *type)
 {
     FamilyInstance *instance;
@@ -106,9 +111,13 @@ Type *reduce_family(Type *type)
             && match_type(instance->lhs->argument, type->argument,
                           instance->variable_count, instance->variables,
                           bound)) {
-            return reduce_family(substitute(instance->rhs,
-                                            instance->variable_count,
-                                            instance->variables, bound));
+            return reduce_family(
+                at_run_time
+                    ? temporary_substitute(instance->rhs,
+                                           instance->variable_count,
+                                           instance->variables, bound)
+                    : substitute(instance->rhs, instance->variable_count,
+                                 instance->variables, bound));
         }
     }
     return type;
@@ -186,14 +195,18 @@ Value *find_method(Global *method, Type *type)
     Value *value;
     int i;
 
+    at_run_time = 1;
     type = reduce_family(type);
     instance = find_instance(method->class, type, &bound);
+    at_run_time = 0;
     if (instance == NULL) {
         /* The instance may be in a module that nothing has needed so far. */
         while (load_all_imports()) {
         }
+        at_run_time = 1;
         type = reduce_family(type);
         instance = find_instance(method->class, type, &bound);
+        at_run_time = 0;
     }
     if (instance == NULL) {
         fflush(stdout);

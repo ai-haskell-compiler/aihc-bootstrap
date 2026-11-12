@@ -551,6 +551,7 @@ Type *new_meta(void);
 Type *new_rigid(Binding *variable);
 Type *new_type_constructor(TypeCon *constructor);
 Type *new_type_application(Type *function, Type *argument);
+Type *temporary_application(Type *function, Type *argument);
 Type *new_forall(int count, Binding **variables, Type *body);
 Type *function_type(Type *argument, Type *result);
 /* The type with every filled-in TY_META at its top replaced by what it
@@ -560,6 +561,8 @@ Type *prune(Type *type);
 int split_function_type(Type *type, Type **argument, Type **result);
 /* The type with each of the variables replaced. */
 Type *substitute(Type *type, int count, Binding **variables, Type **types);
+Type *temporary_substitute(Type *type, int count, Binding **variables,
+                           Type **types);
 void print_type(Type *type); /* on stderr */
 /* Whether the two types are the same and fully known. */
 int types_equal(Type *a, Type *b);

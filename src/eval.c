@@ -337,8 +337,8 @@ static Type *close_type(Type *type, const Env *env)
     case TY_RIGID:
         return force(lookup(env, type->variable))->type;
     case TY_APP:
-        return new_type_application(close_type(type->function, env),
-                                    close_type(type->argument, env));
+        return temporary_application(close_type(type->function, env),
+                                     close_type(type->argument, env));
     case TY_META:
     case TY_CON:
     case TY_FORALL:

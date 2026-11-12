@@ -50,8 +50,8 @@ static Type *field_type(Type *type, Constructor *constructor, int index)
         arguments[i] = type->argument;
         type = prune(type->function);
     }
-    fields = substitute(scheme->type, head->parameter_count, scheme->variables,
-                        arguments);
+    fields = temporary_substitute(scheme->type, head->parameter_count,
+                                  scheme->variables, arguments);
     for (i = 0; i <= index; i++) {
         if (!split_function_type(fields, &field, &rest)) {
             die("constructor %s has no field %d", constructor->name, index);
@@ -526,8 +526,8 @@ static Value *field_shape(Type *field, const TypeCon *head, Type **arguments)
     shape = make_con(SHAPE_INSIDE, 2);
     shape->fields[0] = find_method(
         prelude_method("traverse"),
-        substitute(field->function, head->parameter_count - 1,
-                   head->parameters, arguments));
+        temporary_substitute(field->function, head->parameter_count - 1,
+                             head->parameters, arguments));
     shape->fields[1] = field_shape(field->argument, head, arguments);
     return shape;
 }

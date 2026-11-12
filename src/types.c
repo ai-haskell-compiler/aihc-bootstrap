@@ -1,4 +1,4 @@
-#include "syntax.h"
+#include "eval.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -17,11 +17,24 @@ Binding *new_binding(const char *name)
 
 /* ---- Building types ---- */
 
+/* Types are made in two places. Those of the program itself (signatures,
+   what inference finds out) stay for good. Those made while the program
+   runs, when a type with variables is passed to a function, are only
+   referred to by values and are freed with them: they are the collector's
+   (see temporary_application and temporary_substitute). A type that stays
+   must never refer to one that does not. */
+static int temporary = 0;
+
 static Type *new_type(enum TypeKind kind)
 {
-    Type *type = xmalloc(sizeof(Type));
+    Type *type;
 
-    memset(type, 0, sizeof(Type));
+    if (temporary) {
+        type = gc_alloc(sizeof(Type));
+    } else {
+        type = xmalloc(sizeof(Type));
+        memset(type, 0, sizeof(Type));
+    }
     type->kind = kind;
     return type;
 }
@@ -53,6 +66,17 @@ Type *new_type_application(Type *function, Type *argument)
 
     type->function = function;
     type->argument = argument;
+    return type;
+}
+
+/* For the running program: function applied to argument. */
+Type *temporary_application(Type *function, Type *argument)
+{
+    Type *type;
+
+    temporary = 1;
+    type = new_type_application(function, argument);
+    temporary = 0;
     return type;
 }
 
@@ -127,6 +151,16 @@ Type *substitute(Type *type, int count, Binding **variables, Type **types)
     case TY_CON:
         break;
     }
+    return type;
+}
+
+/* For the running program: the same. */
+Type *temporary_substitute(Type *type, int count, Binding **variables,
+                           Type **types)
+{
+    temporary = 1;
+    type = substitute(type, count, variables, types);
+    temporary = 0;
     return type;
 }
 
