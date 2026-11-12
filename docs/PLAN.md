@@ -262,35 +262,43 @@ the build plan and prints it, and starts to compile:
 build  aihc-rts-1.0.2 (no modules)
 ```
 
-The runtime system is the first package. AIHC compiles its seven LIR
-sources to object files, and those are **byte for byte the files that
-AIHC built with GHC writes**:
+The runtime system is the first package. AIHC gives its six C sources to
+the C compiler, compiles `rts.lir` to an object file itself, and puts them
+in an archive. **Every file of the package is byte for byte what AIHC
+built with GHC writes**: the object file AIHC generates, the archive, and
+the manifest with the package's hash.
 
 ```text
-identical  native_aihc_gc.o (90408 bytes)
-identical  native_aihc_heap_regions.o (6320 bytes)
-identical  native_aihc_host_posix.o (14528 bytes)
-identical  native_aihc_limbs.o (1656 bytes)
-identical  native_aihc_profile.o (10128 bytes)
-identical  native_aihc_runtime.o (78008 bytes)
-built  aihc-rts-1.0.2 in 2 min 27 s
+built  aihc-rts-1.0.2 in 1 min 19 s
+aihc-rts: 11 identical, 0 different, 0 missing
 ```
 
-AIHC built with GHC takes 1.1 seconds for that package, so the
+AIHC built with GHC takes 0.6 seconds for that package, so the
 interpreter is about 130 times slower. Then come `aihc-prim` (27 modules)
-and `aihc-base` (280 modules), which AIHC built with GHC compiles in 10
-and 14 seconds.
+and `aihc-base` (280 modules), which AIHC built with GHC compiles in 4
+and 5 seconds.
 
-To compare a build with the real one, build the same program with both
-into two stores and `cmp` the files:
+### Comparing a build with the real one
+
+Build the same program with both into two stores, and `cmp` the files.
+Three things have to be the same for the files to be:
+
+- **The sources of AIHC.** The interpreter runs AIHC's sources as they are
+  now; a binary is what they were when it was built. Use a copy of the
+  sources at the commit of the binary (`git archive COMMIT | tar -x -C
+  DIR`), run both in it, and point the binary at its data files with
+  `aihc_datadir=DIR/bin/aihc`.
+- **The compiler's identity.** AIHC puts a hash of its own executable into
+  the hash of every package. Set `AIHC_COMPILER_IDENTITY` to the same
+  value for both.
+- **The directory.** AIHC reads the core libraries from the directory it
+  runs in, and writes that directory's `aihc.lock`.
 
 ```sh
-cd ../aihc
-sh ../aihc-bootstrap/scripts/run-aihc.sh build Main.hs --build-root /tmp/a/target --store /tmp/a/store
-cabal run aihc -- build Main.hs --build-root /tmp/b/target --store /tmp/b/store
+cd DIR
+AIHC_COMPILER_IDENTITY=x AIHC=DIR sh .../scripts/run-aihc.sh build Main.hs --build-root /tmp/a/target --store /tmp/a/store
+AIHC_COMPILER_IDENTITY=x aihc_datadir=DIR/bin/aihc aihc build Main.hs --build-root /tmp/b/target --store /tmp/b/store
 ```
-
-AIHC writes the lock file `aihc.lock` of the directory it runs in.
 
 ### Where the time goes
 
