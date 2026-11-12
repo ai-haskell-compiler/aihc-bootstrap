@@ -125,19 +125,28 @@ Type *reduce_family(Type *type)
 
 /* ---- Classes ---- */
 
+/* Whether every type that the first instance is for, the second one is
+   for too: Cbor [Char] and Cbor [a], or anything and C a. */
+static int is_more_specific(const Instance *instance, const Instance *other)
+{
+    return match_type(other->head, instance->head, other->variable_count,
+                      other->variables, new_bound(other->variable_count));
+}
+
 /* Adds the instances that have come since the last time to the class's
-   own list, in front of it and in their order. */
+   own list. An instance comes before every instance that is for all its
+   types and more, so that the first one that matches a type is the most
+   specific one, which is the one Haskell means. */
 static void collect_instances(Class *class)
 {
     Instance *oldest = class->seen;
-    Instance *older = class->instances;
-    Instance **place = &class->instances;
     Instance *instance;
 
     class->seen = all_instances;
     for (instance = all_instances; instance != oldest; instance = instance->next) {
         const Token *token = &instance->module->tokens[instance->class_token];
         const char *qualifier;
+        Instance **place = &class->instances;
 
         /* Compare the names first, so that instances of other classes are
            never looked at more closely. */
@@ -148,19 +157,17 @@ static void collect_instances(Class *class)
         if (instance->class != class) {
             continue;
         }
-        instance->next_of_class = older;
+        while (*place != NULL && !is_more_specific(instance, *place)) {
+            place = &(*place)->next_of_class;
+        }
+        instance->next_of_class = *place;
         *place = instance;
-        place = &instance->next_of_class;
     }
 }
 
-/* The first instance of the class that the type matches, or NULL.
-   Overlapping instances are not handled: the first match wins. One case
-   is: an instance for every type (instance C a) is only used if no other
-   instance matches. */
+/* The first instance of the class that the type matches, or NULL. */
 static Instance *find_instance(Class *class, Type *type, Type ***bound)
 {
-    Instance *for_every_type = NULL;
     Instance *instance;
 
     /* Preparing an instance can load a module, with instances of its
@@ -170,21 +177,13 @@ static Instance *find_instance(Class *class, Type *type, Type ***bound)
     }
     for (instance = class->instances; instance != NULL;
          instance = instance->next_of_class) {
-        if (prune(instance->head)->kind == TY_RIGID) {
-            for_every_type = instance;
-            continue;
-        }
         *bound = new_bound(instance->variable_count);
         if (match_type(instance->head, type, instance->variable_count,
                        instance->variables, *bound)) {
             return instance;
         }
     }
-    if (for_every_type != NULL) {
-        *bound = new_bound(for_every_type->variable_count);
-        (*bound)[0] = type;
-    }
-    return for_every_type;
+    return NULL;
 }
 
 Value *find_method(Global *method, Type *type)
