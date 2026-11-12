@@ -334,6 +334,51 @@ static Value *derived_bound(Type *type, const char *method)
     return value;
 }
 
+/* ---- Semigroup and Monoid, field by field ----
+
+   deriving (Semigroup, Monoid) via Generically T, for a T with one
+   constructor: two values are put together by putting their fields
+   together, and the empty value has the empty value of each field. This
+   is the only `deriving via` there is. */
+
+/* derivedAppend :: a -> a -> a
+   Upstream puts two fields together when the result is looked at; here it
+   is done at once. */
+static Value *derived_append(Value **arguments)
+{
+    Type *type = force(arguments[0])->type;
+    Value *a = arguments[1];
+    Value *b = arguments[2];
+    Value **a_fields;
+    Value **b_fields;
+    Constructor *constructor = constructor_of(type, &a, &a_fields);
+    Value *value;
+    int i;
+
+    constructor_of(type, &b, &b_fields);
+    value = make_con(constructor->tag, constructor->arity);
+    for (i = 0; i < constructor->arity; i++) {
+        Value *append =
+            find_method(prelude_method("<>"), field_type(type, constructor, i));
+
+        value->fields[i] = apply(apply(append, a_fields[i]), b_fields[i]);
+    }
+    return value;
+}
+
+static Value *derived_mempty(Type *type)
+{
+    Constructor *constructor = type_head(type)->constructors[0];
+    Value *value = make_con(constructor->tag, constructor->arity);
+    int i;
+
+    for (i = 0; i < constructor->arity; i++) {
+        value->fields[i] = find_method(prelude_method("mempty"),
+                                       field_type(type, constructor, i));
+    }
+    return value;
+}
+
 /* ---- NFData ---- */
 
 /* deepForce :: a -> ()
@@ -445,6 +490,7 @@ static const Builtin eq_builtin = { "derivedEq", 3, derived_eq };
 static const Builtin compare_builtin = { "derivedCompare", 3, derived_compare };
 static const Builtin showsPrec_builtin =
     { "derivedShowsPrec", 4, derived_showsPrec };
+static const Builtin append_builtin = { "derivedAppend", 3, derived_append };
 static const Builtin toEnum_builtin = { "derivedToEnum", 2, derived_toEnum };
 static const Builtin fromEnum_builtin =
     { "derivedFromEnum", 2, derived_fromEnum };
@@ -490,7 +536,18 @@ Value *derived_method(const Instance *instance, Global *method, Type *type)
     }
     switch (strategy) {
     case DERIVE_VIA:
-        TODO("deriving via");
+        if (head->constructor_count != 1 || head->constructors[0]->is_newtype) {
+            TODO("deriving via for a type that is not one constructor with "
+                 "fields");
+        }
+        if (strcmp(class_name, "Semigroup") == 0 && strcmp(name, "<>") == 0) {
+            return at_type(&append_builtin, type);
+        }
+        if (strcmp(class_name, "Monoid") == 0) {
+            /* The other methods are the class's defaults. */
+            return strcmp(name, "mempty") == 0 ? derived_mempty(type) : NULL;
+        }
+        TODO("deriving via for a class other than Semigroup and Monoid");
         break;
     case DERIVE_NEWTYPE:
         /* The instance of the type inside the newtype. */
