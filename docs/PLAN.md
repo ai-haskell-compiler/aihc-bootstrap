@@ -251,8 +251,9 @@ build actually reaches.
 
 ## Running AIHC
 
-`scripts/run-aihc.sh` now runs AIHC itself. Run from AIHC's repository,
-`aihc build Main.hs` reads its options, finds the core libraries, solves
+`scripts/run-aihc.sh` now runs AIHC itself: the AIHC of the submodule
+`vendor/aihc`, with its three libraries beside it, each pinned to a
+commit. `aihc build /path/to/Main.hs` reads its options, finds the core libraries, solves
 the build plan and prints it, and starts to compile:
 
 ```text
@@ -300,22 +301,28 @@ are 2 MB of source. **`Text` as UTF-8 bytes is the next step**; see
 Build the same program with both into two stores, and `cmp` the files.
 Three things have to be the same for the files to be:
 
-- **The sources of AIHC.** The interpreter runs AIHC's sources as they are
-  now; a binary is what they were when it was built. Use a copy of the
-  sources at the commit of the binary (`git archive COMMIT | tar -x -C
-  DIR`), run both in it, and point the binary at its data files with
-  `aihc_datadir=DIR/bin/aihc`.
+- **The sources of AIHC.** The interpreter runs the sources in `vendor/`.
+  The AIHC to compare with has to be built from the same commits:
+  `cabal build aihc` in `vendor/aihc`, which takes the three libraries at
+  the versions that `vendor/` pins (`aihc-parser` 5.0.0.0, `aihc-cpp`
+  2.0.0.0, `aihc-cabal-syntax` 2.0.0.0). Point it at the data files of the
+  submodule with `aihc_datadir`.
 - **The compiler's identity.** AIHC puts a hash of its own executable into
   the hash of every package. Set `AIHC_COMPILER_IDENTITY` to the same
   value for both.
-- **The directory.** AIHC reads the core libraries from the directory it
-  runs in, and writes that directory's `aihc.lock`.
+- **The directory.** AIHC reads the core libraries from `core-libs/` of
+  the directory it runs in. `scripts/run-aihc.sh` runs it in
+  `build/aihc-work`, where `core-libs` is a link; run the other one there
+  too.
 
 ```sh
-cd DIR
-AIHC_COMPILER_IDENTITY=x AIHC=DIR sh .../scripts/run-aihc.sh build Main.hs --build-root /tmp/a/target --store /tmp/a/store
-AIHC_COMPILER_IDENTITY=x aihc_datadir=DIR/bin/aihc aihc build Main.hs --build-root /tmp/b/target --store /tmp/b/store
+AIHC_COMPILER_IDENTITY=x sh scripts/run-aihc.sh build /path/Main.hs --build-root /tmp/a/target --store /tmp/a/store
+cd build/aihc-work
+AIHC_COMPILER_IDENTITY=x aihc_datadir=../../vendor/aihc/bin/aihc aihc build /path/Main.hs --build-root /tmp/b/target --store /tmp/b/store
 ```
+
+To move the pin, check out another commit in `vendor/aihc`, and in each
+library the commit of the version that `vendor/aihc/cabal.project` names.
 
 ### Where the time goes
 

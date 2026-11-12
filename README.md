@@ -14,9 +14,12 @@ bootstrapped from a C compiler.
 ## How it grows
 
 ```sh
+git submodule update --init
 make
-sh scripts/run-aihc.sh build foo.hs
+sh scripts/run-aihc.sh build /path/to/foo.hs
 ```
+
+AIHC itself is in `vendor/`, as submodules pinned to one commit each.
 
 The interpreter runs AIHC's `main` until it meets something it does not
 support and then stops with a line such as:
@@ -34,7 +37,7 @@ measure of progress:
 
 ```text
 modules loaded:        381
-definitions prepared:  13323 of 13333
+definitions prepared:  13324 of 13334
 ```
 
 The order of the library work is in [docs/PLAN.md](docs/PLAN.md).
@@ -87,6 +90,7 @@ are therefore never looked at.
 | `lib/TopHandler.hs` | What runs `main` and handles exceptions it does not catch |
 | `lib/` | The interpreter's own base library, in Haskell, and small replacements for third-party packages (`lib/Options/Applicative.hs`) |
 | `glue/` | What Cabal would generate for AIHC (`Paths_aihc`) |
+| `vendor/` | AIHC and its libraries `aihc-parser`, `aihc-cpp` and `aihc-cabal-syntax`: submodules, each pinned to a commit |
 | `tests/` | `NAME.hs` with the expected output in `NAME.stdout` |
 
 ## Tests
