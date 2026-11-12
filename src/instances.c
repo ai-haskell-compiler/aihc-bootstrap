@@ -125,6 +125,16 @@ Type *reduce_family(Type *type)
 
 /* ---- Classes ---- */
 
+/* The type constructor that the type is an application of, or NULL. */
+static TypeCon *head_constructor(Type *type)
+{
+    type = prune(type);
+    while (type->kind == TY_APP) {
+        type = prune(type->function);
+    }
+    return type->kind == TY_CON ? type->constructor : NULL;
+}
+
 /* Whether every type that the first instance is for, the second one is
    for too: Cbor [Char] and Cbor [a], or anything and C a. */
 static int is_more_specific(const Instance *instance, const Instance *other)
@@ -157,6 +167,7 @@ static void collect_instances(Class *class)
         if (instance->class != class) {
             continue;
         }
+        instance->head_constructor = head_constructor(instance->head);
         while (*place != NULL && !is_more_specific(instance, *place)) {
             place = &(*place)->next_of_class;
         }
@@ -165,9 +176,17 @@ static void collect_instances(Class *class)
     }
 }
 
-/* The first instance of the class that the type matches, or NULL. */
+/* The first instance of the class that the type matches, or NULL.
+
+   This is done for every call of a method, and a class such as Ord has
+   hundreds of instances. So an instance for another type constructor is
+   passed over without looking closer, and an instance for one type, such
+   as Ord Int, moves to the front of the list when it is used: it cannot
+   be for the types of another instance. */
 static Instance *find_instance(Class *class, Type *type, Type ***bound)
 {
+    TypeCon *wanted = head_constructor(type);
+    Instance **place;
     Instance *instance;
 
     /* Preparing an instance can load a module, with instances of its
@@ -175,11 +194,21 @@ static Instance *find_instance(Class *class, Type *type, Type ***bound)
     while (class->seen != all_instances) {
         collect_instances(class);
     }
-    for (instance = class->instances; instance != NULL;
-         instance = instance->next_of_class) {
+    for (place = &class->instances; *place != NULL;
+         place = &(*place)->next_of_class) {
+        instance = *place;
+        if (wanted != NULL && instance->head_constructor != NULL
+            && instance->head_constructor != wanted) {
+            continue;
+        }
         *bound = new_bound(instance->variable_count);
         if (match_type(instance->head, type, instance->variable_count,
                        instance->variables, *bound)) {
+            if (instance->variable_count == 0) {
+                *place = instance->next_of_class;
+                instance->next_of_class = class->instances;
+                class->instances = instance;
+            }
             return instance;
         }
     }
