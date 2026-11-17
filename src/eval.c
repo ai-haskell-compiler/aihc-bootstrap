@@ -52,7 +52,7 @@ static void push(enum FrameKind kind, Value *value)
 
 static Value *new_value(enum ValueKind kind)
 {
-    Value *value = gc_alloc_value();
+    Value *value = gc_alloc_value(0);
 
     value->kind = kind;
     return value;
@@ -106,13 +106,19 @@ Value *make_char(long code)
     return value;
 }
 
+/* The fields of a constructor that has none. */
+static Value *no_fields[1];
+
+/* The fields are in the cell of the value, right after it: one allocation
+   instead of two, and they are next to it in memory. */
 Value *make_con(int tag, int field_count)
 {
-    Value *value = new_value(V_CON);
+    Value *value = gc_alloc_value(field_count);
 
+    value->kind = V_CON;
     value->tag = tag;
     value->a.field_count = field_count;
-    value->b.fields = gc_alloc((size_t)field_count * sizeof(Value *) + 1);
+    value->b.fields = field_count > 0 ? (Value **)(value + 1) : no_fields;
     return value;
 }
 

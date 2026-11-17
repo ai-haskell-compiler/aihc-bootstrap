@@ -137,6 +137,8 @@ void raise_exception(Value *exception);
    for memory that holds no pointers: bytes, digits, C strings.
    gc_alloc_value and gc_alloc_env are for a Value and an Env: the collector
    then looks only at the fields of those that can point to its memory.
+   gc_alloc_value makes room for `field_count` fields after the value, for a
+   V_CON whose `fields` point there (make_con).
 
    A collection can happen in any of the three allocating functions, so a
    pointer to collected memory must be where the collector looks when one
@@ -145,7 +147,7 @@ void raise_exception(Value *exception);
    looked into. */
 void *gc_alloc(size_t size);
 void *gc_alloc_bytes(size_t size);
-Value *gc_alloc_value(void);
+Value *gc_alloc_value(int field_count);
 Env *gc_alloc_env(int count);
 void *gc_realloc(void *old, size_t size, int bytes);
 void gc_start(const void *bottom);

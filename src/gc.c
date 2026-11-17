@@ -376,6 +376,15 @@ static void mark_from_roots(void)
             gc_mark(value->b.fields);
             on_c_stack = 0;
             gc_mark(value->c.env);
+            /* The fields that are in the cell, after the value (make_con). */
+            if (value->kind == V_CON
+                && value->b.fields == (Value **)(value + 1)) {
+                int i;
+
+                for (i = 0; i < value->a.field_count; i++) {
+                    gc_mark(value->b.fields[i]);
+                }
+            }
         } else if (*cell.state & CELL_ENV) {
             const Env *env = (const Env *)cell.cell;
             int i;
@@ -654,9 +663,10 @@ void *gc_alloc_bytes(size_t size)
     return allocate(size, CELL_BYTES);
 }
 
-Value *gc_alloc_value(void)
+Value *gc_alloc_value(int field_count)
 {
-    return allocate(sizeof(Value), CELL_VALUE);
+    return allocate(sizeof(Value) + (size_t)field_count * sizeof(Value *),
+                    CELL_VALUE);
 }
 
 Env *gc_alloc_env(int count)
