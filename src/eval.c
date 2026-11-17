@@ -52,7 +52,7 @@ static void push(enum FrameKind kind, Value *value)
 
 static Value *new_value(enum ValueKind kind)
 {
-    Value *value = gc_alloc(sizeof(Value));
+    Value *value = gc_alloc_value();
 
     value->kind = kind;
     return value;
@@ -146,7 +146,7 @@ Value *make_string(const char *string)
 
 static Env *extend(Env *outer, Binding *binding, Value *value)
 {
-    Env *env = gc_alloc(sizeof(Env));
+    Env *env = gc_alloc_env();
 
     env->binding = binding;
     env->value = value;
@@ -177,24 +177,24 @@ static Value *lookup(const Env *env, const Binding *binding)
    kept. The list also has the variables that are bound inside the
    expression; those are not in the environment, and are skipped. */
 
-static void note_expr(Expr *owner, const Expr *expr);
+static void note_expr(Needed *owner, const Expr *expr);
 
-static void note_variable(Expr *owner, Binding *binding)
+static void note_variable(Needed *owner, Binding *binding)
 {
     int i;
 
-    for (i = 0; i < owner->needed_count; i++) {
-        if (owner->needed[i] == binding) {
+    for (i = 0; i < owner->count; i++) {
+        if (owner->bindings[i] == binding) {
             return;
         }
     }
-    owner->needed = xrealloc(owner->needed, (size_t)(owner->needed_count + 1)
-                                                * sizeof(Binding *));
-    owner->needed[owner->needed_count++] = binding;
+    owner->bindings = xrealloc(owner->bindings, (size_t)(owner->count + 1)
+                                                    * sizeof(Binding *));
+    owner->bindings[owner->count++] = binding;
 }
 
 /* The same types as close_type looks into. */
-static void note_type(Expr *owner, Type *type)
+static void note_type(Needed *owner, Type *type)
 {
     type = prune(type);
     if (type->kind == TY_RIGID) {
@@ -205,7 +205,7 @@ static void note_type(Expr *owner, Type *type)
     }
 }
 
-static void note_pattern(Expr *owner, const Pattern *pattern)
+static void note_pattern(Needed *owner, const Pattern *pattern)
 {
     int i;
 
@@ -223,11 +223,41 @@ static void note_pattern(Expr *owner, const Pattern *pattern)
     }
 }
 
-static void note_expr(Expr *owner, const Expr *expr)
+/* What the alternatives of a case mention. */
+static void note_alternatives(Needed *owner, const Expr *expr)
 {
     const Alternative *alternative;
     const Guard *guard;
     const Qualifier *qualifier;
+
+    for (alternative = expr->alternatives; alternative != NULL;
+         alternative = alternative->next) {
+        note_pattern(owner, alternative->pattern);
+        if (alternative->where != NULL) {
+            note_expr(owner, alternative->where);
+        }
+        if (alternative->body != NULL) {
+            note_expr(owner, alternative->body);
+        }
+        for (guard = alternative->guards; guard != NULL; guard = guard->next) {
+            for (qualifier = guard->qualifiers; qualifier != NULL;
+                 qualifier = qualifier->next) {
+                if (qualifier->let != NULL) {
+                    note_expr(owner, qualifier->let);
+                    continue;
+                }
+                if (qualifier->pattern != NULL) {
+                    note_pattern(owner, qualifier->pattern);
+                }
+                note_expr(owner, qualifier->expr);
+            }
+            note_expr(owner, guard->body);
+        }
+    }
+}
+
+static void note_expr(Needed *owner, const Expr *expr)
+{
     int i;
 
     switch (expr->kind) {
@@ -252,30 +282,7 @@ static void note_expr(Expr *owner, const Expr *expr)
         break;
     case E_CASE:
         note_expr(owner, expr->scrutinee);
-        for (alternative = expr->alternatives; alternative != NULL;
-             alternative = alternative->next) {
-            note_pattern(owner, alternative->pattern);
-            if (alternative->where != NULL) {
-                note_expr(owner, alternative->where);
-            }
-            if (alternative->body != NULL) {
-                note_expr(owner, alternative->body);
-            }
-            for (guard = alternative->guards; guard != NULL; guard = guard->next) {
-                for (qualifier = guard->qualifiers; qualifier != NULL;
-                     qualifier = qualifier->next) {
-                    if (qualifier->let != NULL) {
-                        note_expr(owner, qualifier->let);
-                        continue;
-                    }
-                    if (qualifier->pattern != NULL) {
-                        note_pattern(owner, qualifier->pattern);
-                    }
-                    note_expr(owner, qualifier->expr);
-                }
-                note_expr(owner, guard->body);
-            }
-        }
+        note_alternatives(owner, expr);
         break;
     case E_TYPE:
     case E_METHOD:
@@ -286,27 +293,46 @@ static void note_expr(Expr *owner, const Expr *expr)
     }
 }
 
-/* An environment with just the variables that the expression mentions. */
-static Env *keep_needed(Expr *expr, Env *env)
+/* An environment with just the variables in `needed`. */
+static Env *keep(const Needed *needed, Env *env)
 {
     Env *kept = NULL;
     int i;
 
-    if (!expr->needed_known) {
-        note_expr(expr, expr);
-        expr->needed_known = 1;
-    }
-    for (i = 0; i < expr->needed_count; i++) {
+    for (i = 0; i < needed->count; i++) {
         const Env *cell = env;
 
-        while (cell != NULL && cell->binding != expr->needed[i]) {
+        while (cell != NULL && cell->binding != needed->bindings[i]) {
             cell = cell->outer;
         }
         if (cell != NULL) {
-            kept = extend(kept, expr->needed[i], cell->value);
+            kept = extend(kept, needed->bindings[i], cell->value);
         }
     }
     return kept;
+}
+
+/* An environment with just the variables that the expression mentions. */
+static Env *keep_needed(Expr *expr, Env *env)
+{
+    if (!expr->needed.known) {
+        note_expr(&expr->needed, expr);
+        expr->needed.known = 1;
+    }
+    return keep(&expr->needed, env);
+}
+
+/* What a case keeps while its scrutinee is evaluated: the variables its
+   alternatives mention. The scrutinee often is the last use of a variable
+   (case run p s of ...), and the value of that variable must not stay in
+   use until the scrutinee is done. */
+static Env *keep_for_alternatives(Expr *expr, Env *env)
+{
+    if (!expr->alternatives_needed.known) {
+        note_alternatives(&expr->alternatives_needed, expr);
+        expr->alternatives_needed.known = 1;
+    }
+    return keep(&expr->alternatives_needed, env);
 }
 
 /* The value of the expression, to be worked out when something needs it.
@@ -461,7 +487,9 @@ static int matches(const Pattern *pattern, Value *value, Env **env)
 }
 
 /* The environment extended with the bindings of an E_LET. Every definition
-   is a thunk that can see all the bindings, itself included. */
+   is a thunk that can see all the bindings, itself included. A binding with
+   a ! in front is evaluated before the body, as in GHC; a program may rely
+   on that to let go of what the expression refers to. */
 static Env *bind_let(const Expr *let, Env *env)
 {
     Env **cells = gc_alloc((size_t)let->binding_count * sizeof(Env *) + 1);
@@ -480,6 +508,9 @@ static Env *bind_let(const Expr *let, Env *env)
     }
     for (i = 0; i < let->binding_count; i++) {
         cells[i]->value->env = keep_needed(let->values[i], env);
+    }
+    for (i = 0; i < let->strict_count; i++) {
+        force(lookup(env, let->strict[i]));
     }
     return env;
 }
@@ -585,7 +616,7 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 }
                 push(F_CASE, NULL);
                 stack[stack_size - 1].expr = expr;
-                stack[stack_size - 1].env = env;
+                stack[stack_size - 1].env = keep_for_alternatives(expr, env);
                 expr = expr->scrutinee;
                 continue;
             case E_LAMBDA:
@@ -640,26 +671,26 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 /* The thunk on top of the stack is waiting for exactly
                    this value, so this thunk shares its frame: it becomes
                    that thunk. A loop that ends in a `seq` b, where b is a
-                   thunk, would otherwise leave a frame for every turn.
-                   The waiting thunk takes over the expression: that is
-                   what it is put back to if an exception passes, and it
-                   lets go of what its own expression could see. */
-                Value *waiting = stack[stack_size - 1].value;
-
-                waiting->expr = expr;
-                waiting->env = env;
+                   thunk, would otherwise leave a frame for every turn. */
                 value->kind = V_INDIRECTION;
-                value->result = waiting;
-                value->expr = NULL;
-                value->env = NULL;
+                value->result = stack[stack_size - 1].value;
             } else {
                 push(F_UPDATE, value);
                 value->kind = V_BLACKHOLE;
             }
+            /* A thunk that is being evaluated lets go of what its
+               expression could see: the machine has that now, and lets go
+               of each part when it is done with it. A parser that keeps
+               its input in a variable would otherwise keep all of it until
+               the parse is over. */
+            value->expr = NULL;
+            value->env = NULL;
         } else if (value->kind == V_INDIRECTION) {
             value = value->result;
         } else if (value->kind == V_BLACKHOLE) {
             die("<<loop>>");
+        } else if (value->kind == V_RAISE) {
+            raise_exception(value->result);
         } else {
             /* A finished value: give it to the frame that is waiting. */
             Frame frame = stack[--stack_size];
@@ -759,13 +790,15 @@ Value *catch_exception(Value *function, Value *argument, Value **exception)
         return result;
     }
     /* raise_exception jumped here. Drop what the machine was doing. A thunk
-       that was being evaluated goes back to being a thunk: evaluating it
-       again raises the exception again. */
+       that was being evaluated raises the same exception when it is
+       evaluated again, as in GHC: what it would need to start again is
+       gone (see run). */
     handlers = handler.outer;
     while (stack_size > handler.stack_size) {
         stack_size--;
         if (stack[stack_size].kind == F_UPDATE) {
-            stack[stack_size].value->kind = V_THUNK;
+            stack[stack_size].value->kind = V_RAISE;
+            stack[stack_size].value->result = raised;
         }
     }
     *exception = raised;

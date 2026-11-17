@@ -1,0 +1,7 @@
+let: strict, a
+lazy neighbour: lazy
+where: strict, d
+where, not taken: lazy
+tuple: lazy
+do: strict, g
+("h","h")

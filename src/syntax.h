@@ -220,6 +220,14 @@ enum ExprKind {
     E_METHOD       /* a class method at a type; made by the type pass */
 };
 
+/* The variables an expression mentions, worked out by the evaluator the
+   first time it needs them (see keep_needed in eval.c). */
+typedef struct Needed {
+    int known;
+    int count;
+    Binding **bindings;
+} Needed;
+
 /* Every kind uses only some of the fields. One flat struct is easier to read
    than a union, and we do not care about the wasted memory. */
 struct Expr {
@@ -242,6 +250,10 @@ struct Expr {
     int binding_count;         /* E_LET */
     Binding **bindings;        /* E_LET */
     Expr **values;             /* E_LET: the definition of each binding */
+    int strict_count;          /* E_LET */
+    Binding **strict;          /* E_LET: the bindings of the patterns with a !
+                                  in front (let !x = e), evaluated before the
+                                  body */
     Expr *scrutinee;           /* E_CASE */
     Alternative *alternatives; /* E_CASE */
     int operator_count;        /* E_OPERATORS */
@@ -258,9 +270,9 @@ struct Expr {
                                   type */
     int type_end;
     Type *type;                /* E_TYPE; E_METHOD: the class argument */
-    int needed_known;          /* set by the evaluator; see keep_needed */
-    int needed_count;
-    Binding **needed;          /* the variables the expression mentions */
+    Needed needed;             /* the variables the expression mentions;
+                                  set by the evaluator, see keep_needed */
+    Needed alternatives_needed; /* E_CASE: those its alternatives mention */
 };
 
 /* A qualifier that makes a name refer to the Prelude whatever is in scope.

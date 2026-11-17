@@ -64,15 +64,20 @@ runParser :: Parsec e s a -> String -> s -> Either (ParseErrorBundle s e) a
 runParser p name s = snd (runParser' p (initialState name s))
 
 -- From the given state. It fails if the parser fails or registered errors.
+--
+-- The position state is taken out of the state before the parse starts.
+-- The state holds the whole input, and nothing may keep it while the
+-- parser works through it: upstream relies on GHC for that.
 runParser' :: Parsec e s a -> State s e -> (State s e, Either (ParseErrorBundle s e) a)
-runParser' p s = case runParsecT p s of
-  Reply s' _ result -> case result of
-    OK _ x -> case stateParseErrors s' of
-      [] -> (s', Right x)
-      e : es -> (s', Left (toBundle (e :| es)))
-    Error e -> (s', Left (toBundle (e :| stateParseErrors s')))
-  where
-    toBundle es = ParseErrorBundle (NE.sortWith errorOffset es) (statePosState s)
+runParser' p s =
+  let posState = statePosState s
+      toBundle es = ParseErrorBundle (NE.sortWith errorOffset es) posState
+   in posState `seq` case runParsecT p s of
+        Reply s' _ result -> case result of
+          OK _ x -> case stateParseErrors s' of
+            [] -> (s', Right x)
+            e : es -> (s', Left (toBundle (e :| es)))
+          Error e -> (s', Left (toBundle (e :| stateParseErrors s')))
 
 -- ---- Failing ----
 

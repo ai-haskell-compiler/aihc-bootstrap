@@ -1765,6 +1765,12 @@ static Expr *parse_local_bindings(Parser *parser, const Token *token)
                 parser->position++;
             }
             pattern = parse_pattern(parser);
+            if (pattern->kind == P_BANG) {
+                let->strict = xrealloc(let->strict,
+                                       (size_t)(let->strict_count + 1)
+                                           * sizeof(Binding *));
+                let->strict[let->strict_count++] = value;
+            }
             /* The guards are those of: case () of _ | condition -> body */
             body->scrutinee = new_constructor(first, "()");
             body->alternatives =

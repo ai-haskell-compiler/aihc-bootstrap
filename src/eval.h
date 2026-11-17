@@ -19,7 +19,9 @@ enum ValueKind {
     V_BYTES,       /* a ByteString: `number` bytes at `bytes` (bytes.c) */
     V_THUNK,       /* an expression that has not been evaluated yet */
     V_BLACKHOLE,   /* a thunk that is being evaluated right now */
-    V_INDIRECTION  /* a thunk that has been evaluated; see `result` */
+    V_INDIRECTION, /* a thunk that has been evaluated; see `result` */
+    V_RAISE        /* a thunk whose evaluation raised the exception
+                      `result`: evaluating it raises that again */
 };
 
 /* Every kind uses only some of the fields, as with Expr. Everything is boxed:
@@ -41,7 +43,7 @@ struct Value {
     const Constructor *constructor; /* V_PARTIAL_CON */
     int argument_count;     /* V_BUILTIN, V_PARTIAL_CON */
     Value **arguments;      /* V_BUILTIN, V_PARTIAL_CON */
-    Value *result;          /* V_INDIRECTION */
+    Value *result;          /* V_INDIRECTION, V_RAISE */
     Type *type;             /* V_TYPE: has no TY_RIGID in it */
     const unsigned char *bytes; /* V_BYTES */
 };
@@ -106,6 +108,8 @@ void raise_exception(Value *exception);
 /* gc.c: memory that is freed when nothing refers to it any more. Everything
    the running program makes is allocated here, zeroed. gc_alloc_bytes is
    for memory that holds no pointers: bytes, digits, C strings.
+   gc_alloc_value and gc_alloc_env are for a Value and an Env: the collector
+   then looks only at the fields of those that can point to its memory.
 
    A collection can happen in any of the three allocating functions, so a
    pointer to collected memory must be where the collector looks when one
@@ -114,6 +118,8 @@ void raise_exception(Value *exception);
    looked into. */
 void *gc_alloc(size_t size);
 void *gc_alloc_bytes(size_t size);
+Value *gc_alloc_value(void);
+Env *gc_alloc_env(void);
 void *gc_realloc(void *old, size_t size, int bytes);
 void gc_start(const void *bottom);
 void gc_collect(void);

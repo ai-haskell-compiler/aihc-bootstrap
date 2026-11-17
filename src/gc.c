@@ -9,12 +9,14 @@
    fields of constructors, byte strings. It is freed when nothing refers
    to it any more.
 
-   The collector marks and sweeps, and never moves anything. It does not
-   know what a piece of memory is. To find what is in use it starts from
-   the roots and treats every word it sees as a possible pointer: if the
-   word is the address of something inside an allocated cell, that cell is
-   in use, and its words are looked at in turn. A number that happens to
-   look like an address keeps a cell alive for nothing, which is harmless.
+   The collector marks and sweeps, and never moves anything. It mostly
+   does not know what a piece of memory is. To find what is in use it
+   starts from the roots and treats every word it sees as a possible
+   pointer: if the word is the address of something inside an allocated
+   cell, that cell is in use, and its words are looked at in turn. A number
+   that happens to look like an address keeps a cell alive for nothing,
+   which is harmless. Values and Envs, which are most of what there is, are
+   known: only their fields that can point here are looked at.
 
    The roots are the C stack (the machine calls itself through builtins,
    and C locals hold values), the registers, and what mark_roots in eval.c
@@ -33,7 +35,9 @@
 enum {
     CELL_USED = 1,
     CELL_MARKED = 2,
-    CELL_BYTES = 4 /* holds no pointers: it is not looked into */
+    CELL_BYTES = 4, /* holds no pointers: it is not looked into */
+    CELL_VALUE = 8, /* a Value: only some of its fields are looked at */
+    CELL_ENV = 16   /* an Env: likewise */
 };
 
 typedef struct Block {
@@ -67,8 +71,11 @@ static Block *class_chunk[CLASS_COUNT];
 
 static const char *stack_bottom = NULL; /* NULL: collecting is not on yet */
 static size_t allocated = 0;            /* bytes handed out since the last collection */
-static size_t threshold = (size_t)256 * 1024 * 1024;
-static size_t minimum_threshold = (size_t)256 * 1024 * 1024;
+/* Collecting looks at everything that is in use, so it is done rarely: the
+   machine makes some 400 kB of short-lived values for every byte of a
+   source file that AIHC parses. */
+static size_t threshold = (size_t)1024 * 1024 * 1024;
+static size_t minimum_threshold = (size_t)1024 * 1024 * 1024;
 static int report = 0;
 static unsigned long collections = 0;
 
@@ -77,14 +84,23 @@ static void out_of_memory(void)
     die("out of memory");
 }
 
+/* The chunk that find_chunk found last. A cell mostly refers to cells that
+   were made at about the same time, which are mostly in the same chunk. */
+static Block *last_found = NULL;
+
 /* The chunk the address is inside, or NULL. Marking asks this of every
    word it sees, so the search only looks at the bases, which are together
    in memory. */
 static Block *find_chunk(const char *address)
 {
-    Block *chunk;
+    Block *chunk = last_found;
     int low = 0;
     int high = chunk_count;
+
+    if (chunk != NULL && address >= chunk->base
+        && address < chunk->base + chunk->cell_size * chunk->cell_count) {
+        return chunk;
+    }
 
     /* The first chunk that starts after the address: the one before it is
        the only one the address can be in. */
@@ -104,6 +120,7 @@ static Block *find_chunk(const char *address)
     if (address >= chunk->base + chunk->cell_size * chunk->cell_count) {
         return NULL;
     }
+    last_found = chunk;
     return chunk;
 }
 
@@ -156,6 +173,7 @@ static Block *add_chunk(size_t cell_size, size_t cell_count)
 typedef struct Pending {
     char *cell;
     size_t size;
+    unsigned char state;
 } Pending;
 
 /* Cells that are marked and whose words are still to be looked at. */
@@ -194,6 +212,7 @@ void gc_mark(const void *pointer)
     }
     pending[pending_count].cell = chunk->base + index * chunk->cell_size;
     pending[pending_count].size = chunk->cell_size;
+    pending[pending_count].state = chunk->state[index];
     pending_count++;
 }
 
@@ -233,7 +252,26 @@ static void mark_from_roots(void)
     while (pending_count > 0) {
         Pending cell = pending[--pending_count];
 
-        gc_mark_range(cell.cell, cell.cell + cell.size);
+        if (cell.state & CELL_VALUE) {
+            /* The other fields are numbers, or point to what the
+               interpreter made while it read the program. Fields that the
+               kind does not use are NULL or left over, which only keeps
+               something in use for longer. */
+            const Value *value = (const Value *)cell.cell;
+
+            gc_mark(value->fields);
+            gc_mark(value->env);
+            gc_mark(value->arguments);
+            gc_mark(value->result);
+            gc_mark(value->bytes);
+        } else if (cell.state & CELL_ENV) {
+            const Env *env = (const Env *)cell.cell;
+
+            gc_mark(env->value);
+            gc_mark(env->outer);
+        } else {
+            gc_mark_range(cell.cell, cell.cell + cell.size);
+        }
     }
 }
 
@@ -294,6 +332,7 @@ static size_t sweep(void)
         chunks[kept++] = chunk;
     }
     chunk_count = kept;
+    last_found = NULL; /* it may have been freed */
     return live;
 }
 
@@ -316,9 +355,9 @@ void gc_collect(void)
         print_position();
     }
     allocated = 0;
-    /* Collect again when as much has been handed out as is in use now, so
-       that the work of collecting stays in proportion. */
-    threshold = live > minimum_threshold ? live : minimum_threshold;
+    /* Collect again when twice as much has been handed out as is in use
+       now, so that the work of collecting stays in proportion. */
+    threshold = 2 * live > minimum_threshold ? 2 * live : minimum_threshold;
 }
 
 /* ---- Allocating ---- */
@@ -383,6 +422,16 @@ void *gc_alloc(size_t size)
 void *gc_alloc_bytes(size_t size)
 {
     return allocate(size, CELL_BYTES);
+}
+
+Value *gc_alloc_value(void)
+{
+    return allocate(sizeof(Value), CELL_VALUE);
+}
+
+Env *gc_alloc_env(void)
+{
+    return allocate(sizeof(Env), CELL_ENV);
 }
 
 /* The memory made at least `size` bytes long, keeping what is in it. `old`
