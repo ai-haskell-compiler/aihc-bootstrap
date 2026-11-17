@@ -35,6 +35,8 @@ struct Value {
     unsigned char is_deep;  /* V_CON: every field is evaluated, all the way
                                down (deepForce). A builtin that changes a
                                field takes it away. */
+    unsigned char old;      /* the collector has made it old: see
+                               gc_written_value */
     int tag;                /* V_CON: index of the constructor in its type */
     union {
         long number;            /* V_INT, V_CHAR, V_BYTES */
@@ -156,6 +158,10 @@ void gc_mark(const void *pointer);
 /* Says that a pointer was put into memory from here that was made before:
    see "Generations" in gc.c. */
 void gc_written(const void *address);
+/* gc_written for a value: only an old one needs it, which the value
+   itself says, so most values need no look into the collector's tables. */
+#define gc_written_value(value) \
+    ((value)->old ? gc_written(value) : (void)0)
 void gc_mark_range(const void *start, const void *end);
 /* eval.c: marks what the machine itself holds on to. */
 void mark_roots(void);

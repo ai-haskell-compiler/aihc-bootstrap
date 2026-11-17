@@ -503,6 +503,9 @@ static size_t sweep_young(void)
 
         if (survives(cell->state)) {
             if (*cell->state & CELL_OLD) {
+                if (*cell->state & CELL_VALUE) {
+                    ((Value *)cell->cell)->old = 1;
+                }
                 old_in_use += cell->size;
             } else {
                 young += cell->size;
@@ -553,6 +556,9 @@ static size_t sweep_all(void)
 
             if ((*state & CELL_USED) && survives(state)) {
                 if (*state & CELL_OLD) {
+                    if ((*state & CELL_VALUE) && !((Value *)cell)->old) {
+                        ((Value *)cell)->old = 1;
+                    }
                     old_in_use += chunk->cell_size;
                 } else {
                     young += chunk->cell_size;
