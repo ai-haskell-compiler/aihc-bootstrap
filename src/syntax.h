@@ -204,6 +204,9 @@ struct Constructor {
        that a pattern match can bring them back. */
     int existential_count;
     Binding **existentials;
+    /* The constructor as a value, before it is given any fields: made once
+       (make_constructor in eval.c). */
+    struct Value *unapplied;
 };
 
 enum ExprKind {

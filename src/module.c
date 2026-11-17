@@ -20,11 +20,11 @@ TypeCon function_type_constructor = { "->", NULL, 0, NULL, 0, 0, 0, NULL, 0, NUL
 TypeCon list_type_constructor = { "[]", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0, 0 };
 TypeCon unit_type_constructor = { "()", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0, 0 };
 Constructor unit_constructor =
-    { "()", &unit_type_constructor, NULL, 0, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, 0, NULL };
+    { "()", &unit_type_constructor, NULL, 0, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL };
 Constructor nil_constructor =
-    { "[]", &list_type_constructor, NULL, 0, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, 0, NULL };
+    { "[]", &list_type_constructor, NULL, 0, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL };
 Constructor cons_constructor =
-    { ":", &list_type_constructor, NULL, 1, 2, 0, 0, NULL, NULL, NULL, NULL, NULL, 0, NULL };
+    { ":", &list_type_constructor, NULL, 1, 2, 0, 0, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL };
 
 static Entity unit_entity =
     { NS_CONSTRUCTOR, "()", "()", NULL, &unit_constructor, NULL, NULL, NULL, NULL };

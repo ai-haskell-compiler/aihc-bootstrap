@@ -702,9 +702,16 @@ Value *make_constructor(const Constructor *constructor)
     if (constructor->arity + constructor->existential_count == 0) {
         return make_con(constructor->tag, 0);
     }
-    value = new_value(V_PARTIAL_CON);
-    value->c.constructor = constructor;
-    return value;
+    /* It never changes: giving it a field makes a new value. So it is made
+       once, outside the collector's memory, as a type's value is. */
+    if (constructor->unapplied == NULL) {
+        value = xmalloc(sizeof(Value));
+        memset(value, 0, sizeof(Value));
+        value->kind = V_PARTIAL_CON;
+        value->c.constructor = constructor;
+        ((Constructor *)constructor)->unapplied = value;
+    }
+    return constructor->unapplied;
 }
 
 /* How many arguments a builtin or a constructor takes in all. */
