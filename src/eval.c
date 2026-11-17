@@ -735,6 +735,8 @@ static Value *give_arguments(const Value *function, Value **arguments,
     return result;
 }
 
+#define BUILTIN_ARGUMENTS 10 /* more than any builtin takes */
+
 /* Gives a builtin or a constructor `argument`, and the `waiting` arguments
    on top of the machine's stack after it. A constructor that gets its last
    argument is made with its fields in its cell, without an array first. */
@@ -744,6 +746,9 @@ static Value *take_arguments(const Value *function, Value *argument,
     int count = function->a.argument_count;
     int total = count + 1 + waiting;
     Value *constructed = NULL;
+    /* A builtin that gets all its arguments gets them on the C stack: no
+       builtin keeps the array. */
+    Value *on_c_stack[BUILTIN_ARGUMENTS];
     Value **arguments;
     int i;
 
@@ -751,6 +756,9 @@ static Value *take_arguments(const Value *function, Value *argument,
         && !function->c.constructor->is_newtype) {
         constructed = make_con(function->c.constructor->tag, total);
         arguments = constructed->b.fields;
+    } else if (function->kind == V_BUILTIN && total == arity_of(function)
+               && total <= BUILTIN_ARGUMENTS) {
+        arguments = on_c_stack;
     } else {
         arguments = gc_alloc((size_t)total * sizeof(Value *));
     }
