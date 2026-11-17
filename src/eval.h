@@ -140,6 +140,9 @@ void *gc_realloc(void *old, size_t size, int bytes);
 void gc_start(const void *bottom);
 void gc_collect(void);
 void gc_mark(const void *pointer);
+/* Says that a pointer was put into memory from here that was made before:
+   see "Generations" in gc.c. */
+void gc_written(const void *address);
 void gc_mark_range(const void *start, const void *end);
 /* eval.c: marks what the machine itself holds on to. */
 void mark_roots(void);

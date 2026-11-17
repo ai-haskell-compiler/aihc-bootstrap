@@ -118,6 +118,7 @@ static Value *builtin_writeRef(Value **arguments)
     Value *ref = force(arguments[1]);
 
     ref->fields[0] = arguments[2];
+    gc_written(ref->fields);
     ref->is_deep = 0;
     return make_io_result(make_con(TAG_UNIT, 0));
 }
@@ -168,6 +169,7 @@ static Value *builtin_arrayWrite(Value **arguments)
     Value *array = array_argument(arguments[1], index);
 
     array->fields[index] = arguments[3];
+    gc_written(array->fields);
     array->is_deep = 0;
     return make_io_result(make_con(TAG_UNIT, 0));
 }

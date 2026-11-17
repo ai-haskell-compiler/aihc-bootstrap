@@ -35,9 +35,12 @@
 enum {
     CELL_USED = 1,
     CELL_MARKED = 2,
-    CELL_BYTES = 4, /* holds no pointers: it is not looked into */
-    CELL_VALUE = 8, /* a Value: only some of its fields are looked at */
-    CELL_ENV = 16   /* an Env: likewise */
+    CELL_BYTES = 4,  /* holds no pointers: it is not looked into */
+    CELL_VALUE = 8,  /* a Value: only some of its fields are looked at */
+    CELL_ENV = 16,   /* an Env: likewise */
+    CELL_OLD = 32,   /* has been through a collection: see "Generations" */
+    CELL_PINNED = 64, /* the C stack points to it: it does not get old */
+    CELL_REMEMBERED = 128 /* old, and may point to young cells */
 };
 
 typedef struct Block {
@@ -71,11 +74,15 @@ static Block *class_chunk[CLASS_COUNT];
 
 static const char *stack_bottom = NULL; /* NULL: collecting is not on yet */
 static size_t allocated = 0;            /* bytes handed out since the last collection */
-/* Collecting looks at everything that is in use, so it is done rarely
-   (see gc_collect). */
-static size_t threshold = (size_t)1024 * 1024 * 1024;
-static size_t minimum_threshold = (size_t)1024 * 1024 * 1024;
-static size_t growth = 4; /* see gc_collect */
+/* A collection comes after `threshold` bytes; most are minor ones (see
+   "Generations"), which look only at what was made since the last. */
+static size_t threshold = (size_t)256 * 1024 * 1024;
+static size_t minimum_major = (size_t)1024 * 1024 * 1024;
+static size_t major_at = (size_t)1024 * 1024 * 1024;
+static size_t growth = 2; /* see gc_collect */
+static int minor_count = 0; /* since the last major collection */
+static int minor_limit = 1000000;
+#define MINOR_LIMIT minor_limit
 static int report = 0;
 static unsigned long collections = 0;
 
@@ -168,23 +175,71 @@ static Block *add_chunk(size_t cell_size, size_t cell_count)
     return chunk;
 }
 
-/* ---- Marking ---- */
+/* ---- Generations ----
+
+   Most of what the machine makes is not used for long, and most of what is
+   in use stays in use: while AIHC type checks, half a gigabyte of syntax
+   trees and environments does not change. So a cell that has been through
+   a collection is old, and most collections (minor ones) look only at the
+   young cells: those the roots point to, and those that old cells point
+   to. Every so often a major collection looks at everything.
+
+   An old cell can only point to a young one if one was put into it after
+   it got old. The places that change a cell that is already made say so
+   (gc_written), and such a cell is remembered until the next collection.
+   A cell that is still being made is in a C local: C code makes a value
+   and then fills in its fields, which can allocate and collect in
+   between. So a cell the C stack points to is pinned: it stays young
+   through the collection, and needs nothing to be said when it is filled
+   in. A cell that gets old while pointing to a pinned one is remembered
+   by the collector itself. */
 
 typedef struct Pending {
     char *cell;
     size_t size;
-    unsigned char state;
+    unsigned char *state;
 } Pending;
 
+/* A list of cells, with their size and where their state is. */
+typedef struct CellList {
+    Pending *cells;
+    size_t count;
+    size_t capacity;
+} CellList;
+
+static void add_cell(CellList *list, char *cell, size_t size,
+                     unsigned char *state)
+{
+    if (list->count == list->capacity) {
+        list->capacity = list->capacity * 2 + 4096;
+        list->cells = realloc(list->cells, list->capacity * sizeof(Pending));
+        if (list->cells == NULL) {
+            out_of_memory();
+        }
+    }
+    list->cells[list->count].cell = cell;
+    list->cells[list->count].size = size;
+    list->cells[list->count].state = state;
+    list->count++;
+}
+
+/* Old cells that may point to young ones. */
+static CellList remembered;
+
+/* ---- Marking ---- */
+
 /* Cells that are marked and whose words are still to be looked at. */
-static Pending *pending = NULL;
-static size_t pending_count = 0;
-static size_t pending_capacity = 0;
+static CellList pending;
+
+static int minor;          /* this collection does not look at old cells */
+static int on_c_stack;     /* the words being marked are on the C stack */
+static int points_to_pinned; /* the cell being looked into does */
 
 void gc_mark(const void *pointer)
 {
     Block *chunk;
     size_t index;
+    unsigned char *state;
 
     /* Most words are not addresses at all: zero, a small number. */
     if ((const char *)pointer < lowest_base
@@ -196,24 +251,44 @@ void gc_mark(const void *pointer)
         return;
     }
     index = (size_t)((const char *)pointer - chunk->base) / chunk->cell_size;
-    if ((chunk->state[index] & (CELL_USED | CELL_MARKED)) != CELL_USED) {
+    state = &chunk->state[index];
+    if (!(*state & CELL_USED) || (minor && (*state & CELL_OLD))) {
         return;
     }
-    chunk->state[index] |= CELL_MARKED;
-    if (chunk->state[index] & CELL_BYTES) {
+    if (on_c_stack && !(*state & CELL_OLD)) {
+        *state |= CELL_PINNED;
+    }
+    if (*state & CELL_PINNED) {
+        points_to_pinned = 1;
+    }
+    if (*state & CELL_MARKED) {
         return;
     }
-    if (pending_count == pending_capacity) {
-        pending_capacity = pending_capacity * 2 + 4096;
-        pending = realloc(pending, pending_capacity * sizeof(Pending));
-        if (pending == NULL) {
-            out_of_memory();
-        }
+    *state |= CELL_MARKED;
+    if (*state & CELL_BYTES) {
+        return;
     }
-    pending[pending_count].cell = chunk->base + index * chunk->cell_size;
-    pending[pending_count].size = chunk->cell_size;
-    pending[pending_count].state = chunk->state[index];
-    pending_count++;
+    add_cell(&pending, chunk->base + index * chunk->cell_size,
+             chunk->cell_size, state);
+}
+
+/* A pointer was put into the cell at that address, which may be old. */
+void gc_written(const void *address)
+{
+    Block *chunk = find_chunk(address);
+    size_t index;
+    unsigned char *state;
+
+    if (chunk == NULL) {
+        return;
+    }
+    index = (size_t)((const char *)address - chunk->base) / chunk->cell_size;
+    state = &chunk->state[index];
+    if ((*state & (CELL_OLD | CELL_REMEMBERED)) == CELL_OLD) {
+        *state |= CELL_REMEMBERED;
+        add_cell(&remembered, chunk->base + index * chunk->cell_size,
+                 chunk->cell_size, state);
+    }
 }
 
 /* Every word from `start` up to `end` is a possible pointer. */
@@ -240,31 +315,56 @@ static void mark_from_roots(void)
        them into this buffer, which is on the stack and so is scanned. */
     jmp_buf registers;
     const char *top = (const char *)&registers;
+    CellList old_remembered = remembered;
+    size_t i;
 
+    /* The remembered cells are looked into below, and remembered again if
+       they still point to a young cell. */
+    remembered.cells = NULL;
+    remembered.count = 0;
+    remembered.capacity = 0;
+    for (i = 0; i < old_remembered.count; i++) {
+        *old_remembered.cells[i].state &= (unsigned char)~CELL_REMEMBERED;
+    }
     memset(&registers, 0, sizeof(registers));
     (void)setjmp(registers);
     mark_roots();
+    on_c_stack = 1;
     if (top < stack_bottom) {
         gc_mark_range(top, stack_bottom);
     } else {
         gc_mark_range(stack_bottom, top + sizeof(registers));
     }
-    while (pending_count > 0) {
-        Pending cell = pending[--pending_count];
+    on_c_stack = 0;
+    if (minor) {
+        for (i = 0; i < old_remembered.count; i++) {
+            Pending *cell = &old_remembered.cells[i];
 
-        if (cell.state & CELL_VALUE) {
+            add_cell(&pending, cell->cell, cell->size, cell->state);
+        }
+    }
+    free(old_remembered.cells);
+    while (pending.count > 0) {
+        Pending cell = pending.cells[--pending.count];
+
+        points_to_pinned = 0;
+        if (*cell.state & CELL_VALUE) {
             /* The other fields are numbers, or point to what the
                interpreter made while it read the program. Fields that the
                kind does not use are NULL or left over, which only keeps
                something in use for longer. */
             const Value *value = (const Value *)cell.cell;
 
+            /* The arrays of a value are a part of it: a value that is being
+               filled in is in a C local, its arrays maybe not. */
+            on_c_stack = (*cell.state & CELL_PINNED) != 0;
             gc_mark(value->fields);
-            gc_mark(value->env);
             gc_mark(value->arguments);
+            on_c_stack = 0;
+            gc_mark(value->env);
             gc_mark(value->result);
             gc_mark(value->bytes);
-        } else if (cell.state & CELL_ENV) {
+        } else if (*cell.state & CELL_ENV) {
             const Env *env = (const Env *)cell.cell;
             int i;
 
@@ -276,10 +376,33 @@ static void mark_from_roots(void)
         } else {
             gc_mark_range(cell.cell, cell.cell + cell.size);
         }
+        /* It is old, or will be after this collection, and the cell it
+           points to stays young. */
+        if (points_to_pinned && !(*cell.state & CELL_PINNED)
+            && !(*cell.state & CELL_REMEMBERED)) {
+            *cell.state |= CELL_REMEMBERED;
+            add_cell(&remembered, cell.cell, cell.size, cell.state);
+        }
     }
 }
 
 /* ---- Sweeping ---- */
+
+/* What is left of a cell after a collection, if it is still in use: the
+   marks are taken off, and it is old unless the C stack points to it. */
+static int survives(unsigned char *state)
+{
+    if (!(*state & CELL_MARKED) && !(minor && (*state & CELL_OLD))) {
+        return 0;
+    }
+    if (!(*state & CELL_PINNED)) {
+        *state |= CELL_OLD;
+    }
+    *state &= (unsigned char)~(CELL_MARKED | CELL_PINNED);
+    return 1;
+}
+
+static size_t old_in_use = 0; /* bytes in old cells after the last sweep */
 
 /* Frees every cell that is not marked, and puts the free cells of each
    size back on its list. Returns how many bytes are still in use. */
@@ -296,6 +419,7 @@ static size_t sweep(void)
     for (k = 0; k < CLASS_COUNT; k++) {
         class_chunk[k] = NULL;
     }
+    old_in_use = 0;
     for (i = 0; i < chunk_count; i++) {
         Block *chunk = chunks[i];
         size_t index;
@@ -308,9 +432,11 @@ static size_t sweep(void)
         }
         if (size_class < 0) {
             /* One large cell: the whole chunk goes if it is not in use. */
-            if (chunk->state[0] & CELL_MARKED) {
-                chunk->state[0] &= (unsigned char)~CELL_MARKED;
+            if (survives(&chunk->state[0])) {
                 live += chunk->cell_size;
+                if (chunk->state[0] & CELL_OLD) {
+                    old_in_use += chunk->cell_size;
+                }
                 chunk_bases[kept] = chunk->base;
                 chunks[kept++] = chunk;
             } else {
@@ -321,9 +447,16 @@ static size_t sweep(void)
             continue;
         }
         for (index = 0; index < chunk->cell_count; index++) {
-            if (chunk->state[index] & CELL_MARKED) {
-                chunk->state[index] &= (unsigned char)~CELL_MARKED;
+            if (!(chunk->state[index] & CELL_USED)) {
+                char *cell = chunk->base + index * chunk->cell_size;
+
+                memcpy(cell, &free_cells[size_class], sizeof(void *));
+                free_cells[size_class] = cell;
+            } else if (survives(&chunk->state[index])) {
                 live += chunk->cell_size;
+                if (chunk->state[index] & CELL_OLD) {
+                    old_in_use += chunk->cell_size;
+                }
             } else {
                 char *cell = chunk->base + index * chunk->cell_size;
 
@@ -347,25 +480,31 @@ void gc_collect(void)
     if (stack_bottom == NULL) {
         return;
     }
+    /* A major collection when the old cells have grown `growth` times
+       since the last one, and in any case every so often. */
+    minor = old_in_use < major_at && minor_count < MINOR_LIMIT;
     mark_from_roots();
     live = sweep();
     collections++;
     if (report) {
-        fprintf(stderr, "gc %lu: %lu MB in use, %lu MB handed out since the last\n",
-                collections, (unsigned long)(live / (1024 * 1024)),
+        fprintf(stderr, "gc %lu%s: %lu MB in use, %lu MB old, %lu MB handed "
+                        "out since the last\n",
+                collections, minor ? "" : " (major)",
+                (unsigned long)(live / (1024 * 1024)),
+                (unsigned long)(old_in_use / (1024 * 1024)),
                 (unsigned long)(allocated / (1024 * 1024)));
         /* A collection comes at no particular place, so the lines of many
            of them show where the program spends its time. */
         print_position();
     }
     allocated = 0;
-    /* Collect again when `growth` times as much has been handed out as is
-       in use now, so that the work of collecting stays in proportion: it
-       looks at everything that is in use, which while AIHC type checks is
-       half a gigabyte that does not change, and the machine makes some 400
-       kB of short-lived values for every byte of a source file. */
-    threshold = growth * live > minimum_threshold ? growth * live
-                                                  : minimum_threshold;
+    if (minor) {
+        minor_count++;
+    } else {
+        minor_count = 0;
+        major_at = growth * old_in_use > minimum_major
+            ? growth * old_in_use : minimum_major;
+    }
 }
 
 /* ---- Allocating ---- */
@@ -471,10 +610,10 @@ void *gc_realloc(void *old, size_t size, int bytes)
 
 /* Turns collecting on. `bottom` is an address in the frame of the function
    that everything else is called from. The environment can ask for a
-   report of every collection (AIHC_GC_REPORT) and for collecting after
-   every so many bytes (AIHC_GC_EVERY), which finds mistakes sooner, and
-   for how much more than is in use is handed out before the next
-   collection (AIHC_GC_GROWTH, 4 times by default). */
+   report of every collection (AIHC_GC_REPORT); for collecting after every
+   so many bytes (AIHC_GC_EVERY), with every fourth collection a major
+   one, which finds mistakes sooner; and for how many times the old cells
+   grow before a major collection (AIHC_GC_GROWTH, 2 by default). */
 void gc_start(const void *bottom)
 {
     const char *every = getenv("AIHC_GC_EVERY");
@@ -483,10 +622,8 @@ void gc_start(const void *bottom)
     stack_bottom = bottom;
     report = getenv("AIHC_GC_REPORT") != NULL;
     if (every != NULL) {
-        /* Then every so many bytes, however much is in use. */
-        minimum_threshold = (size_t)strtoul(every, NULL, 10);
-        threshold = minimum_threshold;
-        growth = 0;
+        threshold = (size_t)strtoul(every, NULL, 10);
+        minor_limit = 3;
     }
     if (growth_text != NULL) {
         growth = (size_t)strtoul(growth_text, NULL, 10);

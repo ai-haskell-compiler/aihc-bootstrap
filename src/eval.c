@@ -623,7 +623,11 @@ static Env *bind_let(const Expr *let, Env *env)
             : make_thunk(let->values[i], NULL);
     }
     for (i = 0; i < let->binding_count; i++) {
-        env->values[first + i]->env = keep_needed(let->values[i], env);
+        Env *kept = keep_needed(let->values[i], env);
+
+        /* A collection in between may have made the thunk old. */
+        env->values[first + i]->env = kept;
+        gc_written(env->values[first + i]);
     }
     for (i = 0; i < let->strict_count; i++) {
         force(lookup(env, let->strict[i]));
@@ -790,6 +794,7 @@ static Value *run(Expr *expr, Env *env, Value *value)
                    thunk, would otherwise leave a frame for every turn. */
                 value->kind = V_INDIRECTION;
                 value->result = stack[stack_size - 1].value;
+                gc_written(value);
             } else {
                 push(F_UPDATE, value);
                 value->kind = V_BLACKHOLE;
@@ -817,6 +822,7 @@ static Value *run(Expr *expr, Env *env, Value *value)
             case F_UPDATE:
                 frame.value->kind = V_INDIRECTION;
                 frame.value->result = value;
+                gc_written(frame.value);
                 /* What the expression could see is no longer needed, and
                    must not stay in use because of this. */
                 frame.value->expr = NULL;
@@ -916,6 +922,7 @@ Value *catch_exception(Value *function, Value *argument, Value **exception)
         if (stack[stack_size].kind == F_UPDATE) {
             stack[stack_size].value->kind = V_RAISE;
             stack[stack_size].value->result = raised;
+            gc_written(stack[stack_size].value);
         }
     }
     *exception = raised;
