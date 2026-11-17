@@ -58,7 +58,17 @@ static Value *new_value(enum ValueKind kind)
     return value;
 }
 
-Value *make_int(long number)
+/* Small numbers and characters are made once: the lexer of aihc-parser
+   makes a value for every character it reads. They are outside the
+   collector's memory, and never change. */
+#define SHARED_INT_LOW (-128)
+#define SHARED_INT_HIGH 1024
+#define SHARED_CHARS 256
+
+static Value shared_ints[SHARED_INT_HIGH - SHARED_INT_LOW];
+static Value shared_chars[SHARED_CHARS];
+
+Value *make_unshared_int(long number)
 {
     Value *value = new_value(V_INT);
 
@@ -66,10 +76,32 @@ Value *make_int(long number)
     return value;
 }
 
+Value *make_int(long number)
+{
+    Value *value;
+
+    if (number < SHARED_INT_LOW || number >= SHARED_INT_HIGH) {
+        return make_unshared_int(number);
+    }
+    value = &shared_ints[number - SHARED_INT_LOW];
+    if (value->kind != V_INT || value->number != number) {
+        value->kind = V_INT;
+        value->number = number;
+    }
+    return value;
+}
+
 Value *make_char(long code)
 {
-    Value *value = new_value(V_CHAR);
+    Value *value;
 
+    if (code >= 0 && code < SHARED_CHARS) {
+        value = &shared_chars[code];
+        value->kind = V_CHAR;
+        value->number = code;
+        return value;
+    }
+    value = new_value(V_CHAR);
     value->number = code;
     return value;
 }

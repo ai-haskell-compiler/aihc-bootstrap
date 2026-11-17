@@ -123,7 +123,7 @@ Value *builtin_sha256(Value **arguments)
     for (i = 0; i < 32; i++) {
         digest[i] = (unsigned char)(state[i / 4] >> (24 - 8 * (i % 4)));
     }
-    result = make_int(32);
+    result = make_unshared_int(32);
     result->kind = V_BYTES;
     result->bytes = digest;
     return result;

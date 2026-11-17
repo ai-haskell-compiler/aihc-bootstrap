@@ -120,7 +120,7 @@ Value *builtin_md5(Value **arguments)
     for (i = 0; i < 16; i++) {
         digest[i] = (unsigned char)(state[i / 4] >> (8 * (i % 4)));
     }
-    result = make_int(16);
+    result = make_unshared_int(16);
     result->kind = V_BYTES;
     result->bytes = digest;
     return result;

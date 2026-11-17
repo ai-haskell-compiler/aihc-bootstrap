@@ -34,7 +34,7 @@ static FILE *handle_file(Value *value)
 
 static Value *make_byte_string(unsigned char *bytes, long length)
 {
-    Value *value = make_int(length);
+    Value *value = make_unshared_int(length);
 
     value->kind = V_BYTES;
     value->bytes = bytes;

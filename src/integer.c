@@ -109,7 +109,7 @@ static Value *value_of(Big big)
             return make_int((long)(0ul - magnitude));
         }
     }
-    value = make_int(big.sign);
+    value = make_unshared_int(big.sign);
     value->tag = INTEGER_BIG;
     value->field_count = big.count;
     value->bytes = (const unsigned char *)big.limbs;

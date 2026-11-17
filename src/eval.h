@@ -94,7 +94,8 @@ struct Builtin {
 #define TAG_NOTHING 0
 #define TAG_JUST 1
 
-Value *make_int(long number);
+Value *make_int(long number); /* may be shared: never change it */
+Value *make_unshared_int(long number); /* for one that is changed */
 Value *make_char(long code);
 Value *make_con(int tag, int field_count);
 Value *make_thunk(Expr *expr, Env *env);
