@@ -259,6 +259,38 @@ static Env *extend(Env *outer, Binding *binding, Value *value)
     return env;
 }
 
+/* Binds `parameter` to the argument on top of the machine's stack (an
+   F_APPLY frame), and the parameters of the lambdas the body starts with
+   to the arguments under it, as long as there are some waiting: one new
+   environment for all of them, instead of one for each. Sets `*body` to
+   what is left to evaluate. */
+static Env *bind_waiting(Env *env, Binding *parameter, Expr **body)
+{
+    const Shape *shape = child_shape(shape_of(env), parameter);
+    Expr *rest = *body;
+    Env *bound;
+    int first;
+    int count = 1;
+    int i;
+
+    while (rest->kind == E_LAMBDA && count < stack_size
+           && stack[stack_size - 1 - count].kind == F_APPLY) {
+        shape = child_shape(shape, rest->local);
+        rest = rest->body;
+        count++;
+    }
+    /* The arguments stay on the stack, where the collector finds them,
+       until they are in the environment. */
+    bound = new_env(shape, env);
+    first = shape->count - count;
+    for (i = 0; i < count; i++) {
+        bound->values[first + i] = stack[stack_size - 1 - i].value;
+    }
+    stack_size -= count;
+    *body = rest;
+    return bound;
+}
+
 /* Where the variable is in an environment of the shape, or -1. The
    innermost one counts, though a variable is bound only once in an
    environment. */
@@ -862,9 +894,10 @@ static Value *run(Expr *expr, Env *env, Value *value)
                        is bound without making it. A function of several
                        arguments, \a -> \b -> ..., takes them all this
                        way. */
-                    stack_size--;
-                    env = extend(env, expr->local, stack[stack_size].value);
+                    Binding *parameter = expr->local;
+
                     expr = expr->body;
+                    env = bind_waiting(env, parameter, &expr);
                     continue;
                 }
                 value = make_closure(expr, keep_needed(expr, env));
@@ -961,8 +994,9 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 break;
             case F_APPLY:
                 if (value->kind == V_CLOSURE) {
-                    env = extend(value->c.env, value->a.parameter, frame.value);
+                    stack_size++; /* the argument is taken from there */
                     expr = value->b.body;
+                    env = bind_waiting(value->c.env, value->a.parameter, &expr);
                 } else if (value->kind == V_BUILTIN
                            || value->kind == V_PARTIAL_CON) {
                     value = apply_waiting(value, frame.value);
