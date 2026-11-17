@@ -515,6 +515,11 @@ static Env *keep(Needed *needed, Env *env)
     if (to->count == 0) {
         return NULL;
     }
+    /* All of them, in the same order: an environment never changes, so
+       this one will do. */
+    if (to == from) {
+        return env;
+    }
     kept = new_env(to, NULL);
     for (i = 0; i < to->count; i++) {
         kept->values[i] = env->values[needed->positions[i]];
