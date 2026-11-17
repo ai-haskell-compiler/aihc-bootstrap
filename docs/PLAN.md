@@ -271,6 +271,8 @@ yet, in this order: derived `Traversable`, overlapping instances
 
 The first build that got through took 4 h 53 min (17,097 s of CPU), with
 the generational collector but before the rest of "Where the time goes".
+With about half of that (up to the arguments bound in one environment)
+it took 1 h 52 min (6,684 s), and wrote the same store.
 AIHC built with GHC builds the whole plan in 34 s of CPU (274 G
 instructions): `aihc-prim` 45.7 s and `aihc-base` 44.6 s of wall time.
 
