@@ -289,6 +289,15 @@ struct Expr {
     Needed alternatives_needed; /* E_CASE: those its alternatives mention */
     const void *lookup_shape;  /* E_LOCAL: where the variable was the last */
     int lookup_index;          /* time, in an environment of that shape */
+    /* E_TYPE, E_METHOD: `type` with its links followed, and whether it has
+       type variables in it (1: none, 2: some), once the evaluator has
+       needed it; see run_type in eval.c. */
+    Type *run_type;
+    int run_type_state;
+    /* E_METHOD at a type without variables: the method found, while
+       all_instances is `method_instances` (eval.c). */
+    struct Value *method;
+    const void *method_instances;
 };
 
 /* A qualifier that makes a name refer to the Prelude whatever is in scope.

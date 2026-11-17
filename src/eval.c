@@ -519,18 +519,92 @@ static Env *keep_for_alternatives(Expr *expr, Env *env)
    thunk of the call before, and that to the one before it. */
 static Type *close_type(Type *type, const Env *env);
 
+/* The type with every link followed. Type applications are made once, so
+   a type without variables in it is one pointer to compare. */
+static Type *follow_links(Type *type)
+{
+    Type *function;
+    Type *argument;
+
+    type = prune(type);
+    if (type->kind != TY_APP) {
+        return type;
+    }
+    function = follow_links(type->function);
+    argument = follow_links(type->argument);
+    if (function == type->function && argument == type->argument) {
+        return type;
+    }
+    return new_type_application(function, argument);
+}
+
+static int has_variables(Type *type)
+{
+    switch (type->kind) {
+    case TY_RIGID:
+        return 1;
+    case TY_APP:
+        return has_variables(type->function)
+               || has_variables(type->argument);
+    default:
+        return 0;
+    }
+}
+
+/* The type of an E_TYPE or E_METHOD, worked out the first time. The type
+   checker is done with it when it runs: its links do not change. */
+static Type *run_type(Expr *expr)
+{
+    if (expr->run_type_state == 0) {
+        expr->run_type = follow_links(expr->type);
+        expr->run_type_state = has_variables(expr->run_type) ? 2 : 1;
+    }
+    return expr->run_type;
+}
+
+/* The type of an E_TYPE or E_METHOD with its variables replaced by what
+   they stand for in the environment. */
+static Type *closed_type(Expr *expr, const Env *env)
+{
+    Type *type = run_type(expr);
+
+    return expr->run_type_state == 1 ? type : close_type(type, env);
+}
+
+/* The method of an E_METHOD. Found once if its type has no variables in
+   it, as long as no instances come: find_method keeps the value in use
+   meanwhile. */
+static Value *method_of(Expr *expr, const Env *env)
+{
+    Type *type = closed_type(expr, env);
+
+    if (expr->run_type_state != 1) {
+        return find_method(expr->global, type);
+    }
+    if (expr->method == NULL || expr->method_instances != all_instances) {
+        Value *method = find_method(expr->global, type);
+
+        if (!method_is_remembered(type)) {
+            return method;
+        }
+        expr->method = method;
+        expr->method_instances = all_instances;
+    }
+    return expr->method;
+}
+
 static Value *delay(Expr *expr, Env *env)
 {
     switch (expr->kind) {
     case E_LOCAL:
         return lookup_local(expr, env);
     case E_TYPE:
-        if (prune(expr->type)->kind == TY_RIGID) {
-            return lookup(env, prune(expr->type)->variable);
+        if (run_type(expr)->kind == TY_RIGID) {
+            return lookup(env, run_type(expr)->variable);
         }
         /* What a type's variables stand for are types too, which are
            quickly found: no thunk is worth making for it. */
-        return make_type(close_type(expr->type, env));
+        return make_type(closed_type(expr, env));
     case E_LAMBDA:
         return make_closure(expr, keep_needed(expr, env));
     case E_CONSTRUCTOR:
@@ -985,10 +1059,10 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 expr = expr->body;
                 continue;
             case E_TYPE:
-                value = make_type(close_type(expr->type, env));
+                value = make_type(closed_type(expr, env));
                 break;
             case E_METHOD:
-                value = find_method(expr->global, close_type(expr->type, env));
+                value = method_of(expr, env);
                 break;
             case E_NAME:
             case E_OPERATORS:

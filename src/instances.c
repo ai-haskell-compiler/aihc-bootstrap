@@ -267,6 +267,11 @@ static void forget_if_instances_came(void)
     remembered_since = all_instances;
 }
 
+int method_is_remembered(Type *type)
+{
+    return hash_type(type) != 0;
+}
+
 void mark_remembered_methods(void)
 {
     int i;
