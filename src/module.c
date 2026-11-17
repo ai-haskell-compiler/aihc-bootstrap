@@ -72,6 +72,9 @@ static Entity *tuple_entity(int arity)
         constructor->name = type->name;
         constructor->type = type;
         constructor->arity = arity;
+        type->constructor_count = 1;
+        type->constructors = xmalloc(sizeof(Constructor *));
+        type->constructors[0] = constructor;
         entity->namespace = NS_CONSTRUCTOR;
         entity->name = type->name;
         entity->parent = type->name;

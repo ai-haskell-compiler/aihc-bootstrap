@@ -84,6 +84,7 @@ Value *make_char(long code);
 Value *make_con(int tag, int field_count);
 Value *make_thunk(Expr *expr, Env *env);
 Value *make_builtin(const Builtin *builtin);
+Value *make_constructor(const Constructor *constructor);
 Value *make_io_result(Value *result);
 Value *make_type(Type *type);
 Value *make_string(const char *string); /* a list of characters */

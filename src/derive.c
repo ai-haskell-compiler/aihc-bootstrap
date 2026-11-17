@@ -484,6 +484,312 @@ static Value *data_method(const char *name, Type *type)
     return apply(global_value(global), make_type(type));
 }
 
+/* ---- Functor, Foldable and Traversable ----
+
+   The class is of a type with its last parameter left off: Functor T for
+   data T b a. The methods work at the full type, with a marker in place of
+   that parameter, and go through each field by its type:
+
+   - the marker itself: the function is applied to the field;
+   - a type without the marker: the field stays as it is (fmap), is
+     skipped (foldr), or is given back with `pure` (traverse);
+   - a tuple: each of its fields, the same way;
+   - any other type with the marker in its last argument only, like [a] or
+     Maybe (b, a): the method of that type's own instance, with a function
+     that does this for the argument.
+
+   That is what GHC derives, with fmap and the fields of foldr done at once
+   rather than when they are looked at. The instance methods take their
+   own type variables after the class's, in the order the signature names
+   them, context first, so these builtins do too: fmap @a @b, foldr @a @b,
+   traverse @f @a @b. */
+
+static Binding *marker_binding = NULL;
+
+static Type *marker(void)
+{
+    static Type *type = NULL;
+
+    if (type == NULL) {
+        marker_binding = xmalloc(sizeof(Binding));
+        memset(marker_binding, 0, sizeof(Binding));
+        marker_binding->name = "<the last parameter>";
+        type = new_rigid(marker_binding);
+    }
+    return type;
+}
+
+static int is_marker(Type *type)
+{
+    type = prune(type);
+    return type->kind == TY_RIGID && type->variable == marker_binding
+        && marker_binding != NULL;
+}
+
+static int mentions_marker(Type *type)
+{
+    type = prune(type);
+    if (type->kind == TY_APP) {
+        return mentions_marker(type->function)
+            || mentions_marker(type->argument);
+    }
+    return is_marker(type);
+}
+
+/* The type with the marker replaced. */
+static Type *instead_of_marker(Type *type, Type *replacement)
+{
+    Binding *variables[1];
+    Type *types[1];
+
+    variables[0] = marker_binding;
+    types[0] = replacement;
+    return substitute(type, 1, variables, types);
+}
+
+/* Whether a value of the type is gone through field by field: the type the
+   instance is for, and tuples. */
+static int is_structural(Type *type, const TypeCon *derived)
+{
+    TypeCon *head = type_head(type);
+
+    return head == derived
+        || (head->parameter_count >= 2
+            && head == tuple_type_constructor(head->parameter_count));
+}
+
+/* The type of an application, without its last argument; dies if the
+   marker is anywhere but there. */
+static Type *functor_part(Type *type)
+{
+    type = prune(type);
+    if (type->kind != TY_APP || mentions_marker(type->function)) {
+        TODO("deriving Functor, Foldable or Traversable over a field whose "
+             "type has the last parameter elsewhere than in its last argument");
+    }
+    return type->function;
+}
+
+static Value *with_types(Value *function, Type *a, Type *b)
+{
+    return apply(apply(function, make_type(a)), make_type(b));
+}
+
+static Value *map_at(Type *type, const TypeCon *derived, Type *a, Type *b,
+                     Value *f, Value *value);
+static const Builtin map_at_builtin;
+
+/* derivedFmapAt :: type -> a -> b -> (a -> b) -> x -> y, for a field of
+   the type `type`. */
+static Value *derived_fmap_at(Value **arguments)
+{
+    Type *type = force(arguments[0])->type;
+
+    return map_at(type, type_head(type), force(arguments[1])->type,
+                  force(arguments[2])->type, arguments[3], arguments[4]);
+}
+
+static const Builtin map_at_builtin = { "derivedFmapAt", 5, derived_fmap_at };
+
+static Value *map_at(Type *type, const TypeCon *derived, Type *a, Type *b,
+                     Value *f, Value *value)
+{
+    if (is_marker(type)) {
+        return apply(f, value);
+    }
+    if (!mentions_marker(type)) {
+        return value;
+    }
+    if (is_structural(type, derived)) {
+        Value **fields;
+        Constructor *constructor = constructor_of(type, &value, &fields);
+        Value *result;
+        int i;
+
+        if (constructor->is_newtype) {
+            return map_at(field_type(type, constructor, 0), derived, a, b, f,
+                          value);
+        }
+        result = make_con(constructor->tag, constructor->arity);
+        for (i = 0; i < constructor->arity; i++) {
+            result->fields[i] = map_at(field_type(type, constructor, i),
+                                       derived, a, b, f, fields[i]);
+        }
+        return result;
+    } else {
+        Type *inner = prune(type)->argument;
+        Value *mapper = with_types(apply(make_builtin(&map_at_builtin),
+                                         make_type(inner)),
+                                   a, b);
+        Value *fmap = find_method(prelude_method("fmap"), functor_part(type));
+
+        fmap = with_types(fmap, instead_of_marker(inner, a),
+                          instead_of_marker(inner, b));
+        return apply(apply(fmap, apply(mapper, f)), value);
+    }
+}
+
+/* derivedFmap :: t -> a -> b -> (a -> b) -> t a -> t b */
+static Value *derived_fmap(Value **arguments)
+{
+    Type *type = force(arguments[0])->type;
+
+    return map_at(new_type_application(type, marker()), type_head(type),
+                  force(arguments[1])->type, force(arguments[2])->type,
+                  arguments[3], arguments[4]);
+}
+
+static Value *fold_at(Type *type, const TypeCon *derived, Type *a, Type *b,
+                      Value *f, Value *end, Value *value);
+
+/* derivedFoldrAt :: type -> a -> b -> (a -> b -> b) -> x -> b -> b */
+static Value *derived_foldr_at(Value **arguments)
+{
+    Type *type = force(arguments[0])->type;
+
+    return fold_at(type, type_head(type), force(arguments[1])->type,
+                   force(arguments[2])->type, arguments[3], arguments[5],
+                   arguments[4]);
+}
+
+static const Builtin foldr_at_builtin =
+    { "derivedFoldrAt", 6, derived_foldr_at };
+
+static Value *fold_at(Type *type, const TypeCon *derived, Type *a, Type *b,
+                      Value *f, Value *end, Value *value)
+{
+    if (is_marker(type)) {
+        return apply(apply(f, value), end);
+    }
+    if (!mentions_marker(type)) {
+        return end;
+    }
+    if (is_structural(type, derived)) {
+        Value **fields;
+        Constructor *constructor = constructor_of(type, &value, &fields);
+        int i;
+
+        for (i = constructor->arity - 1; i >= 0; i--) {
+            end = fold_at(field_type(type, constructor, i), derived, a, b, f,
+                          end, fields[i]);
+        }
+        return end;
+    } else {
+        Type *inner = prune(type)->argument;
+        Value *folder = with_types(apply(make_builtin(&foldr_at_builtin),
+                                         make_type(inner)),
+                                   a, b);
+        Value *foldr = find_method(prelude_method("foldr"), functor_part(type));
+
+        foldr = with_types(foldr, instead_of_marker(inner, a), b);
+        return apply(apply(apply(foldr, apply(folder, f)), end), value);
+    }
+}
+
+/* derivedFoldr :: t -> a -> b -> (a -> b -> b) -> b -> t a -> b */
+static Value *derived_foldr(Value **arguments)
+{
+    Type *type = force(arguments[0])->type;
+
+    return fold_at(new_type_application(type, marker()), type_head(type),
+                   force(arguments[1])->type, force(arguments[2])->type,
+                   arguments[3], arguments[4], arguments[5]);
+}
+
+static Value *traverse_at(Type *type, const TypeCon *derived, Type *a,
+                          Type *applicative, Type *b, Value *f, Value *value);
+
+/* derivedTraverseAt :: type -> f -> a -> b -> (a -> f b) -> x -> f y */
+static Value *derived_traverse_at(Value **arguments)
+{
+    Type *type = force(arguments[0])->type;
+
+    return traverse_at(type, type_head(type), force(arguments[2])->type,
+                       force(arguments[1])->type, force(arguments[3])->type,
+                       arguments[4], arguments[5]);
+}
+
+static const Builtin traverse_at_builtin =
+    { "derivedTraverseAt", 6, derived_traverse_at };
+
+/* pure @f @type value */
+static Value *pure_at(Type *applicative, Type *type, Value *value)
+{
+    Value *pure = find_method(prelude_method("pure"), applicative);
+
+    return apply(apply(pure, make_type(type)), value);
+}
+
+static Value *traverse_at(Type *type, const TypeCon *derived, Type *a,
+                          Type *applicative, Type *b, Value *f, Value *value)
+{
+    if (is_marker(type)) {
+        return apply(f, value);
+    }
+    if (!mentions_marker(type)) {
+        return pure_at(applicative, type, value);
+    }
+    if (is_structural(type, derived)) {
+        Value **fields;
+        Constructor *constructor = constructor_of(type, &value, &fields);
+        Type **types;
+        Type *function;
+        Value *result;
+        int i;
+
+        if (constructor->is_newtype) {
+            return traverse_at(field_type(type, constructor, 0), derived, a,
+                               applicative, b, f, value);
+        }
+        /* pure C <*> field 0 <*> field 1 ..., with the type of what is still
+           a function at each step. */
+        types = gc_alloc((size_t)constructor->arity * sizeof(Type *) + 1);
+        function = instead_of_marker(type, b);
+        for (i = constructor->arity - 1; i >= 0; i--) {
+            types[i] = instead_of_marker(field_type(type, constructor, i), b);
+            function = function_type(types[i], function);
+        }
+        result = pure_at(applicative, function, make_constructor(constructor));
+        for (i = 0; i < constructor->arity; i++) {
+            Value *ap = find_method(prelude_method("<*>"), applicative);
+            Type *rest;
+
+            split_function_type(function, &types[i], &rest);
+            ap = with_types(ap, types[i], rest);
+            result = apply(apply(ap, result),
+                           traverse_at(field_type(type, constructor, i),
+                                       derived, a, applicative, b, f,
+                                       fields[i]));
+            function = rest;
+        }
+        return result;
+    } else {
+        Type *inner = prune(type)->argument;
+        Value *traverser = apply(
+            with_types(apply(make_builtin(&traverse_at_builtin),
+                             make_type(inner)),
+                       applicative, a),
+            make_type(b));
+        Value *traverse =
+            find_method(prelude_method("traverse"), functor_part(type));
+
+        traverse = with_types(apply(traverse, make_type(applicative)),
+                              instead_of_marker(inner, a),
+                              instead_of_marker(inner, b));
+        return apply(apply(traverse, apply(traverser, f)), value);
+    }
+}
+
+/* derivedTraverse :: t -> f -> a -> b -> (a -> f b) -> t a -> f (t b) */
+static Value *derived_traverse(Value **arguments)
+{
+    Type *type = force(arguments[0])->type;
+
+    return traverse_at(new_type_application(type, marker()), type_head(type),
+                       force(arguments[2])->type, force(arguments[1])->type,
+                       force(arguments[3])->type, arguments[4], arguments[5]);
+}
+
 /* ---- Choosing the method ---- */
 
 static const Builtin eq_builtin = { "derivedEq", 3, derived_eq };
@@ -491,6 +797,10 @@ static const Builtin compare_builtin = { "derivedCompare", 3, derived_compare };
 static const Builtin showsPrec_builtin =
     { "derivedShowsPrec", 4, derived_showsPrec };
 static const Builtin append_builtin = { "derivedAppend", 3, derived_append };
+static const Builtin fmap_builtin = { "derivedFmap", 5, derived_fmap };
+static const Builtin foldr_builtin = { "derivedFoldr", 6, derived_foldr };
+static const Builtin traverse_builtin =
+    { "derivedTraverse", 6, derived_traverse };
 static const Builtin toEnum_builtin = { "derivedToEnum", 2, derived_toEnum };
 static const Builtin fromEnum_builtin =
     { "derivedFromEnum", 2, derived_fromEnum };
@@ -595,10 +905,19 @@ Value *derived_method(const Instance *instance, Global *method, Type *type)
         }
         TODO("derived method of Data other than gmapT, gmapQ and gmapM");
     }
-    if (strcmp(class_name, "Read") == 0 || strcmp(class_name, "Functor") == 0
-        || strcmp(class_name, "Foldable") == 0
-        || strcmp(class_name, "Traversable") == 0) {
-        TODO("derived instance of Read, Functor, Foldable or Traversable");
+    /* The other methods of these classes are the defaults. */
+    if (strcmp(class_name, "Functor") == 0 && strcmp(name, "fmap") == 0) {
+        return at_type(&fmap_builtin, type);
+    }
+    if (strcmp(class_name, "Foldable") == 0 && strcmp(name, "foldr") == 0) {
+        return at_type(&foldr_builtin, type);
+    }
+    if (strcmp(class_name, "Traversable") == 0
+        && strcmp(name, "traverse") == 0) {
+        return at_type(&traverse_builtin, type);
+    }
+    if (strcmp(class_name, "Read") == 0) {
+        TODO("derived instance of Read");
     }
     return NULL;
 }

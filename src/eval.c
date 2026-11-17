@@ -374,7 +374,7 @@ static Type *close_type(Type *type, const Env *env)
 }
 
 /* The value of a constructor that has not been given any fields yet. */
-static Value *make_constructor(const Constructor *constructor)
+Value *make_constructor(const Constructor *constructor)
 {
     Value *value;
 
