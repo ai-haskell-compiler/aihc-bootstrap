@@ -75,6 +75,7 @@ static size_t allocated = 0;            /* bytes handed out since the last colle
    (see gc_collect). */
 static size_t threshold = (size_t)1024 * 1024 * 1024;
 static size_t minimum_threshold = (size_t)1024 * 1024 * 1024;
+static size_t growth = 4; /* see gc_collect */
 static int report = 0;
 static unsigned long collections = 0;
 
@@ -358,12 +359,13 @@ void gc_collect(void)
         print_position();
     }
     allocated = 0;
-    /* Collect again when twice as much has been handed out as is in use
-       now, so that the work of collecting stays in proportion: it looks at
-       everything that is in use, and the machine makes some 400 kB of
-       short-lived values for every byte of a source file that AIHC
-       parses. */
-    threshold = 2 * live > minimum_threshold ? 2 * live : minimum_threshold;
+    /* Collect again when `growth` times as much has been handed out as is
+       in use now, so that the work of collecting stays in proportion: it
+       looks at everything that is in use, which while AIHC type checks is
+       half a gigabyte that does not change, and the machine makes some 400
+       kB of short-lived values for every byte of a source file. */
+    threshold = growth * live > minimum_threshold ? growth * live
+                                                  : minimum_threshold;
 }
 
 /* ---- Allocating ---- */
@@ -470,15 +472,23 @@ void *gc_realloc(void *old, size_t size, int bytes)
 /* Turns collecting on. `bottom` is an address in the frame of the function
    that everything else is called from. The environment can ask for a
    report of every collection (AIHC_GC_REPORT) and for collecting after
-   every so many bytes (AIHC_GC_EVERY), which finds mistakes sooner. */
+   every so many bytes (AIHC_GC_EVERY), which finds mistakes sooner, and
+   for how much more than is in use is handed out before the next
+   collection (AIHC_GC_GROWTH, 4 times by default). */
 void gc_start(const void *bottom)
 {
     const char *every = getenv("AIHC_GC_EVERY");
+    const char *growth_text = getenv("AIHC_GC_GROWTH");
 
     stack_bottom = bottom;
     report = getenv("AIHC_GC_REPORT") != NULL;
     if (every != NULL) {
+        /* Then every so many bytes, however much is in use. */
         minimum_threshold = (size_t)strtoul(every, NULL, 10);
         threshold = minimum_threshold;
+        growth = 0;
+    }
+    if (growth_text != NULL) {
+        growth = (size_t)strtoul(growth_text, NULL, 10);
     }
 }

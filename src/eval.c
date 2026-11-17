@@ -469,9 +469,17 @@ static Type *close_type(Type *type, const Env *env)
     switch (type->kind) {
     case TY_RIGID:
         return force(lookup(env, type->variable))->type;
-    case TY_APP:
-        return new_type_application(close_type(type->function, env),
-                                    close_type(type->argument, env));
+    case TY_APP: {
+        /* Types made here are never freed, so one without variables in it
+           is not made again. */
+        Type *function = close_type(type->function, env);
+        Type *argument = close_type(type->argument, env);
+
+        if (function == type->function && argument == type->argument) {
+            return type;
+        }
+        return new_type_application(function, argument);
+    }
     case TY_META:
     case TY_CON:
     case TY_FORALL:
