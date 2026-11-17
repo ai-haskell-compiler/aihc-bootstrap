@@ -34,11 +34,7 @@ static FILE *handle_file(Value *value)
 
 static Value *make_byte_string(unsigned char *bytes, long length)
 {
-    Value *value = make_int(length);
-
-    value->kind = V_BYTES;
-    value->bytes = bytes;
-    return value;
+    return make_bytes(bytes, length);
 }
 
 /* handleOpen :: String -> Int -> IO Int

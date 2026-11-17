@@ -109,10 +109,11 @@ static Value *value_of(Big big)
             return make_int((long)(0ul - magnitude));
         }
     }
-    value = make_int(big.sign);
+    /* A number with all the fields: the sign, how many limbs, the limbs. */
+    value = make_bytes((const unsigned char *)big.limbs, big.sign);
+    value->kind = V_INT;
     value->tag = INTEGER_BIG;
     value->field_count = big.count;
-    value->bytes = (const unsigned char *)big.limbs;
     return value;
 }
 

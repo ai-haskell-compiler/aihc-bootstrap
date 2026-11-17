@@ -77,13 +77,19 @@ mapKeysWith :: Ord k2 => (a -> a -> a) -> (k1 -> k2) -> Map k1 a -> Map k2 a
 mapKeysWith combine f m = strict (L.mapKeysWith combine f m)
 
 unionWith :: Ord k => (a -> a -> a) -> Map k a -> Map k a -> Map k a
-unionWith f left right = strict (L.unionWith f left right)
+unionWith f = unionWithKey (\_ a b -> f a b)
 
 unionWithKey :: Ord k => (k -> a -> a -> a) -> Map k a -> Map k a -> Map k a
-unionWithKey f left right = strict (L.unionWithKey f left right)
+unionWithKey f left right =
+  -- As in Data.Map.Base: the smaller map goes into the larger one, and
+  -- only the values that are put together are evaluated here; the others
+  -- were when they went into their map.
+  if L.size left <= L.size right
+    then L.foldlWithKey' (\m k a -> insertWithKey f k a m) right left
+    else L.foldlWithKey' (\m k b -> insertWithKey (\key new old -> f key old new) k b m) left right
 
 unionsWith :: Ord k => (a -> a -> a) -> [Map k a] -> Map k a
-unionsWith f maps = strict (L.unionsWith f maps)
+unionsWith f maps = foldl' (unionWith f) L.empty maps
 
 intersectionWith :: Ord k => (a -> b -> c) -> Map k a -> Map k b -> Map k c
 intersectionWith f left right = strict (L.intersectionWith f left right)

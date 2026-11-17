@@ -96,7 +96,6 @@ Value *builtin_md5(Value **arguments)
     unsigned long padded = rest < 56 ? 64 : 128;
     unsigned long bits = length * 8;
     unsigned long i;
-    Value *result;
 
     if (input->kind != V_BYTES) {
         die("md5 was given something that is not a ByteString");
@@ -120,8 +119,5 @@ Value *builtin_md5(Value **arguments)
     for (i = 0; i < 16; i++) {
         digest[i] = (unsigned char)(state[i / 4] >> (8 * (i % 4)));
     }
-    result = make_int(16);
-    result->kind = V_BYTES;
-    result->bytes = digest;
-    return result;
+    return make_bytes(digest, 16);
 }

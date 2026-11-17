@@ -5,6 +5,8 @@ fromList [(1,"uno"),(2,"two"),(3,"three")]
 (fromList [(1,"new-uno"),(2,"two"),(3,"three")],fromList [(1,"uno"),(2,"two"),(3,"three"),(5,"new-")],fromList [(1,"uno"),(2,"two!"),(3,"three")])
 (fromList [(1,"ca"),(2,"b")],fromList [(1,"1ba")])
 (fromList [(1,"uno"),(2,"two"),(3,"three"),(4,"four")],fromList [(1,"uno"),(2,"two"),(3,"three+"),(4,"four")])
+(fromList [(1,"l1"),(2,"s2"),(3,"l3"),(4,"l4"),(5,"l5"),(6,"l6"),(50,"s50")],fromList [(1,"l1"),(2,"l2"),(3,"l3"),(4,"l4"),(5,"l5"),(6,"l6"),(50,"s50")])
+(fromList [(1,"l1"),(2,"s2l2"),(3,"l3"),(4,"l4"),(5,"l5"),(6,"l6"),(50,"s50")],fromList [(1,"l1"),(2,"l2s2"),(3,"l3"),(4,"l4"),(5,"l5"),(6,"l6"),(50,"s50")],fromList [(1,"l1"),(2,"s2"),(3,"l3"),(4,"l4"),(5,"l5"),(6,"l6"),(50,"s50")])
 (fromList [(1,"uno"),(2,"two"),(3,"three"),(9,"nine")],fromList [(1,"uno+"),(2,"two"),(3,"three")])
 (fromList [(2,"two"),(3,"three")],fromList [(1,"uno")])
 fromList [(2,("two",'x')),(3,("three",'y'))]

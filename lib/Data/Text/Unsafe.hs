@@ -4,7 +4,7 @@ module Data.Text.Unsafe where
 -- is always where a character starts.
 
 import qualified Data.ByteString as B
-import Data.Text (Text (..), charAt, width)
+import Data.Text (Text (..), charAt, widthAt)
 
 -- A character and its width in bytes.
 data Iter = Iter Char Int
@@ -20,10 +20,10 @@ dropWord8 count (Text bytes) = Text (B.drop count bytes)
 
 -- The character at the byte offset.
 iter :: Text -> Int -> Iter
-iter (Text bytes) offset = let c = charAt bytes offset in Iter c (width c)
+iter (Text bytes) offset = Iter (charAt bytes offset) (widthAt bytes offset)
 
 unsafeHead :: Text -> Char
 unsafeHead (Text bytes) = charAt bytes 0
 
 unsafeTail :: Text -> Text
-unsafeTail (Text bytes) = Text (B.drop (width (charAt bytes 0)) bytes)
+unsafeTail (Text bytes) = Text (B.drop (widthAt bytes 0) bytes)

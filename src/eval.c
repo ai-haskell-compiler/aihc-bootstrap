@@ -50,11 +50,35 @@ static void push(enum FrameKind kind, Value *value)
     stack_size++;
 }
 
+/* A value of the kind, with the memory for the fields that the kind uses:
+   see struct Value. */
 static Value *new_value(enum ValueKind kind)
 {
-    Value *value = gc_alloc(sizeof(Value));
+    size_t size = sizeof(Value);
+    Value *value;
 
+    if (kind == V_INT || kind == V_CHAR) {
+        size = offsetof(Value, expr);
+    } else if (kind == V_CLOSURE) {
+        size = offsetof(Value, result);
+    } else if (kind == V_THUNK) {
+        size = offsetof(Value, field_count);
+    } else if (kind == V_CON) {
+        size = offsetof(Value, builtin);
+    }
+    value = gc_alloc(size);
     value->kind = kind;
+    return value;
+}
+
+/* A ByteString: `length` bytes at `bytes`. An Integer beyond a C long is
+   made from one as well (integer.c): it has all the fields. */
+Value *make_bytes(const unsigned char *bytes, long length)
+{
+    Value *value = new_value(V_BYTES);
+
+    value->number = length;
+    value->bytes = bytes;
     return value;
 }
 
@@ -121,8 +145,7 @@ static Value *make_closure(Expr *lambda, Env *env)
 {
     Value *value = new_value(V_CLOSURE);
 
-    value->parameter = lambda->local;
-    value->body = lambda->body;
+    value->expr = lambda;
     value->env = env;
     return value;
 }
@@ -163,6 +186,56 @@ static Value *lookup(const Env *env, const Binding *binding)
     }
     die("variable %s is not in the environment", binding->name);
     return NULL;
+}
+
+/* ---- Constants ---- */
+
+static int has_type_variables(Type *type)
+{
+    type = prune(type);
+    if (type->kind == TY_APP) {
+        return has_type_variables(type->function)
+            || has_type_variables(type->argument);
+    }
+    return type->kind == TY_RIGID || type->kind == TY_FORALL;
+}
+
+/* The value of an expression that has the same value every time, or NULL:
+   a small number, a character, a constructor without fields, a type
+   without type variables. A function with a class in its type is given
+   types at every call, and most of those are such types.
+
+   The value is made once and stays with the expression. It is not the
+   collector's, which is fine: it refers to nothing that is. */
+static Value *constant(Expr *expr)
+{
+    Value *value;
+
+    if (expr->constant_known) {
+        return expr->constant;
+    }
+    expr->constant_known = 1;
+    if (!(expr->kind == E_CHAR || (expr->kind == E_INT && expr->big == 0)
+          || (expr->kind == E_CONSTRUCTOR
+              && expr->constructor->arity
+                     + expr->constructor->existential_count == 0)
+          || (expr->kind == E_TYPE && !has_type_variables(expr->type)))) {
+        return NULL;
+    }
+    value = xmalloc(sizeof(Value));
+    memset(value, 0, sizeof(Value));
+    if (expr->kind == E_CONSTRUCTOR) {
+        value->kind = V_CON;
+        value->tag = expr->constructor->tag;
+    } else if (expr->kind == E_TYPE) {
+        value->kind = V_TYPE;
+        value->type = expr->type;
+    } else {
+        value->kind = expr->kind == E_CHAR ? V_CHAR : V_INT;
+        value->number = expr->number;
+    }
+    expr->constant = value;
+    return value;
 }
 
 /* ---- What an expression needs of its environment ---- */
@@ -316,6 +389,11 @@ static Env *keep_needed(Expr *expr, Env *env)
    thunk of the call before, and that to the one before it. */
 static Value *delay(Expr *expr, Env *env)
 {
+    Value *known = constant(expr);
+
+    if (known != NULL) {
+        return known;
+    }
     if (expr->kind == E_LOCAL) {
         return lookup(env, expr->local);
     }
@@ -337,8 +415,8 @@ static Type *close_type(Type *type, const Env *env)
     case TY_RIGID:
         return force(lookup(env, type->variable))->type;
     case TY_APP:
-        return new_type_application(close_type(type->function, env),
-                                    close_type(type->argument, env));
+        return temporary_application(close_type(type->function, env),
+                                     close_type(type->argument, env));
     case TY_META:
     case TY_CON:
     case TY_FORALL:
@@ -360,26 +438,42 @@ static Value *make_constructor(const Constructor *constructor)
     return value;
 }
 
-/* Gives a builtin or a constructor one more argument. If that was the last
-   one, calls the builtin or builds the constructed value. */
+/* Gives a builtin or a constructor an argument, and those that are waiting
+   on the stack after it. If that was the last one, calls the builtin or
+   builds the constructed value. */
 static Value *apply_partial(const Value *function, Value *argument)
 {
-    int count = function->argument_count;
-    Value **arguments = gc_alloc((size_t)(count + 1) * sizeof(Value *));
+    int had = function->argument_count;
+    int wanted = function->kind == V_BUILTIN
+        ? function->builtin->arity
+        : function->constructor->arity
+              + function->constructor->existential_count;
+    int count = had + 1;
+    Value **arguments;
     Value *result;
+    int i;
 
-    if (count > 0) {
-        memcpy(arguments, function->arguments, (size_t)count * sizeof(Value *));
+    /* f a b c leaves b and c waiting on the stack while f is given a. They
+       are taken now, as far as they are needed, so that no value is made
+       for f a and for f a b. */
+    while (count < wanted && stack[stack_size - 1 - (count - had - 1)].kind
+                                 == F_APPLY) {
+        count++;
     }
-    arguments[count] = argument;
+    arguments = gc_alloc((size_t)count * sizeof(Value *));
+    if (had > 0) {
+        memcpy(arguments, function->arguments, (size_t)had * sizeof(Value *));
+    }
+    arguments[had] = argument;
+    for (i = had + 1; i < count; i++) {
+        arguments[i] = stack[--stack_size].value;
+    }
     if (function->kind == V_BUILTIN) {
-        if (count + 1 == function->builtin->arity) {
+        if (count == function->builtin->arity) {
             return function->builtin->function(arguments);
         }
-    } else if (count + 1 == function->constructor->arity
-                            + function->constructor->existential_count) {
+    } else if (count == wanted) {
         const Constructor *constructor = function->constructor;
-        int i;
 
         if (constructor->is_newtype) {
             return argument;
@@ -392,14 +486,14 @@ static Value *apply_partial(const Value *function, Value *argument)
         }
         result = new_value(V_CON);
         result->tag = function->constructor->tag;
-        result->field_count = count + 1;
+        result->field_count = count;
         result->fields = arguments;
         return result;
     }
     result = new_value(function->kind);
     result->builtin = function->builtin;
     result->constructor = function->constructor;
-    result->argument_count = count + 1;
+    result->argument_count = count;
     result->arguments = arguments;
     return result;
 }
@@ -589,10 +683,21 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 expr = expr->scrutinee;
                 continue;
             case E_LAMBDA:
+                if (stack[stack_size - 1].kind == F_APPLY) {
+                    /* (\x -> body) a, as every function of several
+                       parameters is once it has its first argument: x is
+                       a, and there is no need for a closure. */
+                    env = extend(env, expr->local, stack[--stack_size].value);
+                    expr = expr->body;
+                    continue;
+                }
                 value = make_closure(expr, keep_needed(expr, env));
                 break;
             case E_CONSTRUCTOR:
-                value = make_constructor(expr->constructor);
+                value = constant(expr);
+                if (value == NULL) {
+                    value = make_constructor(expr->constructor);
+                }
                 break;
             case E_LOCAL:
                 value = lookup(env, expr->local);
@@ -605,10 +710,10 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 value = expr->big == 2 ? integer_from_literal(expr->string)
                     : expr->big == 1
                         ? integer_from_unsigned((unsigned long)expr->number)
-                        : make_int(expr->number);
+                        : constant(expr);
                 break;
             case E_CHAR:
-                value = make_char(expr->number);
+                value = constant(expr);
                 break;
             case E_STRING:
                 value = make_string(expr->string);
@@ -621,7 +726,10 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 expr = expr->body;
                 continue;
             case E_TYPE:
-                value = make_type(close_type(expr->type, env));
+                value = constant(expr);
+                if (value == NULL) {
+                    value = make_type(close_type(expr->type, env));
+                }
                 break;
             case E_METHOD:
                 value = find_method(expr->global, close_type(expr->type, env));
@@ -681,8 +789,8 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 break;
             case F_APPLY:
                 if (value->kind == V_CLOSURE) {
-                    env = extend(value->env, value->parameter, frame.value);
-                    expr = value->body;
+                    env = extend(value->env, value->expr->local, frame.value);
+                    expr = value->expr->body;
                 } else if (value->kind == V_BUILTIN
                            || value->kind == V_PARTIAL_CON) {
                     value = apply_partial(value, frame.value);

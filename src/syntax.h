@@ -128,6 +128,8 @@ struct Instance {
     Global *methods; /* the method definitions, linked by `next` */
     Instance *next;  /* all instances of all loaded modules */
     Instance *next_of_class; /* see Class */
+    TypeCon *head_constructor; /* the T of an instance for T a b; NULL if
+                                  the instance is for a type variable */
     /* An instance from a `deriving` clause has no definitions. Its head is
        the type the clause is on, and its methods are made by derive.c. */
     TypeCon *derived_type; /* that type, else NULL */
@@ -258,6 +260,8 @@ struct Expr {
                                   type */
     int type_end;
     Type *type;                /* E_TYPE; E_METHOD: the class argument */
+    int constant_known;        /* set by the evaluator; see constant */
+    struct Value *constant;    /* the value, if it is the same every time */
     int needed_known;          /* set by the evaluator; see keep_needed */
     int needed_count;
     Binding **needed;          /* the variables the expression mentions */
@@ -551,6 +555,7 @@ Type *new_meta(void);
 Type *new_rigid(Binding *variable);
 Type *new_type_constructor(TypeCon *constructor);
 Type *new_type_application(Type *function, Type *argument);
+Type *temporary_application(Type *function, Type *argument);
 Type *new_forall(int count, Binding **variables, Type *body);
 Type *function_type(Type *argument, Type *result);
 /* The type with every filled-in TY_META at its top replaced by what it
@@ -560,6 +565,8 @@ Type *prune(Type *type);
 int split_function_type(Type *type, Type **argument, Type **result);
 /* The type with each of the variables replaced. */
 Type *substitute(Type *type, int count, Binding **variables, Type **types);
+Type *temporary_substitute(Type *type, int count, Binding **variables,
+                           Type **types);
 void print_type(Type *type); /* on stderr */
 /* Whether the two types are the same and fully known. */
 int types_equal(Type *a, Type *b);

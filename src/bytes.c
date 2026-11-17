@@ -12,15 +12,6 @@
 
    Strings of text are also read and written here, as UTF-8. */
 
-static Value *make_bytes(const unsigned char *bytes, long length)
-{
-    Value *value = make_int(length);
-
-    value->kind = V_BYTES;
-    value->bytes = bytes;
-    return value;
-}
-
 static Value *bytes_argument(Value *value)
 {
     value = force(value);
@@ -200,6 +191,51 @@ Value *builtin_textCharAt(Value **arguments)
     }
     p = (const char *)bytes->bytes + offset;
     return make_char(utf8_decode(&p));
+}
+
+/* textWidthAt :: ByteString -> Int -> Int
+   How many bytes the character that starts at the offset takes. */
+Value *builtin_textWidthAt(Value **arguments)
+{
+    Value *bytes = bytes_argument(arguments[0]);
+    long offset = force(arguments[1])->number;
+    const char *start;
+    const char *p;
+
+    if (offset < 0 || offset >= bytes->number) {
+        die("Text offset %ld is out of range (%ld bytes)", offset,
+            bytes->number);
+    }
+    start = (const char *)bytes->bytes + offset;
+    p = start;
+    utf8_decode(&p);
+    return make_int(p - start);
+}
+
+/* textScan :: (Char -> Bool) -> ByteString -> Int -> Int -> Int
+   The offset of the first character from `offset` on that the test does
+   not hold for, or `end`. */
+Value *builtin_textScan(Value **arguments)
+{
+    Value *test = arguments[0];
+    Value *bytes = bytes_argument(arguments[1]);
+    long end = force(arguments[2])->number;
+    long offset = force(arguments[3])->number;
+    const char *base = (const char *)bytes->bytes;
+
+    if (end > bytes->number) {
+        end = bytes->number;
+    }
+    while (offset >= 0 && offset < end) {
+        const char *p = base + offset;
+        long c = utf8_decode(&p);
+
+        if (apply(test, make_char(c))->tag != TAG_TRUE) {
+            break;
+        }
+        offset = p - base;
+    }
+    return make_int(offset);
 }
 
 /* Whether a character starts with the byte: the bytes after the first one

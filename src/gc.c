@@ -69,6 +69,7 @@ static const char *stack_bottom = NULL; /* NULL: collecting is not on yet */
 static size_t allocated = 0;            /* bytes handed out since the last collection */
 static size_t threshold = (size_t)256 * 1024 * 1024;
 static size_t minimum_threshold = (size_t)256 * 1024 * 1024;
+static size_t stack_bytes = 0; /* of the C stack, at the last collection */
 static int report = 0;
 static unsigned long collections = 0;
 
@@ -227,8 +228,10 @@ static void mark_from_roots(void)
     mark_roots();
     if (top < stack_bottom) {
         gc_mark_range(top, stack_bottom);
+        stack_bytes = (size_t)(stack_bottom - top);
     } else {
         gc_mark_range(stack_bottom, top + sizeof(registers));
+        stack_bytes = (size_t)(top - stack_bottom);
     }
     while (pending_count > 0) {
         Pending cell = pending[--pending_count];
@@ -308,17 +311,23 @@ void gc_collect(void)
     live = sweep();
     collections++;
     if (report) {
-        fprintf(stderr, "gc %lu: %lu MB in use, %lu MB handed out since the last\n",
+        fprintf(stderr,
+                "gc %lu: %lu MB in use, %lu MB of C stack, %lu MB handed out "
+                "since the last\n",
                 collections, (unsigned long)(live / (1024 * 1024)),
+                (unsigned long)(stack_bytes / (1024 * 1024)),
                 (unsigned long)(allocated / (1024 * 1024)));
         /* A collection comes at no particular place, so the lines of many
            of them show where the program spends its time. */
         print_position();
     }
     allocated = 0;
-    /* Collect again when as much has been handed out as is in use now, so
-       that the work of collecting stays in proportion. */
-    threshold = live > minimum_threshold ? live : minimum_threshold;
+    /* Collect again when twice as much has been handed out as is in use
+       now, so that the work of collecting stays in proportion: a
+       collection looks at everything that is in use. Memory is what this
+       costs: up to three times what is in use, and never less than the
+       minimum. */
+    threshold = 2 * live > minimum_threshold ? 2 * live : minimum_threshold;
 }
 
 /* ---- Allocating ---- */

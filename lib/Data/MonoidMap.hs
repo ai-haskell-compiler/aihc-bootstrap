@@ -22,7 +22,7 @@ newtype MonoidMap k v = MonoidMap (Map k v)
 instance NFData (MonoidMap k v)
 
 instance (Ord k, MonoidNull v) => Semigroup (MonoidMap k v) where
-  (<>) = unionWith (<>)
+  (<>) = append
 
 instance (Ord k, MonoidNull v) => Monoid (MonoidMap k v) where
   mempty = empty
@@ -139,8 +139,18 @@ unionWith ::
 unionWith f m1 m2 =
   fromSet (\k -> f (get k m1) (get k m2)) (Set.union (nonNullKeys m1) (nonNullKeys m2))
 
+-- unionWith (<>), without looking at the keys that only the larger map
+-- has: a value put together with mempty is itself. Adding a small map to
+-- a large one, on either side, takes time with the small one.
 append :: (Ord k, MonoidNull v) => MonoidMap k v -> MonoidMap k v -> MonoidMap k v
-append = unionWith (<>)
+append (MonoidMap left) (MonoidMap right) =
+  MonoidMap
+    ( if Map.size left <= Map.size right
+        then Map.foldlWithKey' (\m k v -> put k (maybe v (v <>) (Map.lookup k m)) m) right left
+        else Map.foldlWithKey' (\m k v -> put k (maybe v (<> v) (Map.lookup k m)) m) left right
+    )
+  where
+    put k v m = if Null.null v then Map.delete k m else Map.insert k v m
 
 minus :: (Ord k, MonoidNull v, Group v) => MonoidMap k v -> MonoidMap k v -> MonoidMap k v
 minus = unionWith (~~)
