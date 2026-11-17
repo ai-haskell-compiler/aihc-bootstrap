@@ -273,8 +273,8 @@ static const Fixity *operator_fixity(const Expr *operator)
 
 static Expr *apply_operator(Expr *operator, Expr *left, Expr *right)
 {
-    Expr *inner = xmalloc(sizeof(Expr));
-    Expr *outer = xmalloc(sizeof(Expr));
+    Expr *inner = new_expr_memory();
+    Expr *outer = new_expr_memory();
 
     memset(inner, 0, sizeof(Expr));
     inner->kind = E_APP;
@@ -325,8 +325,8 @@ static Expr *build_operators(Module *module, const Expr *flat, int *index,
     Expr *left = flat->operands[*index];
 
     if (flat->negated[*index]) {
-        Expr *negate = xmalloc(sizeof(Expr));
-        Expr *application = xmalloc(sizeof(Expr));
+        Expr *negate = new_expr_memory();
+        Expr *application = new_expr_memory();
 
         memset(negate, 0, sizeof(Expr));
         negate->kind = E_NAME;
@@ -348,7 +348,7 @@ static Expr *build_operators(Module *module, const Expr *flat, int *index,
 
 static Expr *new_simple_expr(enum ExprKind kind, const Token *token)
 {
-    Expr *expr = xmalloc(sizeof(Expr));
+    Expr *expr = new_expr_memory();
 
     memset(expr, 0, sizeof(Expr));
     expr->kind = kind;

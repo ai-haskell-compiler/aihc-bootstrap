@@ -11,7 +11,7 @@
    infer    (infer.c)   makes type arguments explicit */
 static Expr *new_expr(enum ExprKind kind, const Token *token)
 {
-    Expr *expr = xmalloc(sizeof(Expr));
+    Expr *expr = new_expr_memory();
 
     memset(expr, 0, sizeof(Expr));
     expr->kind = kind;

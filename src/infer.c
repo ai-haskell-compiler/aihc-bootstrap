@@ -318,7 +318,7 @@ static Type *prelude_type(const char *name)
 
 static Expr *copy_expr(const Expr *expr)
 {
-    Expr *copy = xmalloc(sizeof(Expr));
+    Expr *copy = new_expr_memory();
 
     *copy = *expr;
     return copy;
@@ -430,7 +430,7 @@ static Type *infer_pattern_shape(Inference *inference, Pattern *pattern)
     case P_LITERAL:
         /* The pattern matches what is == to the literal. */
         type = infer(inference, pattern->literal);
-        pattern->equals = xmalloc(sizeof(Expr));
+        pattern->equals = new_expr_memory();
         memset(pattern->equals, 0, sizeof(Expr));
         pattern->equals->kind = E_METHOD;
         pattern->equals->token = pattern->token;
@@ -523,7 +523,7 @@ static Expr *add_type_parameters(Expr *expr, int count, Binding **variables)
     int i;
 
     for (i = count - 1; i >= 0; i--) {
-        Expr *lambda = xmalloc(sizeof(Expr));
+        Expr *lambda = new_expr_memory();
 
         memset(lambda, 0, sizeof(Expr));
         lambda->kind = E_LAMBDA;

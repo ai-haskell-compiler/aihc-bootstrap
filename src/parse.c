@@ -170,9 +170,35 @@ static int next_item(Parser *parser, Block *block)
 
 /* ---- Building syntax ---- */
 
+/* Expressions are never freed. They are cut from large blocks, each at the
+   start of a 128-byte cache line, so that the fields the evaluator looks
+   at (the first ones) are in one line. */
+#define EXPR_LINE 128
+#define EXPR_SLOT ((sizeof(Expr) + EXPR_LINE - 1) / EXPR_LINE * EXPR_LINE)
+#define EXPR_BLOCK (256 * EXPR_SLOT)
+
+Expr *new_expr_memory(void)
+{
+    static char *next = NULL;
+    static size_t left = 0;
+    Expr *expr;
+
+    if (left < EXPR_SLOT) {
+        char *block = xmalloc(EXPR_BLOCK + EXPR_LINE);
+
+        next = block + (EXPR_LINE - (size_t)block % EXPR_LINE) % EXPR_LINE;
+        left = EXPR_BLOCK;
+    }
+    expr = (Expr *)next;
+    next += EXPR_SLOT;
+    left -= EXPR_SLOT;
+    memset(expr, 0, sizeof(Expr));
+    return expr;
+}
+
 static Expr *new_expr(enum ExprKind kind, const Token *token)
 {
-    Expr *expr = xmalloc(sizeof(Expr));
+    Expr *expr = new_expr_memory();
 
     memset(expr, 0, sizeof(Expr));
     expr->kind = kind;
