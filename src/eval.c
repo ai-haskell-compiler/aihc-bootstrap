@@ -251,14 +251,6 @@ static Env *new_env(const Shape *shape, const Env *outer)
     return env;
 }
 
-static Env *extend(Env *outer, Binding *binding, Value *value)
-{
-    Env *env = new_env(child_shape(shape_of(outer), binding), outer);
-
-    env->values[env->shape->count - 1] = value;
-    return env;
-}
-
 /* Binds `parameter` to the argument on top of the machine's stack (an
    F_APPLY frame), and the parameters of the lambdas the body starts with
    to the arguments under it, as long as there are some waiting: one new
@@ -694,32 +686,76 @@ static Value *apply_waiting(const Value *function, Value *argument)
     return give_arguments(function, arguments, total);
 }
 
-/* Whether the value has the shape of the pattern. Adds the variables of the
-   pattern to `*env`. Sub-patterns evaluate the fields they look at with a
-   nested call of the machine; flattening nested patterns in a desugaring
-   pass would avoid that. */
-static int matches(const Pattern *pattern, Value *value, Env **env)
+/* The variables a pattern binds, collected while it is matched, so that
+   they go into one new environment at the end instead of one each. The
+   values are on the C stack meanwhile, where the collector sees them. */
+#define BINDER_SIZE 16
+
+typedef struct Binder {
+    Env *env; /* with the variables bound before these */
+    int count;
+    Binding *bindings[BINDER_SIZE];
+    Value *values[BINDER_SIZE];
+} Binder;
+
+/* The environment with every variable bound so far. */
+static Env *bound(Binder *binder)
+{
+    const Shape *shape = shape_of(binder->env);
+    int first = shape->count;
+    Env *env;
+    int i;
+
+    if (binder->count == 0) {
+        return binder->env;
+    }
+    for (i = 0; i < binder->count; i++) {
+        shape = child_shape(shape, binder->bindings[i]);
+    }
+    env = new_env(shape, binder->env);
+    for (i = 0; i < binder->count; i++) {
+        env->values[first + i] = binder->values[i];
+    }
+    binder->env = env;
+    binder->count = 0;
+    return env;
+}
+
+static void bind(Binder *binder, Binding *binding, Value *value)
+{
+    if (binder->count == BINDER_SIZE) {
+        bound(binder);
+    }
+    binder->bindings[binder->count] = binding;
+    binder->values[binder->count] = value;
+    binder->count++;
+}
+
+/* Whether the value has the shape of the pattern. Sub-patterns evaluate
+   the fields they look at with a nested call of the machine; flattening
+   nested patterns in a desugaring pass would avoid that. */
+static int match_into(const Pattern *pattern, Value *value, Binder *binder)
 {
     int skip;
     int i;
 
     switch (pattern->kind) {
     case P_VARIABLE:
-        *env = extend(*env, pattern->variable, value);
+        bind(binder, pattern->variable, value);
         return 1;
     case P_WILDCARD:
         return 1;
     case P_CHAR:
         return force(value)->a.number == pattern->number;
     case P_LITERAL: {
-        Value *equals = delay(pattern->equals, *env);
-        Value *literal = delay(pattern->literal, *env);
+        Value *equals = delay(pattern->equals, bound(binder));
+        Value *literal = delay(pattern->literal, bound(binder));
 
         return apply(apply(equals, value), literal)->tag == TAG_TRUE;
     }
     case P_CONSTRUCTOR:
         if (pattern->constructor->is_newtype) {
-            return matches(pattern->arguments[0], value, env);
+            return match_into(pattern->arguments[0], value, binder);
         }
         value = force(value);
         if (value->tag != pattern->constructor->tag) {
@@ -728,26 +764,43 @@ static int matches(const Pattern *pattern, Value *value, Env **env)
         /* The types the value stores come before its fields. */
         skip = pattern->constructor->existential_count;
         for (i = 0; i < skip; i++) {
-            *env = extend(*env, pattern->existentials[i], value->b.fields[i]);
+            bind(binder, pattern->existentials[i], value->b.fields[i]);
         }
         for (i = 0; i < pattern->argument_count; i++) {
-            if (!matches(pattern->arguments[i], value->b.fields[skip + i], env)) {
+            if (!match_into(pattern->arguments[i], value->b.fields[skip + i],
+                            binder)) {
                 return 0;
             }
         }
         return 1;
     case P_AS:
-        *env = extend(*env, pattern->variable, value);
-        return matches(pattern->inner, value, env);
+        bind(binder, pattern->variable, value);
+        return match_into(pattern->inner, value, binder);
     case P_BANG:
-        return matches(pattern->inner, force(value), env);
+        return match_into(pattern->inner, force(value), binder);
     case P_VIEW:
-        return matches(pattern->inner,
-                       apply(delay(pattern->literal, *env), value), env);
+        return match_into(pattern->inner,
+                          apply(delay(pattern->literal, bound(binder)), value),
+                          binder);
     case P_RECORD:
         break;
     }
     return 0;
+}
+
+/* Whether the value has the shape of the pattern. Adds the variables of the
+   pattern to `*env` if it has. */
+static int matches(const Pattern *pattern, Value *value, Env **env)
+{
+    Binder binder;
+
+    binder.env = *env;
+    binder.count = 0;
+    if (!match_into(pattern, value, &binder)) {
+        return 0;
+    }
+    *env = bound(&binder);
+    return 1;
 }
 
 /* The environment extended with the bindings of an E_LET. Every definition
