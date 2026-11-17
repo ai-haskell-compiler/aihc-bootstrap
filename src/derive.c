@@ -80,9 +80,29 @@ static Constructor *constructor_of(Type *type, Value **value, Value ***fields)
     return head->constructors[(*value)->tag];
 }
 
+/* The Prelude's method of that name. The derived methods ask for one at
+   every call, so what was found is remembered, by the name's address:
+   the names are string constants. */
 static Global *prelude_method(const char *name)
 {
-    return library_entity("Prelude", NS_VARIABLE, name)->global;
+    static const char *names[64];
+    static Global *globals[64];
+    static int count = 0;
+    Global *global;
+    int i;
+
+    for (i = 0; i < count; i++) {
+        if (names[i] == name) {
+            return globals[i];
+        }
+    }
+    global = library_entity("Prelude", NS_VARIABLE, name)->global;
+    if (count < 64) {
+        names[count] = name;
+        globals[count] = global;
+        count++;
+    }
+    return global;
 }
 
 /* The builtin with the type as its first argument. */

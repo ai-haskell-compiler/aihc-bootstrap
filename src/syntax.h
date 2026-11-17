@@ -50,6 +50,7 @@ struct Type {
     int variable_count;   /* TY_FORALL */
     Binding **variables;  /* TY_FORALL */
     Type *body;           /* TY_FORALL */
+    Type *next_same_hash; /* TY_APP: see new_type_application */
 };
 
 /* forall variables. type */

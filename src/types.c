@@ -47,12 +47,36 @@ Type *new_type_constructor(TypeCon *constructor)
     return type;
 }
 
+/* There is one application of a type to a type: asking for it again gives
+   the same one. The program makes types while it runs, whenever a type
+   with variables is passed on, and they are never freed; this way there
+   are only as many as there are different types. A type is never changed
+   once it is made, except that a TY_META is linked to what it stands
+   for. */
+#define APPLICATION_BUCKETS ((size_t)1 << 20)
+static Type **applications = NULL;
+
 Type *new_type_application(Type *function, Type *argument)
 {
-    Type *type = new_type(TY_APP);
+    size_t bucket = ((size_t)function / 8 * 31 + (size_t)argument / 8)
+                    % APPLICATION_BUCKETS;
+    Type *type;
 
+    if (applications == NULL) {
+        applications = xmalloc(APPLICATION_BUCKETS * sizeof(Type *));
+        memset(applications, 0, APPLICATION_BUCKETS * sizeof(Type *));
+    }
+    for (type = applications[bucket]; type != NULL;
+         type = type->next_same_hash) {
+        if (type->function == function && type->argument == argument) {
+            return type;
+        }
+    }
+    type = new_type(TY_APP);
     type->function = function;
     type->argument = argument;
+    type->next_same_hash = applications[bucket];
+    applications[bucket] = type;
     return type;
 }
 
