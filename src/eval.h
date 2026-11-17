@@ -49,15 +49,15 @@ struct Value {
 };
 
 /* Which local variables an environment has, in order: the shape of an
-   environment. Shapes are made once and shared. The shapes that have one
-   more variable than this one are its children, so that the same shape is
-   found again and not made again. The empty environment is NULL. */
+   environment. Shapes are made once and shared: a shape is found again by
+   its parent, the shape with one variable less, and its last variable.
+   The empty environment is NULL. */
 typedef struct Shape Shape;
 struct Shape {
     int count;
     Binding **bindings;
-    Shape *children;
-    Shape *next_child;
+    const Shape *parent;
+    Shape *next; /* in its bucket of the table of shapes (eval.c) */
 };
 
 /* The values of the local variables in scope, the innermost last. An

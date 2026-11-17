@@ -148,18 +148,23 @@ Value *make_string(const char *string)
 
 static Shape empty_shape;
 
+#define SHAPE_BUCKETS 65536
+static Shape *shapes[SHAPE_BUCKETS];
+
 /* The shape with one more variable. */
 static const Shape *child_shape(const Shape *parent, Binding *binding)
 {
+    size_t bucket = ((size_t)parent / 16 * 31 + (size_t)binding / 16)
+                    % SHAPE_BUCKETS;
     Shape *child;
 
-    /* A variable is mostly added to environments of one shape. The empty
-       shape has a child for every parameter of a function. */
+    /* A variable is mostly added to environments of one shape. */
     if (binding->shape_parent == parent) {
         return binding->shape_child;
     }
-    for (child = parent->children; child != NULL; child = child->next_child) {
-        if (child->bindings[parent->count] == binding) {
+    for (child = shapes[bucket]; child != NULL; child = child->next) {
+        if (child->parent == parent
+            && child->bindings[parent->count] == binding) {
             binding->shape_parent = parent;
             binding->shape_child = child;
             return child;
@@ -173,9 +178,9 @@ static const Shape *child_shape(const Shape *parent, Binding *binding)
                (size_t)parent->count * sizeof(Binding *));
     }
     child->bindings[parent->count] = binding;
-    child->children = NULL;
-    child->next_child = parent->children;
-    ((Shape *)parent)->children = child;
+    child->parent = parent;
+    child->next = shapes[bucket];
+    shapes[bucket] = child;
     binding->shape_parent = parent;
     binding->shape_child = child;
     return child;
