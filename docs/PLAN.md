@@ -61,12 +61,12 @@ replacing those packages instead of running them.
 | `Integer` of any size, `Rational`, `Double`, `Float` | done | 12,965 of 13,143 |
 | Handles, Unicode, SHA-256, times | done | 13,125 of 13,211 |
 | 7 Data formats: JSON, MD5 | done | |
-| Running AIHC | in progress: see below | |
+| Running AIHC | in progress: type checking `aihc-prim`, see below | |
 
 Left over from phase 1, each stopping with a `TODO` when reached:
 
 - Division by zero as an exception.
-- Derived `Read`, `Functor`, `Foldable`, `Traversable`; `deriving via`.
+- Derived `Read`; `deriving via` other than `Generically`.
 
 Numbers, as they are now:
 
@@ -104,10 +104,8 @@ comes from a table made with GHC by `scripts/gen-unicode.hs`
 The interpreter runs on a stack of 4 GB of address space (`src/posix.c`),
 because evaluating a value inside a value is a C call inside a C call.
 
-Known to be slow: `Data.Text.Unsafe.lengthWord8` walks the whole text, and
-the lexer of `aihc-parser` asks for the length of the remaining input at
-every token. If lexing a large file takes too long, `Text` becomes UTF-8
-bytes in C, as upstream; that also saves most of its memory.
+`Text` is UTF-8 bytes, as upstream: the lexer of `aihc-parser` asks for
+the length of the remaining input in bytes at every token.
 
 Left over from phase 2:
 
@@ -251,50 +249,23 @@ build actually reaches.
 
 ## Running AIHC
 
-`scripts/run-aihc.sh` now runs AIHC itself: the AIHC of the submodule
+`scripts/run-aihc.sh` runs AIHC itself: the AIHC of the submodule
 `vendor/aihc`, with its three libraries beside it, each pinned to a
-commit. `aihc build /path/to/Main.hs` reads its options, finds the core libraries, solves
-the build plan and prints it, and starts to compile:
+commit. `aihc build /path/to/Main.hs` reads its options, finds the core
+libraries, solves the build plan, and builds the packages in order:
+`aihc-rts`, `aihc-prim` (27 modules), `aihc-base` (280 modules), then the
+program.
 
-```text
-  aihc-prim-0.13.0
-  aihc-base-4.21.2.0
-  Main (executable)
-build  aihc-rts-1.0.2 (no modules)
-```
+**`aihc-rts` is byte for byte what AIHC built with GHC writes**, all 11
+files, with the same `AIHC_COMPILER_IDENTITY` for both (see below). It
+takes 6 to 10 seconds in the interpreter; AIHC built with GHC takes 2.3.
 
-The runtime system is the first package. AIHC gives its six C sources to
-the C compiler, compiles `rts.lir` to an object file itself, and puts them
-in an archive. **Every file of the package is byte for byte what AIHC
-built with GHC writes**: the object file AIHC generates, the archive, and
-the manifest with the package's hash.
-
-```text
-built  aihc-rts-1.0.2 in 1 min 19 s
-aihc-rts: 11 identical, 0 different, 0 missing
-```
-
-AIHC built with GHC takes 0.6 seconds for that package, so the
-interpreter is about 130 times slower. Then come `aihc-prim` (27 modules)
-and `aihc-base` (280 modules), which AIHC built with GHC compiles in 4
-and 5 seconds.
-
-**They do not get through the lexer.** After seven minutes the interpreter
-has allocated 346 GB, with 58 MB in use, and every collection finds it at
-the same place:
-
-```text
-gc 1354: 58 MB in use, 256 MB handed out since the last
-  at .../Aihc/Parser/Lex/Types.hs:442 lib/Prelude.hs:403 .../Aihc/Parser/Lex.hs:139
-```
-
-That is `skipWhitespace`, which runs before every token. It asks for the
-length of the rest of the input in bytes (`lengthWord8`) and reads
-characters at byte offsets (`iter`). Both are one step for a `Text` that
-is bytes. Here a `Text` is a list of characters, so both walk the list:
-lexing a file takes time with the square of its length. The two packages
-are 2 MB of source. **`Text` as UTF-8 bytes is the next step**; see
-"Memory" below for what it takes.
+**`aihc-prim` gets through parsing and name resolution and into type
+checking** (`aihc-tc`). Each run so far has stopped at something the
+interpreter did not have yet, in this order: derived `Traversable`,
+overlapping instances (`Cbor String` and `Cbor [a]`), `Traversable` of a
+pair. AIHC built with GHC builds the whole plan in 34 s of CPU (274 G
+instructions): `aihc-prim` 45.7 s and `aihc-base` 44.6 s of wall time.
 
 ### Comparing a build with the real one
 
@@ -326,14 +297,28 @@ library the commit of the version that `vendor/aihc/cabal.project` names.
 
 ### Where the time goes
 
-`sample` on the running interpreter shows it. Three things were most of
-the time of a build, and each took a few lines to fix:
+`sample` on the running interpreter shows it. The machine this ran on was
+shared and loaded, so times are compared in cycles and instructions
+(`/usr/bin/time -l`), which load does not change. The benchmark is AIHC's
+parser on a 28 kB module:
 
-| What | Share | Now |
-| --- | ---: | --- |
-| Looking through all instances of all classes for every method call | 60% | Each class has a list of its instances (`collect_instances`) |
-| Finding the block of a cell that is being allocated | 16% | The block of the last cell of that size is tried first |
-| Finding the block of a word while marking | 40% of what was left | The search looks only at the bases of the blocks, in one array |
+| What | Gcycles |
+| --- | ---: |
+| At the start, built without optimization | 30 |
+| Built with `-O2`; the collector looks only at the pointers of a `Value` and an `Env` | 21 |
+| What `find_method` finds for a method at a type without variables is remembered (`src/instances.c`): looking through the instances of the class was a third of the time | 13.7 |
+| An environment is an array of values with a shared shape; where a thunk's variables are in an environment of a shape is worked out once (`keep` in `src/eval.c`) | 9.0 |
+| A type without variables is not copied by `close_type` | 8.3 |
+
+Earlier, before any of these: each class got a list of its instances, the
+block of the last cell of a size is tried first when allocating, and the
+search for the block of a word looks only at the bases.
+
+In type checking, marking is two thirds of the time: half a gigabyte is in
+use and does not change, and every collection looks at all of it. A
+collection now comes after 4 times what is in use (`AIHC_GC_GROWTH`). A
+generational collector would look at it much less; it needs a write
+barrier wherever a value is changed after it is made.
 
 ## Memory
 
@@ -342,16 +327,18 @@ always inside nested C calls (`force` inside a builtin inside `run`), and
 C locals hold values, so the collector does not move anything and reads
 the C stack as it is: every word that is the address of something
 allocated keeps that alive. It has an allocator of its own, in cells of a
-few sizes, so that a word can be checked against what exists.
+few sizes, so that a word can be checked against what exists. A `Value`
+and an `Env` are known to it: only their pointers are looked at.
 
 `make test-gc` runs the tests with a collection after every 100 kB.
 `AIHC_GC_REPORT=1` prints a line for every collection, and the lines of
 the program that the machine is at. A collection comes at no particular
 place, so many of them show where a program spends its time.
 
-Three things kept memory in use that a compiled program would have let go.
-All three had to be fixed before AIHC ran in constant memory, and
-`tests/memory.hs` runs into each of them:
+These kept memory in use that a compiled program would have let go, and
+each had to be fixed for AIHC to run in the memory it has.
+`tests/memory.hs` runs into the first three, `tests/strictlet.hs` into the
+fourth:
 
 1. **A thunk or a closure kept everything that was in scope** where it was
    made. It now keeps only the variables its expression mentions
@@ -363,34 +350,23 @@ All three had to be fixed before AIHC ran in constant memory, and
 3. **A function that calls itself passed its type on as a thunk**, which
    referred to the thunk of the call before. A type that is a type
    variable is now passed as it is.
+4. **`let !x = e` did not evaluate `e`.** aihc-parser takes a position out
+   of the parser state with it, so that a declaration does not keep the
+   state; the state holds the stream of every token after it. Parsing kept
+   all tokens, and `GHC/Types.hs` (435 kB) took 7 minutes and 2.5 GB.
+   Also, a thunk lets go of its environment while it is evaluated (and
+   raises the same exception again if its evaluation raised one, as in
+   GHC), and a `case` keeps only what its alternatives use while its
+   scrutinee is evaluated.
 
 What is left, in the order it is likely to matter:
 
-1. **`Text` as UTF-8 bytes**, as upstream. It is what stops AIHC now (see
-   "Running AIHC"), and as a list of characters it is also the largest
-   user of memory while AIHC lexes. A `Text` becomes a `ByteString`, which
-   is already a part of a block of bytes that can be cut in one step.
-   What has to be one step, or one pass, on that: `lengthWord8`, `iter`,
-   `null`, `uncons` and the pattern `:<`, `take`, `drop`, `splitAt`,
-   `takeWhile`, `dropWhile`, `span`, `break`, `isPrefixOf`, `stripPrefix`,
-   and comparing. Decoding a character at an offset, counting characters
-   and finding the offset of the nth character are best in C. Everything
-   that makes a new text anyway (`replace`, `splitOn`, `toUpper`,
-   `intercalate`, ...) can stay as it is, on the characters. Only
-   `lib/Data/Text.hs`, `Data/Text/Unsafe.hs`, `Data/Text/IO.hs` and
-   `Data/Text/Encoding.hs` look inside a `Text`.
-2. **Types made while the program runs are never freed.** A type is made
-   whenever a type with variables is passed to a function. This is most of
-   the difference between the memory in use and the memory of the process
-   (58 MB and 1.3 GB while AIHC lexes).
-3. **Smaller values.** A `Value` is 128 bytes whatever it is, and a thunk
-   also takes a cell of 32 bytes for each variable it keeps. One struct
+1. **Types made while the program runs are never freed.** A type is made
+   whenever a type with variables is passed to a function. In type
+   checking that was most of the memory of the process (11 GB) before
+   `close_type` stopped copying types without variables.
+2. **Smaller values.** A `Value` is 128 bytes whatever it is. One struct
    per kind, or an allocation that is only as long as the kind needs.
-
-The megaparsec port takes more than linear time: 4,000 words parse in 2.5
-seconds and 16,000 in 11 (measured before the three fixes under "Where
-the time goes"). AIHC's own inputs are small enough for that not to
-matter yet.
 
 ## Language backlog
 
@@ -408,6 +384,9 @@ Done, each with a test compared against GHC:
 | `forall` inside a type: an argument that works at every type, and a record field that does | `tests/rankn.hs` |
 | Derived `Data` (`gmapT`, `gmapQ`, `gmapM`); `eqT`, and a match on `Refl` | `tests/data.hs` |
 | A pattern in a `do` block that does not match is the monad's `fail` | `tests/dofail.hs` |
+| `let !x = e` and `where !x = e` evaluate `e` before the body | `tests/strictlet.hs` |
+| Derived `Functor`, `Foldable`, `Traversable` (by the type of each field) | `tests/derivefunctor.hs` |
+| Overlapping instances: the most specific one that matches | `tests/overlap.hs` |
 
 How the less obvious ones work:
 
@@ -440,7 +419,7 @@ be written with one (`MVector v a` in `lib/Data/Vector/Generic/Mutable.hs`).
 
 Still missing, as the survey shows them:
 
-- Derived `Read`; `deriving via`. (`Read` is there for numbers,
+- Derived `Read`; `deriving via` other than `Generically`. (`Read` is there for numbers,
   characters, strings, lists and a few small types: `tests/read.hs`.)
 - The methods of `Data` other than `gmapT`, `gmapQ` and `gmapM`, for a
   derived instance. `Generic` is a class with nothing in it.
