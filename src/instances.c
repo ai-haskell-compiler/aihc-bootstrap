@@ -146,13 +146,25 @@ static void collect_instances(Class *class)
     }
 }
 
-/* The first instance of the class that the type matches, or NULL.
-   Overlapping instances are not handled: the first match wins. One case
-   is: an instance for every type (instance C a) is only used if no other
+/* Whether instance `a` is more specific than `b`: its head is a case of
+   b's head, as Cbor [Char] is of Cbor [a]. */
+static int more_specific(Instance *a, Instance *b)
+{
+    Type **bound = new_bound(b->variable_count);
+
+    return match_type(b->head, a->head, b->variable_count, b->variables,
+                      bound);
+}
+
+/* The instance of the class that the type matches, or NULL. If several
+   match (OVERLAPPING and OVERLAPPABLE), the most specific one, as in GHC.
+   An instance for every type (instance C a) is only used if no other
    instance matches. */
 static Instance *find_instance(Class *class, Type *type, Type ***bound)
 {
     Instance *for_every_type = NULL;
+    Instance *found = NULL;
+    Type **found_bound = NULL;
     Instance *instance;
 
     /* Preparing an instance can load a module, with instances of its
@@ -162,15 +174,23 @@ static Instance *find_instance(Class *class, Type *type, Type ***bound)
     }
     for (instance = class->instances; instance != NULL;
          instance = instance->next_of_class) {
+        Type **candidate_bound;
+
         if (prune(instance->head)->kind == TY_RIGID) {
             for_every_type = instance;
             continue;
         }
-        *bound = new_bound(instance->variable_count);
+        candidate_bound = new_bound(instance->variable_count);
         if (match_type(instance->head, type, instance->variable_count,
-                       instance->variables, *bound)) {
-            return instance;
+                       instance->variables, candidate_bound)
+            && (found == NULL || more_specific(instance, found))) {
+            found = instance;
+            found_bound = candidate_bound;
         }
+    }
+    if (found != NULL) {
+        *bound = found_bound;
+        return found;
     }
     if (for_every_type != NULL) {
         *bound = new_bound(for_every_type->variable_count);
