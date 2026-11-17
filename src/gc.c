@@ -55,6 +55,28 @@ static const size_t class_sizes[] = {
 };
 
 #define CLASS_COUNT ((int)(sizeof(class_sizes) / sizeof(class_sizes[0])))
+
+/* The smallest class for each size, in units of 16 bytes rounded up (so
+   that it is also the class of a cell of a class's size). */
+static const unsigned char class_of_units[257] = {
+    0, 0, 1, 2, 3, 4, 4, 5, 5, 6, 6, 6, 6, 7, 7, 7,
+    7, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9,
+    9, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+    10, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,
+    11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+    12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+    13
+};
 #define CHUNK_BYTES ((size_t)1024 * 1024)
 
 static Block **chunks = NULL; /* sorted by base */
@@ -66,11 +88,19 @@ static const char *highest_end = NULL;
 static int chunk_count = 0;
 static int chunk_capacity = 0;
 
-static void *free_cells[CLASS_COUNT]; /* each cell holds the next one */
-/* The chunk that the last cell of each size came from. The free cells of a
-   size are in the order of their chunks, so the next one is mostly from
-   the same chunk. */
-static Block *class_chunk[CLASS_COUNT];
+/* The free cells of each size. A free cell holds the next one in its first
+   word, and where its state is in its second (every cell has two), so that
+   allocating does not look for its chunk. */
+static void *free_cells[CLASS_COUNT];
+
+static void free_cell(int size_class, char *cell, unsigned char *state)
+{
+    void **words = (void **)cell;
+
+    words[0] = free_cells[size_class];
+    words[1] = state;
+    free_cells[size_class] = cell;
+}
 
 static const char *stack_bottom = NULL; /* NULL: collecting is not on yet */
 static size_t allocated = 0;            /* bytes handed out since the last collection */
@@ -427,14 +457,10 @@ static size_t old_in_use = 0; /* bytes in old cells after the last sweep */
 
 static int size_class_of(size_t cell_size)
 {
-    int k;
-
-    for (k = 0; k < CLASS_COUNT; k++) {
-        if (class_sizes[k] == cell_size) {
-            return k;
-        }
+    if (cell_size > class_sizes[CLASS_COUNT - 1]) {
+        return -1;
     }
-    return -1;
+    return class_of_units[(cell_size + 15) / 16];
 }
 
 /* Takes the chunks of large cells that are no longer in use out of the
@@ -493,8 +519,7 @@ static size_t sweep_young(void)
         if (poison) {
             memset(cell->cell, 0xAB, cell->size);
         }
-        memcpy(cell->cell, &free_cells[k], sizeof(void *));
-        free_cells[k] = cell->cell;
+        free_cell(k, cell->cell, cell->state);
     }
     young_cells.count = kept;
     if (large_freed) {
@@ -540,8 +565,7 @@ static size_t sweep_all(void)
                 if (poison) {
                     memset(cell, 0xAB, chunk->cell_size);
                 }
-                memcpy(cell, &free_cells[size_class], sizeof(void *));
-                free_cells[size_class] = cell;
+                free_cell(size_class, cell, state);
             }
         }
     }
@@ -553,11 +577,7 @@ static size_t sweep_all(void)
 static size_t sweep(void)
 {
     size_t live;
-    int k;
 
-    for (k = 0; k < CLASS_COUNT; k++) {
-        class_chunk[k] = NULL;
-    }
     live = minor ? sweep_young() : sweep_all();
     last_found = NULL; /* it may have been freed */
     return live;
@@ -604,7 +624,7 @@ static void *allocate(size_t size, int flags)
     Block *chunk;
     char *cell;
     size_t index;
-    int size_class = 0;
+    int size_class;
 
     if (allocated >= threshold) {
         gc_collect();
@@ -612,10 +632,8 @@ static void *allocate(size_t size, int flags)
     if (size == 0) {
         size = 1;
     }
-    while (size_class < CLASS_COUNT && class_sizes[size_class] < size) {
-        size_class++;
-    }
-    if (size_class == CLASS_COUNT) {
+    size_class = size_class_of(size);
+    if (size_class < 0) {
         /* Too large for a class: a chunk of its own, rounded up to whole
            words. */
         size = (size + sizeof(void *) - 1) / sizeof(void *) * sizeof(void *);
@@ -631,25 +649,27 @@ static void *allocate(size_t size, int flags)
         size_t count = CHUNK_BYTES / class_sizes[size_class];
 
         chunk = add_chunk(class_sizes[size_class], count);
-        for (index = 0; index < count; index++) {
-            cell = chunk->base + index * chunk->cell_size;
-            memcpy(cell, &free_cells[size_class], sizeof(void *));
-            free_cells[size_class] = cell;
+        /* The last one is freed first, so that they are taken in order
+           of address. */
+        index = count;
+        while (index > 0) {
+            index--;
+            free_cell(size_class, chunk->base + index * chunk->cell_size,
+                      &chunk->state[index]);
         }
     }
-    cell = free_cells[size_class];
-    memcpy(&free_cells[size_class], cell, sizeof(void *));
-    chunk = class_chunk[size_class];
-    if (chunk == NULL || cell < chunk->base
-        || cell >= chunk->base + chunk->cell_size * chunk->cell_count) {
-        chunk = find_chunk(cell);
-        class_chunk[size_class] = chunk;
+    {
+        void **words = free_cells[size_class];
+        unsigned char *state = words[1];
+        size_t cell_size = class_sizes[size_class];
+
+        free_cells[size_class] = words[0];
+        *state = (unsigned char)(CELL_USED | flags);
+        cell = (char *)words;
+        add_cell(&young_cells, cell, cell_size, state);
+        memset(cell, 0, cell_size);
+        allocated += cell_size;
     }
-    index = (size_t)(cell - chunk->base) / chunk->cell_size;
-    chunk->state[index] = (unsigned char)(CELL_USED | flags);
-    add_cell(&young_cells, cell, chunk->cell_size, &chunk->state[index]);
-    memset(cell, 0, chunk->cell_size);
-    allocated += chunk->cell_size;
     return cell;
 }
 
