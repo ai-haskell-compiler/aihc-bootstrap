@@ -16,9 +16,9 @@ Instance *all_instances = NULL;
 const char *const PRELUDE_NAME = "Prelude";
 
 /* The types and constructors that have their own syntax. */
-TypeCon function_type_constructor = { "->", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0 };
-TypeCon list_type_constructor = { "[]", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0 };
-TypeCon unit_type_constructor = { "()", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0 };
+TypeCon function_type_constructor = { "->", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0, 0 };
+TypeCon list_type_constructor = { "[]", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0, 0 };
+TypeCon unit_type_constructor = { "()", NULL, 0, NULL, 0, 0, 0, NULL, 0, NULL, 0, 0 };
 Constructor unit_constructor =
     { "()", &unit_type_constructor, NULL, 0, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, 0, NULL };
 Constructor nil_constructor =

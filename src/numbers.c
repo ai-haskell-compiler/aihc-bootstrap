@@ -49,8 +49,14 @@ static enum NumberKind number_kind(Value *type_value)
     int i;
 
     if (type->kind == TY_CON) {
+        TypeCon *constructor = type->constructor;
+
+        if (constructor->number_kind > 0) {
+            return (enum NumberKind)(constructor->number_kind - 1);
+        }
         for (i = 0; names[i] != NULL; i++) {
-            if (strcmp(type->constructor->name, names[i]) == 0) {
+            if (strcmp(constructor->name, names[i]) == 0) {
+                constructor->number_kind = (int)kinds[i] + 1;
                 return kinds[i];
             }
         }

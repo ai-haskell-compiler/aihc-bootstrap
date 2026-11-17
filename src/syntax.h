@@ -75,6 +75,8 @@ struct TypeCon {
     int constructor_count; /* data, newtype */
     Constructor **constructors;
     int is_family;  /* declared with `type F a` in a class: see below */
+    int number_kind; /* numbers.c: 1 + its kind of number once it is
+                        known */
 };
 
 /* An associated type. A class declares it:
