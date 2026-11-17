@@ -748,6 +748,7 @@ void mark_roots(void)
 
     gc_mark_range(stack, stack + stack_size);
     gc_mark(raised);
+    mark_remembered_methods();
     for (global = all_globals; global != NULL; global = global->all_next) {
         gc_mark(global->value);
     }

@@ -253,6 +253,7 @@ const Builtin *find_builtin(const char *name);
 /* instances.c: the definition of the class method for the type the class is
    used at. */
 Value *find_method(Global *method, Type *type);
+void mark_remembered_methods(void); /* for the collector */
 
 /* elaborate.c: the value of a top-level variable, preparing it on first
    use. */
