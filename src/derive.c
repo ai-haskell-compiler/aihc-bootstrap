@@ -1,5 +1,6 @@
 #include "eval.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /* Derived instances. A `deriving` clause does not generate code. Its
@@ -31,34 +32,120 @@ static TypeCon *type_head(Type *type)
     return type->constructor;
 }
 
-/* The type of field `index` of the constructor, in a value of type `type`:
-   the declared field type with the parameters of T replaced by the
+/* The types of the fields of a constructor in a value of some type, worked
+   out once for each: the derived methods ask at every call. */
+typedef struct FieldTypes {
+    Constructor *constructor;
+    Type *type;
+    Type **fields;
+    /* The == and the compare of each field, found once while
+       all_instances is `instances`: see field_method. */
+    Value **methods[2];
+    const void *instances;
+    struct FieldTypes *next;
+} FieldTypes;
+
+#define FIELD_TYPE_BUCKETS 4096
+static FieldTypes *field_types[FIELD_TYPE_BUCKETS];
+
+/* The types of the fields of the constructor, in a value of type `type`:
+   the declared field types with the parameters of T replaced by the
    arguments T has in `type`. */
-static Type *field_type(Type *type, Constructor *constructor, int index)
+static FieldTypes *fields_of(Type *type, Constructor *constructor)
 {
     TypeCon *head = constructor->type;
-    Scheme *scheme = constructor_scheme(constructor);
-    Type **arguments =
-        gc_alloc((size_t)head->parameter_count * sizeof(Type *) + 1);
+    size_t bucket = ((size_t)constructor / 16 * 31 + (size_t)type / 16)
+                    % FIELD_TYPE_BUCKETS;
+    FieldTypes *known;
+    Scheme *scheme;
+    Type **arguments;
     Type *fields;
-    Type *field = NULL;
     Type *rest;
     int i;
 
-    type = prune(type);
-    for (i = head->parameter_count - 1; i >= 0; i--) {
-        arguments[i] = type->argument;
-        type = prune(type->function);
-    }
-    fields = substitute(scheme->type, head->parameter_count, scheme->variables,
-                        arguments);
-    for (i = 0; i <= index; i++) {
-        if (!split_function_type(fields, &field, &rest)) {
-            die("constructor %s has no field %d", constructor->name, index);
+    for (known = field_types[bucket]; known != NULL; known = known->next) {
+        if (known->constructor == constructor && known->type == type) {
+            break;
         }
-        fields = rest;
     }
-    return field;
+    if (known == NULL) {
+        Type *applied = prune(type);
+
+        scheme = constructor_scheme(constructor);
+        arguments = xmalloc((size_t)head->parameter_count * sizeof(Type *) + 1);
+        for (i = head->parameter_count - 1; i >= 0; i--) {
+            arguments[i] = applied->argument;
+            applied = prune(applied->function);
+        }
+        fields = substitute(scheme->type, head->parameter_count,
+                            scheme->variables, arguments);
+        free(arguments);
+        known = xmalloc(sizeof(FieldTypes));
+        known->constructor = constructor;
+        known->type = type;
+        known->fields = xmalloc((size_t)(constructor->arity + 1) * sizeof(Type *));
+        for (i = 0; i < constructor->arity; i++) {
+            if (!split_function_type(fields, &known->fields[i], &rest)) {
+                die("constructor %s has no field %d", constructor->name, i);
+            }
+            fields = rest;
+        }
+        known->methods[0] = NULL;
+        known->methods[1] = NULL;
+        known->instances = NULL;
+        known->next = field_types[bucket];
+        field_types[bucket] = known;
+    }
+    return known;
+}
+
+static Type *field_type(Type *type, Constructor *constructor, int index)
+{
+    if (index >= constructor->arity) {
+        die("constructor %s has no field %d", constructor->name, index);
+    }
+    return fields_of(type, constructor)->fields[index];
+}
+
+static Global *prelude_method(const char *name);
+
+#define FIELD_EQ 0
+#define FIELD_COMPARE 1
+
+/* The == (FIELD_EQ) or compare (FIELD_COMPARE) of field `index`. Found
+   once, as long as no instances come: find_method keeps it in use
+   meanwhile, as eval.c's method_of relies on too. */
+static Value *field_method(int which, Type *type, Constructor *constructor,
+                           int index)
+{
+    static const char *const names[2] = { "==", "compare" };
+    FieldTypes *known = fields_of(type, constructor);
+    Type *field = known->fields[index];
+    Value *method;
+
+    if (known->instances != all_instances) {
+        free(known->methods[0]);
+        free(known->methods[1]);
+        known->methods[0] = NULL;
+        known->methods[1] = NULL;
+        known->instances = all_instances;
+    }
+    if (known->methods[which] != NULL && known->methods[which][index] != NULL) {
+        return known->methods[which][index];
+    }
+    method = find_method(prelude_method(names[which]), field);
+    /* find_method may have loaded instances. */
+    if (!method_is_remembered(field) || known->instances != all_instances) {
+        return method;
+    }
+    if (known->methods[which] == NULL) {
+        known->methods[which] =
+            xmalloc((size_t)(constructor->arity + 1) * sizeof(Value *));
+        memset(known->methods[which], 0,
+               (size_t)(constructor->arity + 1) * sizeof(Value *));
+    }
+    known->methods[which][index] = method;
+    return method;
 }
 
 /* The constructor of the value and its fields. A newtype has no
@@ -128,8 +215,7 @@ static Value *derived_eq(Value **arguments)
         return make_con(TAG_FALSE, 0);
     }
     for (i = 0; i < constructor->arity; i++) {
-        Value *equals =
-            find_method(prelude_method("=="), field_type(type, constructor, i));
+        Value *equals = field_method(FIELD_EQ, type, constructor, i);
 
         if (apply(apply(equals, a_fields[i]), b_fields[i])->tag != TAG_TRUE) {
             return make_con(TAG_FALSE, 0);
@@ -156,8 +242,7 @@ static Value *derived_compare(Value **arguments)
         return make_con(constructor->tag < other->tag ? TAG_LT : TAG_GT, 0);
     }
     for (i = 0; i < constructor->arity; i++) {
-        Value *compare = find_method(prelude_method("compare"),
-                                     field_type(type, constructor, i));
+        Value *compare = field_method(FIELD_COMPARE, type, constructor, i);
         Value *order = apply(apply(compare, a_fields[i]), b_fields[i]);
 
         if (order->tag != TAG_EQ) {
