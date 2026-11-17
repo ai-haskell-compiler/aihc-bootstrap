@@ -109,11 +109,28 @@ Value *make_char(long code)
 /* The fields of a constructor that has none. */
 static Value *no_fields[1];
 
+/* A constructor without fields is made once for each tag, outside the
+   collector's memory, as small numbers are: True, Nothing, (). */
+#define SHARED_TAGS 64
+static Value shared_nullary[SHARED_TAGS];
+
 /* The fields are in the cell of the value, right after it: one allocation
    instead of two, and they are next to it in memory. */
 Value *make_con(int tag, int field_count)
 {
-    Value *value = gc_alloc_value(field_count);
+    Value *value;
+
+    if (field_count == 0 && tag >= 0 && tag < SHARED_TAGS) {
+        value = &shared_nullary[tag];
+        if (value->kind != V_CON) {
+            value->kind = V_CON;
+            value->tag = tag;
+            value->is_deep = 1;
+            value->b.fields = no_fields;
+        }
+        return value;
+    }
+    value = gc_alloc_value(field_count);
 
     value->kind = V_CON;
     value->tag = tag;
@@ -696,34 +713,19 @@ static int arity_of(const Value *function)
 }
 
 /* The builtin or constructor given `count` arguments in all, all of them
-   in `arguments`, a new array: calls the builtin or builds the value if
-   that is all of them. */
+   in `arguments`, a new array: calls the builtin if that is all of them.
+   A constructor with all of them is made by take_arguments, but for a
+   newtype, which is its argument. */
 static Value *give_arguments(const Value *function, Value **arguments,
                              int count)
 {
     Value *result;
 
     if (count == arity_of(function)) {
-        const Constructor *constructor = function->c.constructor;
-        int i;
-
         if (function->kind == V_BUILTIN) {
             return function->c.builtin->function(arguments);
         }
-        if (constructor->is_newtype) {
-            return arguments[count - 1];
-        }
-        for (i = 0; i < constructor->arity; i++) {
-            if (constructor->field_strict != NULL
-                && constructor->field_strict[i]) {
-                force(arguments[constructor->existential_count + i]);
-            }
-        }
-        result = new_value(V_CON);
-        result->tag = constructor->tag;
-        result->a.field_count = count;
-        result->b.fields = arguments;
-        return result;
+        return arguments[count - 1];
     }
     result = new_value(function->kind);
     result->c.builtin = function->c.builtin;
@@ -733,17 +735,50 @@ static Value *give_arguments(const Value *function, Value **arguments,
     return result;
 }
 
-/* Gives a builtin or a constructor one more argument. */
-static Value *apply_partial(const Value *function, Value *argument)
+/* Gives a builtin or a constructor `argument`, and the `waiting` arguments
+   on top of the machine's stack after it. A constructor that gets its last
+   argument is made with its fields in its cell, without an array first. */
+static Value *take_arguments(const Value *function, Value *argument,
+                             int waiting)
 {
     int count = function->a.argument_count;
-    Value **arguments = gc_alloc((size_t)(count + 1) * sizeof(Value *));
+    int total = count + 1 + waiting;
+    Value *constructed = NULL;
+    Value **arguments;
+    int i;
 
+    if (function->kind == V_PARTIAL_CON && total == arity_of(function)
+        && !function->c.constructor->is_newtype) {
+        constructed = make_con(function->c.constructor->tag, total);
+        arguments = constructed->b.fields;
+    } else {
+        arguments = gc_alloc((size_t)total * sizeof(Value *));
+    }
     if (count > 0) {
         memcpy(arguments, function->b.arguments, (size_t)count * sizeof(Value *));
     }
     arguments[count] = argument;
-    return give_arguments(function, arguments, count + 1);
+    for (i = 1; i <= waiting; i++) {
+        arguments[count + i] = stack[--stack_size].value;
+    }
+    if (constructed != NULL) {
+        const Constructor *constructor = function->c.constructor;
+
+        for (i = 0; constructor->field_strict != NULL
+                    && i < constructor->arity; i++) {
+            if (constructor->field_strict[i]) {
+                force(arguments[constructor->existential_count + i]);
+            }
+        }
+        return constructed;
+    }
+    return give_arguments(function, arguments, total);
+}
+
+/* Gives a builtin or a constructor one more argument. */
+static Value *apply_partial(const Value *function, Value *argument)
+{
+    return take_arguments(function, argument, 0);
 }
 
 /* Gives a builtin or a constructor `argument` and, if the machine's stack
@@ -751,10 +786,7 @@ static Value *apply_partial(const Value *function, Value *argument)
    too: one array, instead of a partial application for each. */
 static Value *apply_waiting(const Value *function, Value *argument)
 {
-    int count = function->a.argument_count;
-    int total = arity_of(function);
-    int waiting = total - count - 1;
-    Value **arguments;
+    int waiting = arity_of(function) - function->a.argument_count - 1;
     int i;
 
     if (waiting <= 0 || stack_size < waiting) {
@@ -765,15 +797,7 @@ static Value *apply_waiting(const Value *function, Value *argument)
             return apply_partial(function, argument);
         }
     }
-    arguments = gc_alloc((size_t)total * sizeof(Value *));
-    if (count > 0) {
-        memcpy(arguments, function->b.arguments, (size_t)count * sizeof(Value *));
-    }
-    arguments[count] = argument;
-    for (i = 1; i <= waiting; i++) {
-        arguments[count + i] = stack[--stack_size].value;
-    }
-    return give_arguments(function, arguments, total);
+    return take_arguments(function, argument, waiting);
 }
 
 /* The variables a pattern binds, collected while it is matched, so that
