@@ -256,15 +256,22 @@ libraries, solves the build plan, and builds the packages in order:
 `aihc-rts`, `aihc-prim` (27 modules), `aihc-base` (280 modules), then the
 program.
 
-**`aihc-rts` is byte for byte what AIHC built with GHC writes**, all 11
-files, with the same `AIHC_COMPILER_IDENTITY` for both (see below). It
-takes 6 to 10 seconds in the interpreter; AIHC built with GHC takes 2.3.
+**The whole plan builds, and the program runs**: `aihc build` of a hello
+world in the interpreter builds `aihc-rts`, `aihc-prim`, `aihc-base` and
+the executable, which prints `hello`. **The store is what AIHC built with
+GHC writes**, with the same `AIHC_COMPILER_IDENTITY` for both (see below):
+every object file (325), library and package file is byte for byte the
+same. The unit files under `.units` differ only in the times and the
+paths they record, and the `.capi.d` files in the temporary directory
+they name.
 
-**`aihc-prim` gets through parsing and name resolution and into type
-checking** (`aihc-tc`). Each run so far has stopped at something the
-interpreter did not have yet, in this order: derived `Traversable`,
-overlapping instances (`Cbor String` and `Cbor [a]`), `Traversable` of a
-pair. AIHC built with GHC builds the whole plan in 34 s of CPU (274 G
+Each run before that stopped at something the interpreter did not have
+yet, in this order: derived `Traversable`, overlapping instances
+(`Cbor String` and `Cbor [a]`), `Traversable` of a pair.
+
+The first build that got through took 4 h 53 min (17,097 s of CPU), with
+the generational collector but before the rest of "Where the time goes".
+AIHC built with GHC builds the whole plan in 34 s of CPU (274 G
 instructions): `aihc-prim` 45.7 s and `aihc-base` 44.6 s of wall time.
 
 ### Comparing a build with the real one
@@ -314,11 +321,46 @@ Earlier, before any of these: each class got a list of its instances, the
 block of the last cell of a size is tried first when allocating, and the
 search for the block of a word looks only at the bases.
 
-In type checking, marking is two thirds of the time: half a gigabyte is in
-use and does not change, and every collection looks at all of it. A
-collection now comes after 4 times what is in use (`AIHC_GC_GROWTH`). A
-generational collector would look at it much less; it needs a write
-barrier wherever a value is changed after it is made.
+Then the collector became generational (see "Memory"): marking had been
+half to two thirds of the time of type checking, and is a few percent.
+With that and a few smaller changes the module above took 8.0 Gcycles.
+
+The rest was measured on a 114 kB module (the one above four times), in
+the order of the commits:
+
+| What | Gcycles |
+| --- | ---: |
+| Generational collector | 35.3 |
+| A `Value` is 32 bytes instead of 128: its fields share three slots | 28.0 |
+| The fields of a constructor are in the cell of its value; a free cell knows where its state is; size classes come from a table | 26.9 |
+| A literal, a constructor or a type passed as an argument is made at once, not delayed; a type has one value | 26.3 |
+| A lambda that is applied at once binds its argument without making a closure; a builtin takes all the arguments waiting for it at once | 21.8 |
+| The arguments waiting for a function are bound in one environment, not one each | 19.7 |
+| The variables of a pattern are bound in one environment | 19.6 |
+| An expression's type at run time, and the method it stands for, are worked out once (`run_type`, `method_of`) | 18.4 |
+| `force` of an evaluated value does not start the machine | 17.8 |
+| A constructor without fields is made once; a builtin gets its arguments in an array on the C stack | 17.2 |
+| A value says whether it is old, so the write barrier rarely looks it up | 17.0 |
+| A thunk that needs all of an environment shares it | 16.7 |
+
+The 28 kB module takes 4.8 Gcycles now. A map benchmark (200,000
+inserts) went from 57.5 to 28.6 Gcycles. Derived `Eq` and `Ord` also work
+out a constructor's field types, and the methods for them, once
+(`src/derive.c`): in the full build, the substitution was 3.6% of the
+time.
+
+Tried and not kept: zeroing small cells with stores of a known size,
+prefetching the next free cell, finding free cells from the state bytes
+instead of a free list (more instructions, no fewer cache misses), and
+choosing the alternative of a `case` on an evaluated variable without a
+frame.
+
+What is left, from a profile of the full build: the machine itself
+(`run`, a fifth), allocating and zeroing cells (a fifth), collecting
+(a tenth), `delay` and matching patterns. Arithmetic in a map benchmark
+makes a thunk for every argument of `+` and `<`, which the builtin forces
+at once; a builtin that is known to force its arguments could have them
+evaluated without one.
 
 ## Memory
 
@@ -330,7 +372,20 @@ allocated keeps that alive. It has an allocator of its own, in cells of a
 few sizes, so that a word can be checked against what exists. A `Value`
 and an `Env` are known to it: only their pointers are looked at.
 
-`make test-gc` runs the tests with a collection after every 100 kB.
+The collector is generational ("Generations" in `src/gc.c`). A cell that
+has been through a collection is old, and most collections (minor ones)
+look only at the young cells: what the C stack, the machine's roots and
+the old cells that were written to since (the remembered set) point to. A
+change to a cell after it is made goes through a write barrier
+(`gc_written`, or `gc_written_value`, which a value answers itself). A
+cell the C stack points to stays young (it is pinned), because C code
+fills in what it has just made without a barrier. A major collection
+looks at everything, when the old cells have grown `AIHC_GC_GROWTH` times
+(2) since the last one.
+
+`make test-gc` runs the tests with a collection after every 100 kB, every
+fourth one major, and freed cells filled with a pattern, so that a cell
+used after it was freed goes wrong at once.
 `AIHC_GC_REPORT=1` prints a line for every collection, and the lines of
 the program that the machine is at. A collection comes at no particular
 place, so many of them show where a program spends its time.
@@ -365,8 +420,6 @@ What is left, in the order it is likely to matter:
    whenever a type with variables is passed to a function. In type
    checking that was most of the memory of the process (11 GB) before
    `close_type` stopped copying types without variables.
-2. **Smaller values.** A `Value` is 128 bytes whatever it is. One struct
-   per kind, or an allocation that is only as long as the kind needs.
 
 ## Language backlog
 
