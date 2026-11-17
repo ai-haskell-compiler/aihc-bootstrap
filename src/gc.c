@@ -71,9 +71,8 @@ static Block *class_chunk[CLASS_COUNT];
 
 static const char *stack_bottom = NULL; /* NULL: collecting is not on yet */
 static size_t allocated = 0;            /* bytes handed out since the last collection */
-/* Collecting looks at everything that is in use, so it is done rarely: the
-   machine makes some 400 kB of short-lived values for every byte of a
-   source file that AIHC parses. */
+/* Collecting looks at everything that is in use, so it is done rarely
+   (see gc_collect). */
 static size_t threshold = (size_t)1024 * 1024 * 1024;
 static size_t minimum_threshold = (size_t)1024 * 1024 * 1024;
 static int report = 0;
@@ -356,7 +355,10 @@ void gc_collect(void)
     }
     allocated = 0;
     /* Collect again when twice as much has been handed out as is in use
-       now, so that the work of collecting stays in proportion. */
+       now, so that the work of collecting stays in proportion: it looks at
+       everything that is in use, and the machine makes some 400 kB of
+       short-lived values for every byte of a source file that AIHC
+       parses. */
     threshold = 2 * live > minimum_threshold ? 2 * live : minimum_threshold;
 }
 
