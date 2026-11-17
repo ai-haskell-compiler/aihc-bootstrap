@@ -258,8 +258,9 @@ static Env *new_env(const Shape *shape, const Env *outer)
    what is left to evaluate. */
 static Env *bind_waiting(Env *env, Binding *parameter, Expr **body)
 {
-    const Shape *shape = child_shape(shape_of(env), parameter);
-    Expr *rest = *body;
+    const Shape *shape = shape_of(env);
+    Expr *start = *body;
+    Expr *rest = start;
     Env *bound;
     int first;
     int count = 1;
@@ -267,9 +268,24 @@ static Env *bind_waiting(Env *env, Binding *parameter, Expr **body)
 
     while (rest->kind == E_LAMBDA && count < stack_size
            && stack[stack_size - 1 - count].kind == F_APPLY) {
-        shape = child_shape(shape, rest->local);
         rest = rest->body;
         count++;
+    }
+    /* Mostly the same shape as the last time. */
+    if (start->bind_from == shape && start->bind_count == count) {
+        shape = start->bind_to;
+    } else {
+        const Shape *from = shape;
+        Expr *lambda = start;
+
+        shape = child_shape(shape, parameter);
+        for (i = 1; i < count; i++) {
+            shape = child_shape(shape, lambda->local);
+            lambda = lambda->body;
+        }
+        start->bind_from = from;
+        start->bind_to = shape;
+        start->bind_count = count;
     }
     /* The arguments stay on the stack, where the collector finds them,
        until they are in the environment. */

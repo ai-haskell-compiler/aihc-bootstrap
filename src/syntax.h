@@ -298,6 +298,12 @@ struct Expr {
        all_instances is `method_instances` (eval.c). */
     struct Value *method;
     const void *method_instances;
+    /* The body of a lambda: the shape of the environment the last time
+       arguments were bound for it, before and after (bind_waiting in
+       eval.c), and how many. */
+    const void *bind_from;
+    const void *bind_to;
+    int bind_count;
 };
 
 /* A qualifier that makes a name refer to the Prelude whatever is in scope.
