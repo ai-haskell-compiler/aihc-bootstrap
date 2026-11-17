@@ -48,8 +48,6 @@ typedef struct Block {
     size_t cell_size;
     size_t cell_count;
     unsigned char *state; /* CELL_... for each cell */
-    int has_young; /* cells were made in it since the last collection, or
-                      it has cells that stayed young */
 } Block;
 
 static const size_t class_sizes[] = {
@@ -144,7 +142,6 @@ static Block *add_chunk(size_t cell_size, size_t cell_count)
     }
     chunk->base = malloc(cell_size * cell_count);
     chunk->state = calloc(cell_count, 1);
-    chunk->has_young = 0;
     if (chunk->base == NULL || chunk->state == NULL) {
         out_of_memory();
     }
@@ -226,8 +223,14 @@ static void add_cell(CellList *list, char *cell, size_t size,
     list->count++;
 }
 
-/* Old cells that may point to young ones. */
+/* Old cells that may point to young ones, and the list they were in
+   before this collection (kept for its memory). */
 static CellList remembered;
+static CellList old_remembered;
+
+/* The young cells: those made since the last collection, and those that
+   stayed young through it. A minor sweep looks only at these. */
+static CellList young_cells;
 
 /* ---- Marking ---- */
 
@@ -318,14 +321,14 @@ static void mark_from_roots(void)
        them into this buffer, which is on the stack and so is scanned. */
     jmp_buf registers;
     const char *top = (const char *)&registers;
-    CellList old_remembered = remembered;
+    CellList list = old_remembered;
     size_t i;
 
     /* The remembered cells are looked into below, and remembered again if
        they still point to a young cell. */
-    remembered.cells = NULL;
+    old_remembered = remembered;
+    remembered = list;
     remembered.count = 0;
-    remembered.capacity = 0;
     for (i = 0; i < old_remembered.count; i++) {
         *old_remembered.cells[i].state &= (unsigned char)~CELL_REMEMBERED;
     }
@@ -346,7 +349,6 @@ static void mark_from_roots(void)
             add_cell(&pending, cell->cell, cell->size, cell->state);
         }
     }
-    free(old_remembered.cells);
     while (pending.count > 0) {
         Pending cell = pending.cells[--pending.count];
 
@@ -407,95 +409,136 @@ static int survives(unsigned char *state)
 
 static size_t old_in_use = 0; /* bytes in old cells after the last sweep */
 
-/* The free cells of each size are always exactly those that are not in
-   use: a major sweep makes the lists again, a minor one adds the cells
-   that were freed. A minor sweep only looks at the chunks with young
-   cells, since old cells are not freed by it. Returns how many bytes are
-   in use. */
-static size_t sweep(void)
+static int size_class_of(size_t cell_size)
 {
-    size_t young = 0;
-    int kept = 0;
-    int i;
     int k;
 
-    if (!minor) {
-        for (k = 0; k < CLASS_COUNT; k++) {
-            free_cells[k] = NULL;
-        }
-        old_in_use = 0;
-    }
     for (k = 0; k < CLASS_COUNT; k++) {
-        class_chunk[k] = NULL;
+        if (class_sizes[k] == cell_size) {
+            return k;
+        }
     }
+    return -1;
+}
+
+/* Takes the chunks of large cells that are no longer in use out of the
+   table, and frees them. */
+static void free_large_chunks(void)
+{
+    int kept = 0;
+    int i;
+
     for (i = 0; i < chunk_count; i++) {
         Block *chunk = chunks[i];
-        size_t index;
-        int size_class = -1;
 
-        if (minor && !chunk->has_young) {
-            chunk_bases[kept] = chunk->base;
-            chunks[kept++] = chunk;
+        if (chunk->cell_count == 1 && !(chunk->state[0] & CELL_USED)) {
+            free(chunk->base);
+            free(chunk->state);
+            free(chunk);
             continue;
-        }
-        chunk->has_young = 0;
-        for (k = 0; k < CLASS_COUNT; k++) {
-            if (class_sizes[k] == chunk->cell_size && chunk->cell_count > 1) {
-                size_class = k;
-            }
-        }
-        if (size_class < 0) {
-            /* One large cell: the whole chunk goes if it is not in use. */
-            int was_old = (chunk->state[0] & CELL_OLD) != 0;
-
-            if (survives(&chunk->state[0])) {
-                if (!(chunk->state[0] & CELL_OLD)) {
-                    young += chunk->cell_size;
-                    chunk->has_young = 1;
-                } else if (!minor || !was_old) {
-                    old_in_use += chunk->cell_size;
-                }
-                chunk_bases[kept] = chunk->base;
-                chunks[kept++] = chunk;
-            } else {
-                free(chunk->base);
-                free(chunk->state);
-                free(chunk);
-            }
-            continue;
-        }
-        for (index = 0; index < chunk->cell_count; index++) {
-            unsigned char *state = &chunk->state[index];
-            int was_old = (*state & CELL_OLD) != 0;
-
-            if (!(*state & CELL_USED)) {
-                if (!minor) {
-                    char *cell = chunk->base + index * chunk->cell_size;
-
-                    memcpy(cell, &free_cells[size_class], sizeof(void *));
-                    free_cells[size_class] = cell;
-                }
-            } else if (survives(state)) {
-                if (!(*state & CELL_OLD)) {
-                    young += chunk->cell_size;
-                    chunk->has_young = 1;
-                } else if (!minor || !was_old) {
-                    old_in_use += chunk->cell_size;
-                }
-            } else {
-                char *cell = chunk->base + index * chunk->cell_size;
-
-                *state = 0;
-                memcpy(cell, &free_cells[size_class], sizeof(void *));
-                free_cells[size_class] = cell;
-            }
         }
         chunk_bases[kept] = chunk->base;
         chunks[kept++] = chunk;
     }
     chunk_count = kept;
-    last_found = NULL; /* it may have been freed */
+}
+
+/* A minor sweep: of the young cells, those that are not marked are
+   freed, and the others get old unless they are pinned. Those that stay
+   young are moved to the front of the list: its memory is kept, since
+   giving back a block that large and asking for it again does not make
+   the process any smaller on macOS. */
+static size_t sweep_young(void)
+{
+    size_t young = 0;
+    size_t kept = 0;
+    int large_freed = 0;
+    size_t i;
+
+    for (i = 0; i < young_cells.count; i++) {
+        Pending *cell = &young_cells.cells[i];
+        int k;
+
+        if (survives(cell->state)) {
+            if (*cell->state & CELL_OLD) {
+                old_in_use += cell->size;
+            } else {
+                young += cell->size;
+                young_cells.cells[kept++] = *cell;
+            }
+            continue;
+        }
+        *cell->state = 0;
+        k = size_class_of(cell->size);
+        if (k < 0 || cell->size > class_sizes[CLASS_COUNT - 1]) {
+            large_freed = 1;
+            continue;
+        }
+        memcpy(cell->cell, &free_cells[k], sizeof(void *));
+        free_cells[k] = cell->cell;
+    }
+    young_cells.count = kept;
+    if (large_freed) {
+        free_large_chunks();
+    }
     return old_in_use + young;
+}
+
+/* A major sweep: every cell that is not marked is freed, and the free
+   cells of each size are listed again. */
+static size_t sweep_all(void)
+{
+    size_t young = 0;
+    int i;
+    int k;
+
+    for (k = 0; k < CLASS_COUNT; k++) {
+        free_cells[k] = NULL;
+    }
+    old_in_use = 0;
+    young_cells.count = 0;
+    for (i = 0; i < chunk_count; i++) {
+        Block *chunk = chunks[i];
+        int size_class = chunk->cell_count > 1
+            ? size_class_of(chunk->cell_size) : -1;
+        size_t index;
+
+        for (index = 0; index < chunk->cell_count; index++) {
+            unsigned char *state = &chunk->state[index];
+            char *cell = chunk->base + index * chunk->cell_size;
+
+            if ((*state & CELL_USED) && survives(state)) {
+                if (*state & CELL_OLD) {
+                    old_in_use += chunk->cell_size;
+                } else {
+                    young += chunk->cell_size;
+                    add_cell(&young_cells, cell, chunk->cell_size, state);
+                }
+                continue;
+            }
+            *state = 0;
+            if (size_class >= 0) {
+                memcpy(cell, &free_cells[size_class], sizeof(void *));
+                free_cells[size_class] = cell;
+            }
+        }
+    }
+    free_large_chunks();
+    return old_in_use + young;
+}
+
+/* Frees what is no longer in use. Returns how many bytes are. */
+static size_t sweep(void)
+{
+    size_t live;
+    int k;
+
+    for (k = 0; k < CLASS_COUNT; k++) {
+        class_chunk[k] = NULL;
+    }
+    live = minor ? sweep_young() : sweep_all();
+    last_found = NULL; /* it may have been freed */
+    return live;
 }
 
 void gc_collect(void)
@@ -555,8 +598,8 @@ static void *allocate(size_t size, int flags)
            words. */
         size = (size + sizeof(void *) - 1) / sizeof(void *) * sizeof(void *);
         chunk = add_chunk(size, 1);
-        chunk->has_young = 1;
         chunk->state[0] = (unsigned char)(CELL_USED | flags);
+        add_cell(&young_cells, chunk->base, size, &chunk->state[0]);
         memset(chunk->base, 0, size);
         allocated += size;
         return chunk->base;
@@ -582,7 +625,7 @@ static void *allocate(size_t size, int flags)
     }
     index = (size_t)(cell - chunk->base) / chunk->cell_size;
     chunk->state[index] = (unsigned char)(CELL_USED | flags);
-    chunk->has_young = 1;
+    add_cell(&young_cells, cell, chunk->cell_size, &chunk->state[index]);
     memset(cell, 0, chunk->cell_size);
     allocated += chunk->cell_size;
     return cell;
