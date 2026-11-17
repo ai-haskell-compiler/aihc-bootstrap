@@ -48,6 +48,8 @@ typedef struct Block {
     size_t cell_size;
     size_t cell_count;
     unsigned char *state; /* CELL_... for each cell */
+    int has_young; /* cells were made in it since the last collection, or
+                      it has cells that stayed young */
 } Block;
 
 static const size_t class_sizes[] = {
@@ -142,6 +144,7 @@ static Block *add_chunk(size_t cell_size, size_t cell_count)
     }
     chunk->base = malloc(cell_size * cell_count);
     chunk->state = calloc(cell_count, 1);
+    chunk->has_young = 0;
     if (chunk->base == NULL || chunk->state == NULL) {
         out_of_memory();
     }
@@ -404,27 +407,38 @@ static int survives(unsigned char *state)
 
 static size_t old_in_use = 0; /* bytes in old cells after the last sweep */
 
-/* Frees every cell that is not marked, and puts the free cells of each
-   size back on its list. Returns how many bytes are still in use. */
+/* The free cells of each size are always exactly those that are not in
+   use: a major sweep makes the lists again, a minor one adds the cells
+   that were freed. A minor sweep only looks at the chunks with young
+   cells, since old cells are not freed by it. Returns how many bytes are
+   in use. */
 static size_t sweep(void)
 {
-    size_t live = 0;
+    size_t young = 0;
     int kept = 0;
     int i;
     int k;
 
-    for (k = 0; k < CLASS_COUNT; k++) {
-        free_cells[k] = NULL;
+    if (!minor) {
+        for (k = 0; k < CLASS_COUNT; k++) {
+            free_cells[k] = NULL;
+        }
+        old_in_use = 0;
     }
     for (k = 0; k < CLASS_COUNT; k++) {
         class_chunk[k] = NULL;
     }
-    old_in_use = 0;
     for (i = 0; i < chunk_count; i++) {
         Block *chunk = chunks[i];
         size_t index;
         int size_class = -1;
 
+        if (minor && !chunk->has_young) {
+            chunk_bases[kept] = chunk->base;
+            chunks[kept++] = chunk;
+            continue;
+        }
+        chunk->has_young = 0;
         for (k = 0; k < CLASS_COUNT; k++) {
             if (class_sizes[k] == chunk->cell_size && chunk->cell_count > 1) {
                 size_class = k;
@@ -432,9 +446,13 @@ static size_t sweep(void)
         }
         if (size_class < 0) {
             /* One large cell: the whole chunk goes if it is not in use. */
+            int was_old = (chunk->state[0] & CELL_OLD) != 0;
+
             if (survives(&chunk->state[0])) {
-                live += chunk->cell_size;
-                if (chunk->state[0] & CELL_OLD) {
+                if (!(chunk->state[0] & CELL_OLD)) {
+                    young += chunk->cell_size;
+                    chunk->has_young = 1;
+                } else if (!minor || !was_old) {
                     old_in_use += chunk->cell_size;
                 }
                 chunk_bases[kept] = chunk->base;
@@ -447,20 +465,27 @@ static size_t sweep(void)
             continue;
         }
         for (index = 0; index < chunk->cell_count; index++) {
-            if (!(chunk->state[index] & CELL_USED)) {
-                char *cell = chunk->base + index * chunk->cell_size;
+            unsigned char *state = &chunk->state[index];
+            int was_old = (*state & CELL_OLD) != 0;
 
-                memcpy(cell, &free_cells[size_class], sizeof(void *));
-                free_cells[size_class] = cell;
-            } else if (survives(&chunk->state[index])) {
-                live += chunk->cell_size;
-                if (chunk->state[index] & CELL_OLD) {
+            if (!(*state & CELL_USED)) {
+                if (!minor) {
+                    char *cell = chunk->base + index * chunk->cell_size;
+
+                    memcpy(cell, &free_cells[size_class], sizeof(void *));
+                    free_cells[size_class] = cell;
+                }
+            } else if (survives(state)) {
+                if (!(*state & CELL_OLD)) {
+                    young += chunk->cell_size;
+                    chunk->has_young = 1;
+                } else if (!minor || !was_old) {
                     old_in_use += chunk->cell_size;
                 }
             } else {
                 char *cell = chunk->base + index * chunk->cell_size;
 
-                chunk->state[index] = 0;
+                *state = 0;
                 memcpy(cell, &free_cells[size_class], sizeof(void *));
                 free_cells[size_class] = cell;
             }
@@ -470,7 +495,7 @@ static size_t sweep(void)
     }
     chunk_count = kept;
     last_found = NULL; /* it may have been freed */
-    return live;
+    return old_in_use + young;
 }
 
 void gc_collect(void)
@@ -530,6 +555,7 @@ static void *allocate(size_t size, int flags)
            words. */
         size = (size + sizeof(void *) - 1) / sizeof(void *) * sizeof(void *);
         chunk = add_chunk(size, 1);
+        chunk->has_young = 1;
         chunk->state[0] = (unsigned char)(CELL_USED | flags);
         memset(chunk->base, 0, size);
         allocated += size;
@@ -556,6 +582,7 @@ static void *allocate(size_t size, int flags)
     }
     index = (size_t)(cell - chunk->base) / chunk->cell_size;
     chunk->state[index] = (unsigned char)(CELL_USED | flags);
+    chunk->has_young = 1;
     memset(cell, 0, chunk->cell_size);
     allocated += chunk->cell_size;
     return cell;
