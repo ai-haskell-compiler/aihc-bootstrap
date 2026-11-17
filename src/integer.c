@@ -7,9 +7,9 @@
 /* Integer. A value that fits in a C long is that long, as for every other
    number type. A larger one is a sign and a magnitude:
 
-       number        the sign, 1 or -1
+       number        how many limbs the magnitude has, negated if the
+                     number is negative: its sign is the number's
        tag           INTEGER_BIG
-       field_count   how many limbs the magnitude has
        bytes         the limbs, least significant first
 
    A limb is 32 bits, so that two of them can be multiplied in an unsigned
@@ -79,14 +79,15 @@ static Big big_of(Value *value)
 
     value = force(value);
     if (!integer_is_big(value)) {
-        long number = value->number;
+        long number = value->a.number;
 
         return number < 0 ? big_from_magnitude(0ul - (unsigned long)number, -1)
                           : big_from_magnitude((unsigned long)number, 1);
     }
-    big.sign = (int)value->number;
-    big.count = value->field_count;
-    big.limbs = (Limb *)value->bytes;
+    big.sign = value->a.number < 0 ? -1 : 1;
+    big.count = (int)(value->a.number < 0 ? -value->a.number
+                                          : value->a.number);
+    big.limbs = (Limb *)value->b.bytes;
     return big;
 }
 
@@ -109,10 +110,9 @@ static Value *value_of(Big big)
             return make_int((long)(0ul - magnitude));
         }
     }
-    value = make_unshared_int(big.sign);
+    value = make_unshared_int(big.sign * (long)big.count);
     value->tag = INTEGER_BIG;
-    value->field_count = big.count;
-    value->bytes = (const unsigned char *)big.limbs;
+    value->b.bytes = (const unsigned char *)big.limbs;
     return value;
 }
 

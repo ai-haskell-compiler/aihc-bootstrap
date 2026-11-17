@@ -84,6 +84,10 @@ static int minor_count = 0; /* since the last major collection */
 static int minor_limit = 1000000;
 #define MINOR_LIMIT minor_limit
 static int report = 0;
+/* Whether a freed cell is filled with a pattern, so that a cell that is
+   used after it was freed is wrong at once (with AIHC_GC_EVERY): a value
+   of no kind, or a pointer to nowhere. */
+static int poison = 0;
 static unsigned long collections = 0;
 
 static void out_of_memory(void)
@@ -354,21 +358,24 @@ static void mark_from_roots(void)
 
         points_to_pinned = 0;
         if (*cell.state & CELL_VALUE) {
-            /* The other fields are numbers, or point to what the
-               interpreter made while it read the program. Fields that the
-               kind does not use are NULL or left over, which only keeps
-               something in use for longer. */
+            /* Slot `a` holds numbers, or points to what the interpreter
+               made while it read the program; so do the builtins and
+               constructors in slot `c`. Each kind uses a slot for one
+               thing, and what it holds for another kind is left over,
+               which only keeps something in use for longer. */
             const Value *value = (const Value *)cell.cell;
 
-            /* The arrays of a value are a part of it: a value that is being
-               filled in is in a C local, its arrays maybe not. */
-            on_c_stack = (*cell.state & CELL_PINNED) != 0;
-            gc_mark(value->fields);
-            gc_mark(value->arguments);
+            /* The arrays of a value (`fields`, `arguments`) are a part of
+               it: a value that is being filled in is in a C local, its
+               arrays maybe not. Only the arrays: what else is in slot `b`
+               is shared, and a cell that was marked before it was pinned
+               would point to a young cell without being remembered. */
+            on_c_stack = (*cell.state & CELL_PINNED) != 0
+                && (value->kind == V_CON || value->kind == V_BUILTIN
+                    || value->kind == V_PARTIAL_CON);
+            gc_mark(value->b.fields);
             on_c_stack = 0;
-            gc_mark(value->env);
-            gc_mark(value->result);
-            gc_mark(value->bytes);
+            gc_mark(value->c.env);
         } else if (*cell.state & CELL_ENV) {
             const Env *env = (const Env *)cell.cell;
             int i;
@@ -474,6 +481,9 @@ static size_t sweep_young(void)
             large_freed = 1;
             continue;
         }
+        if (poison) {
+            memset(cell->cell, 0xAB, cell->size);
+        }
         memcpy(cell->cell, &free_cells[k], sizeof(void *));
         free_cells[k] = cell->cell;
     }
@@ -518,6 +528,9 @@ static size_t sweep_all(void)
             }
             *state = 0;
             if (size_class >= 0) {
+                if (poison) {
+                    memset(cell, 0xAB, chunk->cell_size);
+                }
                 memcpy(cell, &free_cells[size_class], sizeof(void *));
                 free_cells[size_class] = cell;
             }
@@ -682,7 +695,7 @@ void *gc_realloc(void *old, size_t size, int bytes)
    that everything else is called from. The environment can ask for a
    report of every collection (AIHC_GC_REPORT); for collecting after every
    so many bytes (AIHC_GC_EVERY), with every fourth collection a major
-   one, which finds mistakes sooner; and for how many times the old cells
+   one and freed cells filled with a pattern, which finds mistakes sooner; and for how many times the old cells
    grow before a major collection (AIHC_GC_GROWTH, 2 by default). */
 void gc_start(const void *bottom)
 {
@@ -694,6 +707,7 @@ void gc_start(const void *bottom)
     if (every != NULL) {
         threshold = (size_t)strtoul(every, NULL, 10);
         minor_limit = 3;
+        poison = 1;
     }
     if (growth_text != NULL) {
         growth = (size_t)strtoul(growth_text, NULL, 10);

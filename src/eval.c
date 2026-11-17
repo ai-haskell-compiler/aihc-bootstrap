@@ -72,7 +72,7 @@ Value *make_unshared_int(long number)
 {
     Value *value = new_value(V_INT);
 
-    value->number = number;
+    value->a.number = number;
     return value;
 }
 
@@ -84,9 +84,9 @@ Value *make_int(long number)
         return make_unshared_int(number);
     }
     value = &shared_ints[number - SHARED_INT_LOW];
-    if (value->kind != V_INT || value->number != number) {
+    if (value->kind != V_INT || value->a.number != number) {
         value->kind = V_INT;
-        value->number = number;
+        value->a.number = number;
     }
     return value;
 }
@@ -98,11 +98,11 @@ Value *make_char(long code)
     if (code >= 0 && code < SHARED_CHARS) {
         value = &shared_chars[code];
         value->kind = V_CHAR;
-        value->number = code;
+        value->a.number = code;
         return value;
     }
     value = new_value(V_CHAR);
-    value->number = code;
+    value->a.number = code;
     return value;
 }
 
@@ -111,8 +111,8 @@ Value *make_con(int tag, int field_count)
     Value *value = new_value(V_CON);
 
     value->tag = tag;
-    value->field_count = field_count;
-    value->fields = gc_alloc((size_t)field_count * sizeof(Value *) + 1);
+    value->a.field_count = field_count;
+    value->b.fields = gc_alloc((size_t)field_count * sizeof(Value *) + 1);
     return value;
 }
 
@@ -120,8 +120,8 @@ Value *make_thunk(Expr *expr, Env *env)
 {
     Value *value = new_value(V_THUNK);
 
-    value->expr = expr;
-    value->env = env;
+    value->a.expr = expr;
+    value->c.env = env;
     return value;
 }
 
@@ -129,7 +129,7 @@ Value *make_builtin(const Builtin *builtin)
 {
     Value *value = new_value(V_BUILTIN);
 
-    value->builtin = builtin;
+    value->c.builtin = builtin;
     return value;
 }
 
@@ -137,7 +137,7 @@ Value *make_io_result(Value *result)
 {
     Value *box = make_con(0, 1);
 
-    box->fields[0] = result;
+    box->b.fields[0] = result;
     return box;
 }
 
@@ -145,7 +145,7 @@ Value *make_type(Type *type)
 {
     Value *value = new_value(V_TYPE);
 
-    value->type = type;
+    value->b.type = type;
     return value;
 }
 
@@ -153,9 +153,9 @@ static Value *make_closure(Expr *lambda, Env *env)
 {
     Value *value = new_value(V_CLOSURE);
 
-    value->parameter = lambda->local;
-    value->body = lambda->body;
-    value->env = env;
+    value->a.parameter = lambda->local;
+    value->b.body = lambda->body;
+    value->c.env = env;
     return value;
 }
 
@@ -168,10 +168,10 @@ Value *make_string(const char *string)
     while (*string != '\0') {
         Value *cell = make_con(TAG_CONS, 2);
 
-        cell->fields[0] = make_char(utf8_decode(&string));
-        cell->fields[1] = *last;
+        cell->b.fields[0] = make_char(utf8_decode(&string));
+        cell->b.fields[1] = *last;
         *last = cell;
-        last = &cell->fields[1];
+        last = &cell->b.fields[1];
     }
     return list;
 }
@@ -500,7 +500,7 @@ static Type *close_type(Type *type, const Env *env)
     type = prune(type);
     switch (type->kind) {
     case TY_RIGID:
-        return force(lookup(env, type->variable))->type;
+        return force(lookup(env, type->variable))->b.type;
     case TY_APP: {
         /* Types made here are never freed, so one without variables in it
            is not made again. */
@@ -529,7 +529,7 @@ Value *make_constructor(const Constructor *constructor)
         return make_con(constructor->tag, 0);
     }
     value = new_value(V_PARTIAL_CON);
-    value->constructor = constructor;
+    value->c.constructor = constructor;
     return value;
 }
 
@@ -537,21 +537,21 @@ Value *make_constructor(const Constructor *constructor)
    one, calls the builtin or builds the constructed value. */
 static Value *apply_partial(const Value *function, Value *argument)
 {
-    int count = function->argument_count;
+    int count = function->a.argument_count;
     Value **arguments = gc_alloc((size_t)(count + 1) * sizeof(Value *));
     Value *result;
 
     if (count > 0) {
-        memcpy(arguments, function->arguments, (size_t)count * sizeof(Value *));
+        memcpy(arguments, function->b.arguments, (size_t)count * sizeof(Value *));
     }
     arguments[count] = argument;
     if (function->kind == V_BUILTIN) {
-        if (count + 1 == function->builtin->arity) {
-            return function->builtin->function(arguments);
+        if (count + 1 == function->c.builtin->arity) {
+            return function->c.builtin->function(arguments);
         }
-    } else if (count + 1 == function->constructor->arity
-                            + function->constructor->existential_count) {
-        const Constructor *constructor = function->constructor;
+    } else if (count + 1 == function->c.constructor->arity
+                            + function->c.constructor->existential_count) {
+        const Constructor *constructor = function->c.constructor;
         int i;
 
         if (constructor->is_newtype) {
@@ -564,16 +564,16 @@ static Value *apply_partial(const Value *function, Value *argument)
             }
         }
         result = new_value(V_CON);
-        result->tag = function->constructor->tag;
-        result->field_count = count + 1;
-        result->fields = arguments;
+        result->tag = function->c.constructor->tag;
+        result->a.field_count = count + 1;
+        result->b.fields = arguments;
         return result;
     }
     result = new_value(function->kind);
-    result->builtin = function->builtin;
-    result->constructor = function->constructor;
-    result->argument_count = count + 1;
-    result->arguments = arguments;
+    result->c.builtin = function->c.builtin;
+    result->c.constructor = function->c.constructor;
+    result->a.argument_count = count + 1;
+    result->b.arguments = arguments;
     return result;
 }
 
@@ -593,7 +593,7 @@ static int matches(const Pattern *pattern, Value *value, Env **env)
     case P_WILDCARD:
         return 1;
     case P_CHAR:
-        return force(value)->number == pattern->number;
+        return force(value)->a.number == pattern->number;
     case P_LITERAL: {
         Value *equals = delay(pattern->equals, *env);
         Value *literal = delay(pattern->literal, *env);
@@ -611,10 +611,10 @@ static int matches(const Pattern *pattern, Value *value, Env **env)
         /* The types the value stores come before its fields. */
         skip = pattern->constructor->existential_count;
         for (i = 0; i < skip; i++) {
-            *env = extend(*env, pattern->existentials[i], value->fields[i]);
+            *env = extend(*env, pattern->existentials[i], value->b.fields[i]);
         }
         for (i = 0; i < pattern->argument_count; i++) {
-            if (!matches(pattern->arguments[i], value->fields[skip + i], env)) {
+            if (!matches(pattern->arguments[i], value->b.fields[skip + i], env)) {
                 return 0;
             }
         }
@@ -658,7 +658,7 @@ static Env *bind_let(const Expr *let, Env *env)
         Env *kept = keep_needed(let->values[i], env);
 
         /* A collection in between may have made the thunk old. */
-        env->values[first + i]->env = kept;
+        env->values[first + i]->c.env = kept;
         gc_written(env->values[first + i]);
     }
     for (i = 0; i < let->strict_count; i++) {
@@ -817,15 +817,15 @@ static Value *run(Expr *expr, Env *env, Value *value)
             }
             expr = NULL;
         } else if (value->kind == V_THUNK) {
-            expr = value->expr;
-            env = value->env;
+            expr = value->a.expr;
+            env = value->c.env;
             if (stack[stack_size - 1].kind == F_UPDATE) {
                 /* The thunk on top of the stack is waiting for exactly
                    this value, so this thunk shares its frame: it becomes
                    that thunk. A loop that ends in a `seq` b, where b is a
                    thunk, would otherwise leave a frame for every turn. */
                 value->kind = V_INDIRECTION;
-                value->result = stack[stack_size - 1].value;
+                value->b.result = stack[stack_size - 1].value;
                 gc_written(value);
             } else {
                 push(F_UPDATE, value);
@@ -836,14 +836,14 @@ static Value *run(Expr *expr, Env *env, Value *value)
                of each part when it is done with it. A parser that keeps
                its input in a variable would otherwise keep all of it until
                the parse is over. */
-            value->expr = NULL;
-            value->env = NULL;
+            value->a.expr = NULL;
+            value->c.env = NULL;
         } else if (value->kind == V_INDIRECTION) {
-            value = value->result;
+            value = value->b.result;
         } else if (value->kind == V_BLACKHOLE) {
             die("<<loop>>");
         } else if (value->kind == V_RAISE) {
-            raise_exception(value->result);
+            raise_exception(value->b.result);
         } else {
             /* A finished value: give it to the frame that is waiting. */
             Frame frame = stack[--stack_size];
@@ -853,12 +853,12 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 return value;
             case F_UPDATE:
                 frame.value->kind = V_INDIRECTION;
-                frame.value->result = value;
+                frame.value->b.result = value;
                 gc_written(frame.value);
                 /* What the expression could see is no longer needed, and
                    must not stay in use because of this. */
-                frame.value->expr = NULL;
-                frame.value->env = NULL;
+                frame.value->a.expr = NULL;
+                frame.value->c.env = NULL;
                 break;
             case F_CASE:
                 env = frame.env;
@@ -866,8 +866,8 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 break;
             case F_APPLY:
                 if (value->kind == V_CLOSURE) {
-                    env = extend(value->env, value->parameter, frame.value);
-                    expr = value->body;
+                    env = extend(value->c.env, value->a.parameter, frame.value);
+                    expr = value->b.body;
                 } else if (value->kind == V_BUILTIN
                            || value->kind == V_PARTIAL_CON) {
                     value = apply_partial(value, frame.value);
@@ -953,7 +953,7 @@ Value *catch_exception(Value *function, Value *argument, Value **exception)
         stack_size--;
         if (stack[stack_size].kind == F_UPDATE) {
             stack[stack_size].value->kind = V_RAISE;
-            stack[stack_size].value->result = raised;
+            stack[stack_size].value->b.result = raised;
             gc_written(stack[stack_size].value);
         }
     }

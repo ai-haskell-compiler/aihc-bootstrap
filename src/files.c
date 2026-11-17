@@ -29,7 +29,7 @@ FILE *handle_stream(long handle)
 
 static FILE *handle_file(Value *value)
 {
-    return handle_stream(force(value)->number);
+    return handle_stream(force(value)->a.number);
 }
 
 static Value *make_byte_string(unsigned char *bytes, long length)
@@ -37,7 +37,7 @@ static Value *make_byte_string(unsigned char *bytes, long length)
     Value *value = make_unshared_int(length);
 
     value->kind = V_BYTES;
-    value->bytes = bytes;
+    value->b.bytes = bytes;
     return value;
 }
 
@@ -48,7 +48,7 @@ Value *builtin_handleOpen(Value **arguments)
 {
     static const char *modes[] = { "rb", "wb", "ab", "r+b" };
     const char *path = c_string(arguments[0], NULL);
-    long mode = force(arguments[1])->number;
+    long mode = force(arguments[1])->a.number;
     FILE *file;
 
     handle_file(make_int(1)); /* makes sure the table is there */
@@ -68,7 +68,7 @@ Value *builtin_handleOpen(Value **arguments)
    Closing a handle twice does nothing, as in GHC. */
 Value *builtin_handleClose(Value **arguments)
 {
-    long handle = force(arguments[0])->number;
+    long handle = force(arguments[0])->a.number;
 
     if (handle >= 3 && handle < handle_count && handles[handle] != NULL) {
         fclose(handles[handle]);
@@ -83,7 +83,7 @@ Value *builtin_handleWrite(Value **arguments)
     FILE *file = handle_file(arguments[0]);
     Value *bytes = force(arguments[1]);
 
-    fwrite(bytes->bytes, 1, (size_t)bytes->number, file);
+    fwrite(bytes->b.bytes, 1, (size_t)bytes->a.number, file);
     return make_io_result(make_con(TAG_UNIT, 0));
 }
 

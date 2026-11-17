@@ -70,10 +70,10 @@ Value *builtin_listDirectory(Value **arguments)
             continue;
         }
         cell = make_con(TAG_CONS, 2);
-        cell->fields[0] = make_string(entry->d_name);
-        cell->fields[1] = *last;
+        cell->b.fields[0] = make_string(entry->d_name);
+        cell->b.fields[1] = *last;
         *last = cell;
-        last = &cell->fields[1];
+        last = &cell->b.fields[1];
     }
     closedir(directory);
     return make_io_result(make_maybe(list));
@@ -158,8 +158,8 @@ static char **string_array(char *first, Value *list)
     list = force(list);
     while (list->tag == TAG_CONS) {
         array = gc_realloc(array, ((size_t)count + 2) * sizeof(char *), 0);
-        array[count++] = c_string(list->fields[0], NULL);
-        list = force(list->fields[1]);
+        array[count++] = c_string(list->b.fields[0], NULL);
+        list = force(list->b.fields[1]);
     }
     array[count] = NULL;
     return array;
@@ -229,7 +229,7 @@ Value *builtin_runProcess(Value **arguments)
 /* sleepMicroseconds :: Int -> IO () */
 Value *builtin_sleepMicroseconds(Value **arguments)
 {
-    long microseconds = force(arguments[0])->number;
+    long microseconds = force(arguments[0])->a.number;
     struct timespec duration;
 
     if (microseconds > 0) {
@@ -277,8 +277,8 @@ Value *builtin_environment(Value **arguments)
     for (i = count - 1; i >= 0; i--) {
         Value *cell = make_con(TAG_CONS, 2);
 
-        cell->fields[0] = make_string(environ[i]);
-        cell->fields[1] = list;
+        cell->b.fields[0] = make_string(environ[i]);
+        cell->b.fields[1] = list;
         list = cell;
     }
     return make_io_result(list);

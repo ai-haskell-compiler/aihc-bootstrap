@@ -76,7 +76,7 @@ static Constructor *constructor_of(Type *type, Value **value, Value ***fields)
         return head->constructors[0];
     }
     *value = force(*value);
-    *fields = (*value)->fields;
+    *fields = (*value)->b.fields;
     return head->constructors[(*value)->tag];
 }
 
@@ -116,7 +116,7 @@ static Value *at_type(const Builtin *builtin, Type *type)
 /* derivedEq :: a -> a -> Bool */
 static Value *derived_eq(Value **arguments)
 {
-    Type *type = force(arguments[0])->type;
+    Type *type = force(arguments[0])->b.type;
     Value *a = arguments[1];
     Value *b = arguments[2];
     Value **a_fields;
@@ -143,7 +143,7 @@ static Value *derived_eq(Value **arguments)
    the same constructor by their fields from left to right. */
 static Value *derived_compare(Value **arguments)
 {
-    Type *type = force(arguments[0])->type;
+    Type *type = force(arguments[0])->b.type;
     Value *a = arguments[1];
     Value *b = arguments[2];
     Value **a_fields;
@@ -178,10 +178,10 @@ static Value *prepend(const char *text, Value *rest)
     while (*text != '\0') {
         Value *cell = make_con(TAG_CONS, 2);
 
-        cell->fields[0] = make_char(utf8_decode(&text));
-        cell->fields[1] = rest;
+        cell->b.fields[0] = make_char(utf8_decode(&text));
+        cell->b.fields[1] = rest;
         *last = cell;
-        last = &cell->fields[1];
+        last = &cell->b.fields[1];
     }
     return list;
 }
@@ -215,8 +215,8 @@ static Value *show_field(Type *type, long precedence, Value *value, Value *rest)
                              something that binds tighter is expected */
 static Value *derived_showsPrec(Value **arguments)
 {
-    Type *type = force(arguments[0])->type;
-    long precedence = force(arguments[1])->number;
+    Type *type = force(arguments[0])->b.type;
+    long precedence = force(arguments[1])->a.number;
     Value *value = arguments[2];
     Value *rest = arguments[3];
     Value **fields;
@@ -275,8 +275,8 @@ static Value *derived_showsPrec(Value **arguments)
 /* derivedToEnum :: Int -> a */
 static Value *derived_toEnum(Value **arguments)
 {
-    TypeCon *head = type_head(force(arguments[0])->type);
-    long number = force(arguments[1])->number;
+    TypeCon *head = type_head(force(arguments[0])->b.type);
+    long number = force(arguments[1])->a.number;
 
     if (number < 0 || number >= head->constructor_count) {
         die("toEnum at %s: %ld is out of range", head->name, number);
@@ -300,10 +300,10 @@ static Value *enumeration(const TypeCon *head, int first, int step)
     for (tag = first; tag >= 0 && tag < head->constructor_count; tag += step) {
         Value *cell = make_con(TAG_CONS, 2);
 
-        cell->fields[0] = make_con(tag, 0);
-        cell->fields[1] = *last;
+        cell->b.fields[0] = make_con(tag, 0);
+        cell->b.fields[1] = *last;
         *last = cell;
-        last = &cell->fields[1];
+        last = &cell->b.fields[1];
     }
     return list;
 }
@@ -311,7 +311,7 @@ static Value *enumeration(const TypeCon *head, int first, int step)
 /* derivedEnumFrom :: a -> [a] */
 static Value *derived_enumFrom(Value **arguments)
 {
-    return enumeration(type_head(force(arguments[0])->type),
+    return enumeration(type_head(force(arguments[0])->b.type),
                        force(arguments[1])->tag, 1);
 }
 
@@ -324,7 +324,7 @@ static Value *derived_enumFromThen(Value **arguments)
     if (first == second) {
         TODO("enumFromThen with the same value twice");
     }
-    return enumeration(type_head(force(arguments[0])->type), first,
+    return enumeration(type_head(force(arguments[0])->b.type), first,
                        second - first);
 }
 
@@ -348,7 +348,7 @@ static Value *derived_bound(Type *type, const char *method)
     }
     value = make_con(constructor->tag, constructor->arity);
     for (i = 0; i < constructor->arity; i++) {
-        value->fields[i] = find_method(prelude_method(method),
+        value->b.fields[i] = find_method(prelude_method(method),
                                        field_type(type, constructor, i));
     }
     return value;
@@ -366,7 +366,7 @@ static Value *derived_bound(Type *type, const char *method)
    is done at once. */
 static Value *derived_append(Value **arguments)
 {
-    Type *type = force(arguments[0])->type;
+    Type *type = force(arguments[0])->b.type;
     Value *a = arguments[1];
     Value *b = arguments[2];
     Value **a_fields;
@@ -381,7 +381,7 @@ static Value *derived_append(Value **arguments)
         Value *append =
             find_method(prelude_method("<>"), field_type(type, constructor, i));
 
-        value->fields[i] = apply(apply(append, a_fields[i]), b_fields[i]);
+        value->b.fields[i] = apply(apply(append, a_fields[i]), b_fields[i]);
     }
     return value;
 }
@@ -393,7 +393,7 @@ static Value *derived_mempty(Type *type)
     int i;
 
     for (i = 0; i < constructor->arity; i++) {
-        value->fields[i] = find_method(prelude_method("mempty"),
+        value->b.fields[i] = find_method(prelude_method("mempty"),
                                        field_type(type, constructor, i));
     }
     return value;
@@ -415,30 +415,30 @@ Value *builtin_deepForce(Value **arguments)
 
     for (;;) {
         value = force(value);
-        if (value->kind != V_CON || value->field_count == 0
+        if (value->kind != V_CON || value->a.field_count == 0
             || value->is_deep) {
             break;
         }
-        for (i = 0; i < value->field_count - 1; i++) {
+        for (i = 0; i < value->a.field_count - 1; i++) {
             Value *field_arguments[2];
 
             field_arguments[0] = NULL;
-            field_arguments[1] = value->fields[i];
+            field_arguments[1] = value->b.fields[i];
             builtin_deepForce(field_arguments);
         }
-        value = value->fields[value->field_count - 1];
+        value = value->b.fields[value->a.field_count - 1];
     }
     /* All of it is evaluated now, so every value along the last fields can
        say so. */
     value = arguments[1];
     for (;;) {
         value = force(value);
-        if (value->kind != V_CON || value->field_count == 0
+        if (value->kind != V_CON || value->a.field_count == 0
             || value->is_deep) {
             break;
         }
         value->is_deep = 1;
-        value = value->fields[value->field_count - 1];
+        value = value->b.fields[value->a.field_count - 1];
     }
     return make_con(TAG_UNIT, 0);
 }
@@ -452,7 +452,7 @@ Value *builtin_deepForce(Value **arguments)
    lib/Data/Data.hs. */
 Value *builtin_dataFields(Value **arguments)
 {
-    Type *type = force(arguments[0])->type;
+    Type *type = force(arguments[0])->b.type;
     Value *value = arguments[1];
     Value **fields;
     Constructor *constructor = constructor_of(type, &value, &fields);
@@ -463,10 +463,10 @@ Value *builtin_dataFields(Value **arguments)
         Value *field = make_con(0, 2);
         Value *cell = make_con(TAG_CONS, 2);
 
-        field->fields[0] = make_type(field_type(type, constructor, i));
-        field->fields[1] = fields[i];
-        cell->fields[0] = field;
-        cell->fields[1] = list;
+        field->b.fields[0] = make_type(field_type(type, constructor, i));
+        field->b.fields[1] = fields[i];
+        cell->b.fields[0] = field;
+        cell->b.fields[1] = list;
         list = cell;
     }
     return list;
@@ -476,7 +476,7 @@ Value *builtin_dataFields(Value **arguments)
    The value with its fields replaced by those of the list. */
 Value *builtin_dataRebuild(Value **arguments)
 {
-    Type *type = force(arguments[0])->type;
+    Type *type = force(arguments[0])->b.type;
     Value *value = arguments[1];
     Value *list = force(arguments[2]);
     Value **fields;
@@ -485,12 +485,12 @@ Value *builtin_dataRebuild(Value **arguments)
     int i;
 
     if (constructor->is_newtype) {
-        return force(force(list->fields[0])->fields[1]);
+        return force(force(list->b.fields[0])->b.fields[1]);
     }
     result = make_con(value->tag, constructor->arity);
     for (i = 0; i < constructor->arity; i++) {
-        result->fields[i] = force(list->fields[0])->fields[1];
-        list = force(list->fields[1]);
+        result->b.fields[i] = force(list->b.fields[0])->b.fields[1];
+        list = force(list->b.fields[1]);
     }
     return result;
 }
@@ -603,10 +603,10 @@ static const Builtin map_at_builtin;
    the type `type`. */
 static Value *derived_fmap_at(Value **arguments)
 {
-    Type *type = force(arguments[0])->type;
+    Type *type = force(arguments[0])->b.type;
 
-    return map_at(type, type_head(type), force(arguments[1])->type,
-                  force(arguments[2])->type, arguments[3], arguments[4]);
+    return map_at(type, type_head(type), force(arguments[1])->b.type,
+                  force(arguments[2])->b.type, arguments[3], arguments[4]);
 }
 
 static const Builtin map_at_builtin = { "derivedFmapAt", 5, derived_fmap_at };
@@ -632,7 +632,7 @@ static Value *map_at(Type *type, const TypeCon *derived, Type *a, Type *b,
         }
         result = make_con(constructor->tag, constructor->arity);
         for (i = 0; i < constructor->arity; i++) {
-            result->fields[i] = map_at(field_type(type, constructor, i),
+            result->b.fields[i] = map_at(field_type(type, constructor, i),
                                        derived, a, b, f, fields[i]);
         }
         return result;
@@ -652,10 +652,10 @@ static Value *map_at(Type *type, const TypeCon *derived, Type *a, Type *b,
 /* derivedFmap :: t -> a -> b -> (a -> b) -> t a -> t b */
 static Value *derived_fmap(Value **arguments)
 {
-    Type *type = force(arguments[0])->type;
+    Type *type = force(arguments[0])->b.type;
 
     return map_at(new_type_application(type, marker()), type_head(type),
-                  force(arguments[1])->type, force(arguments[2])->type,
+                  force(arguments[1])->b.type, force(arguments[2])->b.type,
                   arguments[3], arguments[4]);
 }
 
@@ -665,10 +665,10 @@ static Value *fold_at(Type *type, const TypeCon *derived, Type *a, Type *b,
 /* derivedFoldrAt :: type -> a -> b -> (a -> b -> b) -> x -> b -> b */
 static Value *derived_foldr_at(Value **arguments)
 {
-    Type *type = force(arguments[0])->type;
+    Type *type = force(arguments[0])->b.type;
 
-    return fold_at(type, type_head(type), force(arguments[1])->type,
-                   force(arguments[2])->type, arguments[3], arguments[5],
+    return fold_at(type, type_head(type), force(arguments[1])->b.type,
+                   force(arguments[2])->b.type, arguments[3], arguments[5],
                    arguments[4]);
 }
 
@@ -709,10 +709,10 @@ static Value *fold_at(Type *type, const TypeCon *derived, Type *a, Type *b,
 /* derivedFoldr :: t -> a -> b -> (a -> b -> b) -> b -> t a -> b */
 static Value *derived_foldr(Value **arguments)
 {
-    Type *type = force(arguments[0])->type;
+    Type *type = force(arguments[0])->b.type;
 
     return fold_at(new_type_application(type, marker()), type_head(type),
-                   force(arguments[1])->type, force(arguments[2])->type,
+                   force(arguments[1])->b.type, force(arguments[2])->b.type,
                    arguments[3], arguments[4], arguments[5]);
 }
 
@@ -722,10 +722,10 @@ static Value *traverse_at(Type *type, const TypeCon *derived, Type *a,
 /* derivedTraverseAt :: type -> f -> a -> b -> (a -> f b) -> x -> f y */
 static Value *derived_traverse_at(Value **arguments)
 {
-    Type *type = force(arguments[0])->type;
+    Type *type = force(arguments[0])->b.type;
 
-    return traverse_at(type, type_head(type), force(arguments[2])->type,
-                       force(arguments[1])->type, force(arguments[3])->type,
+    return traverse_at(type, type_head(type), force(arguments[2])->b.type,
+                       force(arguments[1])->b.type, force(arguments[3])->b.type,
                        arguments[4], arguments[5]);
 }
 
@@ -803,11 +803,11 @@ static Value *traverse_at(Type *type, const TypeCon *derived, Type *a,
 /* derivedTraverse :: t -> f -> a -> b -> (a -> f b) -> t a -> f (t b) */
 static Value *derived_traverse(Value **arguments)
 {
-    Type *type = force(arguments[0])->type;
+    Type *type = force(arguments[0])->b.type;
 
     return traverse_at(new_type_application(type, marker()), type_head(type),
-                       force(arguments[2])->type, force(arguments[1])->type,
-                       force(arguments[3])->type, arguments[4], arguments[5]);
+                       force(arguments[2])->b.type, force(arguments[1])->b.type,
+                       force(arguments[3])->b.type, arguments[4], arguments[5]);
 }
 
 /* ---- Choosing the method ---- */

@@ -17,7 +17,7 @@ static Value *make_bytes(const unsigned char *bytes, long length)
     Value *value = make_unshared_int(length);
 
     value->kind = V_BYTES;
-    value->bytes = bytes;
+    value->b.bytes = bytes;
     return value;
 }
 
@@ -43,7 +43,7 @@ Value *make_maybe(Value *value)
         return make_con(TAG_NOTHING, 0);
     }
     result = make_con(TAG_JUST, 1);
-    result->fields[0] = value;
+    result->b.fields[0] = value;
     return result;
 }
 
@@ -61,8 +61,8 @@ char *c_string(Value *list, long *length)
             capacity = capacity * 2 + 64;
             text = gc_realloc(text, (size_t)capacity, 1);
         }
-        used += utf8_encode_exact(force(list->fields[0])->number, text + used);
-        list = force(list->fields[1]);
+        used += utf8_encode_exact(force(list->b.fields[0])->a.number, text + used);
+        list = force(list->b.fields[1]);
     }
     text = gc_realloc(text, (size_t)used + 1, 1);
     text[used] = '\0';
@@ -83,10 +83,10 @@ static Value *string_from_bytes(const unsigned char *bytes, long length)
     while (p < end) {
         Value *cell = make_con(TAG_CONS, 2);
 
-        cell->fields[0] = make_char(utf8_decode(&p));
-        cell->fields[1] = *last;
+        cell->b.fields[0] = make_char(utf8_decode(&p));
+        cell->b.fields[1] = *last;
         *last = cell;
-        last = &cell->fields[1];
+        last = &cell->b.fields[1];
     }
     return list;
 }
@@ -138,8 +138,8 @@ Value *builtin_bytesPack(Value **arguments)
             capacity = capacity * 2 + 64;
             bytes = gc_realloc(bytes, (size_t)capacity, 1);
         }
-        bytes[length++] = (unsigned char)force(list->fields[0])->number;
-        list = force(list->fields[1]);
+        bytes[length++] = (unsigned char)force(list->b.fields[0])->a.number;
+        list = force(list->b.fields[1]);
     }
     return make_bytes(bytes, length);
 }
@@ -151,11 +151,11 @@ Value *builtin_bytesUnpack(Value **arguments)
     Value *list = make_con(TAG_NIL, 0);
     long i;
 
-    for (i = bytes->number - 1; i >= 0; i--) {
+    for (i = bytes->a.number - 1; i >= 0; i--) {
         Value *cell = make_con(TAG_CONS, 2);
 
-        cell->fields[0] = make_int(bytes->bytes[i]);
-        cell->fields[1] = list;
+        cell->b.fields[0] = make_int(bytes->b.bytes[i]);
+        cell->b.fields[1] = list;
         list = cell;
     }
     return list;
@@ -164,20 +164,20 @@ Value *builtin_bytesUnpack(Value **arguments)
 /* bytesLength :: ByteString -> Int */
 Value *builtin_bytesLength(Value **arguments)
 {
-    return make_int(bytes_argument(arguments[0])->number);
+    return make_int(bytes_argument(arguments[0])->a.number);
 }
 
 /* bytesIndex :: ByteString -> Int -> Word8 */
 Value *builtin_bytesIndex(Value **arguments)
 {
     Value *bytes = bytes_argument(arguments[0]);
-    long index = force(arguments[1])->number;
+    long index = force(arguments[1])->a.number;
 
-    if (index < 0 || index >= bytes->number) {
+    if (index < 0 || index >= bytes->a.number) {
         die("ByteString index %ld is out of range (length %ld)", index,
-            bytes->number);
+            bytes->a.number);
     }
-    return make_int(bytes->bytes[index]);
+    return make_int(bytes->b.bytes[index]);
 }
 
 /* ---- Text: bytes that are UTF-8 ----
@@ -191,14 +191,14 @@ Value *builtin_bytesIndex(Value **arguments)
 Value *builtin_textCharAt(Value **arguments)
 {
     Value *bytes = bytes_argument(arguments[0]);
-    long offset = force(arguments[1])->number;
+    long offset = force(arguments[1])->a.number;
     const char *p;
 
-    if (offset < 0 || offset >= bytes->number) {
+    if (offset < 0 || offset >= bytes->a.number) {
         die("Text offset %ld is out of range (%ld bytes)", offset,
-            bytes->number);
+            bytes->a.number);
     }
-    p = (const char *)bytes->bytes + offset;
+    p = (const char *)bytes->b.bytes + offset;
     return make_char(utf8_decode(&p));
 }
 
@@ -217,8 +217,8 @@ Value *builtin_textCount(Value **arguments)
     long count = 0;
     long i;
 
-    for (i = 0; i < bytes->number; i++) {
-        count += starts_character(bytes->bytes[i]);
+    for (i = 0; i < bytes->a.number; i++) {
+        count += starts_character(bytes->b.bytes[i]);
     }
     return make_int(count);
 }
@@ -229,12 +229,12 @@ Value *builtin_textCount(Value **arguments)
 Value *builtin_textOffset(Value **arguments)
 {
     Value *bytes = bytes_argument(arguments[0]);
-    long count = force(arguments[1])->number;
+    long count = force(arguments[1])->a.number;
     long i = 0;
 
-    while (i < bytes->number && count > 0) {
+    while (i < bytes->a.number && count > 0) {
         i++;
-        while (i < bytes->number && !starts_character(bytes->bytes[i])) {
+        while (i < bytes->a.number && !starts_character(bytes->b.bytes[i])) {
             i++;
         }
         count--;
@@ -246,23 +246,23 @@ Value *builtin_textOffset(Value **arguments)
    `length` bytes from `offset`, as far as they exist. */
 Value *builtin_bytesSlice(Value **arguments)
 {
-    long offset = force(arguments[0])->number;
-    long length = force(arguments[1])->number;
+    long offset = force(arguments[0])->a.number;
+    long length = force(arguments[1])->a.number;
     Value *bytes = bytes_argument(arguments[2]);
 
     if (offset < 0) {
         offset = 0;
     }
-    if (offset > bytes->number) {
-        offset = bytes->number;
+    if (offset > bytes->a.number) {
+        offset = bytes->a.number;
     }
     if (length < 0) {
         length = 0;
     }
-    if (length > bytes->number - offset) {
-        length = bytes->number - offset;
+    if (length > bytes->a.number - offset) {
+        length = bytes->a.number - offset;
     }
-    return make_bytes(bytes->bytes + offset, length);
+    return make_bytes(bytes->b.bytes + offset, length);
 }
 
 /* bytesConcat :: [ByteString] -> ByteString */
@@ -274,17 +274,17 @@ Value *builtin_bytesConcat(Value **arguments)
     Value *list = force(arguments[0]);
 
     while (list->tag == TAG_CONS) {
-        Value *bytes = bytes_argument(list->fields[0]);
+        Value *bytes = bytes_argument(list->b.fields[0]);
 
-        if (length + bytes->number > capacity) {
-            capacity = (length + bytes->number) * 2 + 64;
+        if (length + bytes->a.number > capacity) {
+            capacity = (length + bytes->a.number) * 2 + 64;
             result = gc_realloc(result, (size_t)capacity, 1);
         }
-        if (bytes->number > 0) {
-            memcpy(result + length, bytes->bytes, (size_t)bytes->number);
+        if (bytes->a.number > 0) {
+            memcpy(result + length, bytes->b.bytes, (size_t)bytes->a.number);
         }
-        length += bytes->number;
-        list = force(list->fields[1]);
+        length += bytes->a.number;
+        list = force(list->b.fields[1]);
     }
     return make_bytes(result, length);
 }
@@ -295,11 +295,11 @@ Value *builtin_bytesCompare(Value **arguments)
 {
     Value *a = bytes_argument(arguments[0]);
     Value *b = bytes_argument(arguments[1]);
-    long shorter = a->number < b->number ? a->number : b->number;
-    int order = shorter > 0 ? memcmp(a->bytes, b->bytes, (size_t)shorter) : 0;
+    long shorter = a->a.number < b->a.number ? a->a.number : b->a.number;
+    int order = shorter > 0 ? memcmp(a->b.bytes, b->b.bytes, (size_t)shorter) : 0;
 
     if (order == 0) {
-        order = a->number < b->number ? -1 : a->number > b->number ? 1 : 0;
+        order = a->a.number < b->a.number ? -1 : a->a.number > b->a.number ? 1 : 0;
     }
     return make_int(order < 0 ? -1 : order > 0 ? 1 : 0);
 }
@@ -312,10 +312,10 @@ Value *builtin_bytesFind(Value **arguments)
     Value *haystack = bytes_argument(arguments[1]);
     long i;
 
-    for (i = 0; i + needle->number <= haystack->number; i++) {
-        if (needle->number == 0
-            || memcmp(haystack->bytes + i, needle->bytes,
-                      (size_t)needle->number) == 0) {
+    for (i = 0; i + needle->a.number <= haystack->a.number; i++) {
+        if (needle->a.number == 0
+            || memcmp(haystack->b.bytes + i, needle->b.bytes,
+                      (size_t)needle->a.number) == 0) {
             return make_int(i);
         }
     }
@@ -328,7 +328,7 @@ Value *builtin_bytesFind(Value **arguments)
    bytesNew :: Int -> IO ByteString        (all zero) */
 Value *builtin_bytesNew(Value **arguments)
 {
-    long length = force(arguments[0])->number;
+    long length = force(arguments[0])->a.number;
     unsigned char *bytes = gc_alloc_bytes((size_t)(length < 0 ? 0 : length) + 1);
 
     if (length > 0) {
@@ -341,14 +341,14 @@ Value *builtin_bytesNew(Value **arguments)
 Value *builtin_bytesPoke(Value **arguments)
 {
     Value *bytes = bytes_argument(arguments[0]);
-    long index = force(arguments[1])->number;
+    long index = force(arguments[1])->a.number;
 
-    if (index < 0 || index >= bytes->number) {
+    if (index < 0 || index >= bytes->a.number) {
         die("byte index %ld is out of range (length %ld)", index,
-            bytes->number);
+            bytes->a.number);
     }
-    ((unsigned char *)bytes->bytes)[index] =
-        (unsigned char)force(arguments[2])->number;
+    ((unsigned char *)bytes->b.bytes)[index] =
+        (unsigned char)force(arguments[2])->a.number;
     return make_io_result(make_con(TAG_UNIT, 0));
 }
 
@@ -359,17 +359,17 @@ Value *builtin_bytesPoke(Value **arguments)
 Value *builtin_bytesBlit(Value **arguments)
 {
     Value *target = bytes_argument(arguments[0]);
-    long to = force(arguments[1])->number;
+    long to = force(arguments[1])->a.number;
     Value *source = bytes_argument(arguments[2]);
-    long from = force(arguments[3])->number;
-    long count = force(arguments[4])->number;
+    long from = force(arguments[3])->a.number;
+    long count = force(arguments[4])->a.number;
 
     if (count > 0) {
-        if (to < 0 || from < 0 || to + count > target->number
-            || from + count > source->number) {
+        if (to < 0 || from < 0 || to + count > target->a.number
+            || from + count > source->a.number) {
             die("copying %ld bytes goes out of range", count);
         }
-        memmove((unsigned char *)target->bytes + to, source->bytes + from,
+        memmove((unsigned char *)target->b.bytes + to, source->b.bytes + from,
                 (size_t)count);
     }
     return make_io_result(make_con(TAG_UNIT, 0));
@@ -434,7 +434,7 @@ Value *builtin_bytesValidUtf8(Value **arguments)
 {
     Value *bytes = bytes_argument(arguments[0]);
 
-    return make_bool(is_valid_utf8(bytes->bytes, bytes->number));
+    return make_bool(is_valid_utf8(bytes->b.bytes, bytes->a.number));
 }
 
 /* bytesToString :: ByteString -> String        (UTF-8, which must be valid) */
@@ -442,7 +442,7 @@ Value *builtin_bytesToString(Value **arguments)
 {
     Value *bytes = bytes_argument(arguments[0]);
 
-    return string_from_bytes(bytes->bytes, bytes->number);
+    return string_from_bytes(bytes->b.bytes, bytes->a.number);
 }
 
 /* bytesReadFile :: String -> IO (Maybe ByteString) */
@@ -461,7 +461,7 @@ Value *builtin_bytesWriteFile(Value **arguments)
     Value *bytes = bytes_argument(arguments[1]);
 
     return make_io_result(make_bool(write_whole_file(
-        c_string(arguments[0], NULL), "wb", bytes->bytes, bytes->number)));
+        c_string(arguments[0], NULL), "wb", bytes->b.bytes, bytes->a.number)));
 }
 
 /* bytesHPut :: Int -> ByteString -> IO ()
@@ -470,8 +470,8 @@ Value *builtin_bytesHPut(Value **arguments)
 {
     Value *bytes = bytes_argument(arguments[1]);
 
-    fwrite(bytes->bytes, 1, (size_t)bytes->number,
-           handle_stream(force(arguments[0])->number));
+    fwrite(bytes->b.bytes, 1, (size_t)bytes->a.number,
+           handle_stream(force(arguments[0])->a.number));
     return make_io_result(make_con(TAG_UNIT, 0));
 }
 

@@ -24,28 +24,38 @@ enum ValueKind {
                       `result`: evaluating it raises that again */
 };
 
-/* Every kind uses only some of the fields, as with Expr. Everything is boxed:
-   there are no unboxed values anywhere in the interpreter. */
+/* Every kind uses only some of the fields. A value is made often, so it is
+   small: the fields are in three slots, and the kinds that use a slot share
+   it. No kind uses two names in one slot. A thunk's `result` is not in the
+   slot of its `expr` or `env`, which are cleared after it is set (run).
+   Everything is boxed: there are no unboxed values anywhere in the
+   interpreter. */
 struct Value {
-    enum ValueKind kind;
-    long number;            /* V_INT, V_CHAR */
-    int tag;                /* V_CON: index of the constructor in its type */
-    int field_count;        /* V_CON */
-    Value **fields;         /* V_CON */
-    int is_deep;            /* V_CON: every field is evaluated, all the way
+    unsigned char kind;     /* an enum ValueKind */
+    unsigned char is_deep;  /* V_CON: every field is evaluated, all the way
                                down (deepForce). A builtin that changes a
                                field takes it away. */
-    Binding *parameter;     /* V_CLOSURE */
-    Expr *body;             /* V_CLOSURE */
-    Expr *expr;             /* V_THUNK */
-    Env *env;               /* V_CLOSURE, V_THUNK */
-    const Builtin *builtin; /* V_BUILTIN */
-    const Constructor *constructor; /* V_PARTIAL_CON */
-    int argument_count;     /* V_BUILTIN, V_PARTIAL_CON */
-    Value **arguments;      /* V_BUILTIN, V_PARTIAL_CON */
-    Value *result;          /* V_INDIRECTION, V_RAISE */
-    Type *type;             /* V_TYPE: has no TY_RIGID in it */
-    const unsigned char *bytes; /* V_BYTES */
+    int tag;                /* V_CON: index of the constructor in its type */
+    union {
+        long number;            /* V_INT, V_CHAR, V_BYTES */
+        int field_count;        /* V_CON */
+        int argument_count;     /* V_BUILTIN, V_PARTIAL_CON */
+        Binding *parameter;     /* V_CLOSURE */
+        Expr *expr;             /* V_THUNK */
+    } a;
+    union {
+        Value **fields;         /* V_CON */
+        Value **arguments;      /* V_BUILTIN, V_PARTIAL_CON */
+        Expr *body;             /* V_CLOSURE */
+        Value *result;          /* V_INDIRECTION, V_RAISE */
+        Type *type;             /* V_TYPE: has no TY_RIGID in it */
+        const unsigned char *bytes; /* V_BYTES: `number` bytes (bytes.c) */
+    } b;
+    union {
+        Env *env;               /* V_CLOSURE, V_THUNK */
+        const Builtin *builtin; /* V_BUILTIN */
+        const Constructor *constructor; /* V_PARTIAL_CON */
+    } c;
 };
 
 /* Which local variables an environment has, in order: the shape of an

@@ -86,8 +86,8 @@ static void add_block(Word state[4], const unsigned char *block)
 Value *builtin_md5(Value **arguments)
 {
     Value *input = force(arguments[0]);
-    const unsigned char *bytes = input->bytes;
-    unsigned long length = (unsigned long)input->number;
+    const unsigned char *bytes = input->b.bytes;
+    unsigned long length = (unsigned long)input->a.number;
     Word state[4] = { 0x67452301u, 0xefcdab89u, 0x98badcfeu, 0x10325476u };
     unsigned char last[128];
     unsigned char *digest = gc_alloc_bytes(16);
@@ -122,6 +122,6 @@ Value *builtin_md5(Value **arguments)
     }
     result = make_unshared_int(16);
     result->kind = V_BYTES;
-    result->bytes = digest;
+    result->b.bytes = digest;
     return result;
 }

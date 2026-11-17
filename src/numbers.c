@@ -45,7 +45,7 @@ static enum NumberKind number_kind(Value *type_value)
         K_INT, K_INT, K_INTEGER, K_WORD64, K_WORD64, K_WORD32, K_WORD16,
         K_WORD8, K_INT32, K_INT16, K_INT8, K_CHAR, K_DOUBLE, K_FLOAT
     };
-    Type *type = prune(force(type_value)->type);
+    Type *type = prune(force(type_value)->b.type);
     int i;
 
     if (type->kind == TY_CON) {
@@ -111,7 +111,7 @@ static int is_float(enum NumberKind kind)
 
 static double float_operand(enum NumberKind kind, Value *value)
 {
-    long bits = force(value)->number;
+    long bits = force(value)->a.number;
     double d;
     float f;
     unsigned int low = (unsigned int)bits;
@@ -153,7 +153,7 @@ static Value *make_number(enum NumberKind kind, unsigned long bits)
 static long operand(enum NumberKind kind, Value *value)
 {
     (void)kind;
-    return force(value)->number;
+    return force(value)->a.number;
 }
 
 /* Whether either Integer is big. */
@@ -211,8 +211,8 @@ static Value *arithmetic(char operation, Value **arguments)
         long result;
 
         if (!any_big(arguments[1], arguments[2])
-            && fits(operation, force(arguments[1])->number,
-                    force(arguments[2])->number, &result)) {
+            && fits(operation, force(arguments[1])->a.number,
+                    force(arguments[2])->a.number, &result)) {
             return make_int(result);
         }
         return integer_arithmetic(operation, arguments[1], arguments[2]);
@@ -418,7 +418,7 @@ static int is_signed(enum NumberKind kind)
 static Value *shift(int left, Value **arguments)
 {
     enum NumberKind kind = number_kind(arguments[0]);
-    long count = force(arguments[2])->number;
+    long count = force(arguments[2])->a.number;
     unsigned long bits;
     long a;
 
@@ -476,27 +476,27 @@ Value *builtin_numConvert(Value **arguments)
         if (from == K_INTEGER) {
             integer_top_bits(value, &top, &shift, &negative);
         } else if (from == K_WORD64) {
-            top = (unsigned long)value->number;
+            top = (unsigned long)value->a.number;
         } else {
-            negative = value->number < 0;
-            top = negative ? 0ul - (unsigned long)value->number
-                           : (unsigned long)value->number;
+            negative = value->a.number < 0;
+            top = negative ? 0ul - (unsigned long)value->a.number
+                           : (unsigned long)value->a.number;
         }
         d = to == K_FLOAT ? (double)(float)top : (double)top;
         d = ldexp(d, (int)(shift > 100000 ? 100000 : shift));
         return make_float(to, negative ? -d : d);
     }
     if (to == K_INTEGER) {
-        if (from == K_WORD64 && value->number < 0) {
+        if (from == K_WORD64 && value->a.number < 0) {
             /* A Word64 of 2^63 or more. */
-            return integer_from_unsigned((unsigned long)value->number);
+            return integer_from_unsigned((unsigned long)value->a.number);
         }
-        return from == K_INTEGER ? value : make_int(value->number);
+        return from == K_INTEGER ? value : make_int(value->a.number);
     }
     if (from == K_INTEGER) {
         return make_number(to, integer_low_bits(value));
     }
-    return make_number(to, (unsigned long)value->number);
+    return make_number(to, (unsigned long)value->a.number);
 }
 
 /* numShow :: a -> String
@@ -511,9 +511,9 @@ Value *builtin_numShow(Value **arguments)
         return make_string(integer_show(value));
     }
     if (kind == K_WORD64) {
-        sprintf(text, "%lu", (unsigned long)value->number);
+        sprintf(text, "%lu", (unsigned long)value->a.number);
     } else {
-        sprintf(text, "%ld", value->number);
+        sprintf(text, "%ld", value->a.number);
     }
     return make_string(text);
 }
@@ -570,8 +570,8 @@ Value *builtin_floatExponent(Value **arguments)
 Value *builtin_floatEncode(Value **arguments)
 {
     enum NumberKind kind = number_kind(arguments[0]);
-    long mantissa = force(arguments[1])->number;
-    long exponent = force(arguments[2])->number;
+    long mantissa = force(arguments[1])->a.number;
+    long exponent = force(arguments[2])->a.number;
 
     if (exponent > 100000) {
         exponent = 100000;
@@ -589,7 +589,7 @@ Value *builtin_floatClass(Value **arguments)
     enum NumberKind kind = number_kind(arguments[0]);
     double d = float_operand(kind, arguments[1]);
     double smallest = kind == K_DOUBLE ? ldexp(1.0, -1022) : ldexp(1.0, -126);
-    long bits = force(arguments[1])->number;
+    long bits = force(arguments[1])->a.number;
 
     if (d != d) {
         return make_int(1);
@@ -609,7 +609,7 @@ Value *builtin_floatClass(Value **arguments)
 Value *builtin_floatMath(Value **arguments)
 {
     enum NumberKind kind = number_kind(arguments[0]);
-    long function = force(arguments[1])->number;
+    long function = force(arguments[1])->a.number;
     double d = float_operand(kind, arguments[2]);
 
     switch (function) {
