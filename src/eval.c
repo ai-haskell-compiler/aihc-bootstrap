@@ -571,29 +571,33 @@ Value *make_constructor(const Constructor *constructor)
     return value;
 }
 
-/* Gives a builtin or a constructor one more argument. If that was the last
-   one, calls the builtin or builds the constructed value. */
-static Value *apply_partial(const Value *function, Value *argument)
+/* How many arguments a builtin or a constructor takes in all. */
+static int arity_of(const Value *function)
 {
-    int count = function->a.argument_count;
-    Value **arguments = gc_alloc((size_t)(count + 1) * sizeof(Value *));
+    if (function->kind == V_BUILTIN) {
+        return function->c.builtin->arity;
+    }
+    return function->c.constructor->arity
+           + function->c.constructor->existential_count;
+}
+
+/* The builtin or constructor given `count` arguments in all, all of them
+   in `arguments`, a new array: calls the builtin or builds the value if
+   that is all of them. */
+static Value *give_arguments(const Value *function, Value **arguments,
+                             int count)
+{
     Value *result;
 
-    if (count > 0) {
-        memcpy(arguments, function->b.arguments, (size_t)count * sizeof(Value *));
-    }
-    arguments[count] = argument;
-    if (function->kind == V_BUILTIN) {
-        if (count + 1 == function->c.builtin->arity) {
-            return function->c.builtin->function(arguments);
-        }
-    } else if (count + 1 == function->c.constructor->arity
-                            + function->c.constructor->existential_count) {
+    if (count == arity_of(function)) {
         const Constructor *constructor = function->c.constructor;
         int i;
 
+        if (function->kind == V_BUILTIN) {
+            return function->c.builtin->function(arguments);
+        }
         if (constructor->is_newtype) {
-            return argument;
+            return arguments[count - 1];
         }
         for (i = 0; i < constructor->arity; i++) {
             if (constructor->field_strict != NULL
@@ -602,17 +606,60 @@ static Value *apply_partial(const Value *function, Value *argument)
             }
         }
         result = new_value(V_CON);
-        result->tag = function->c.constructor->tag;
-        result->a.field_count = count + 1;
+        result->tag = constructor->tag;
+        result->a.field_count = count;
         result->b.fields = arguments;
         return result;
     }
     result = new_value(function->kind);
     result->c.builtin = function->c.builtin;
     result->c.constructor = function->c.constructor;
-    result->a.argument_count = count + 1;
+    result->a.argument_count = count;
     result->b.arguments = arguments;
     return result;
+}
+
+/* Gives a builtin or a constructor one more argument. */
+static Value *apply_partial(const Value *function, Value *argument)
+{
+    int count = function->a.argument_count;
+    Value **arguments = gc_alloc((size_t)(count + 1) * sizeof(Value *));
+
+    if (count > 0) {
+        memcpy(arguments, function->b.arguments, (size_t)count * sizeof(Value *));
+    }
+    arguments[count] = argument;
+    return give_arguments(function, arguments, count + 1);
+}
+
+/* Gives a builtin or a constructor `argument` and, if the machine's stack
+   has the rest of the arguments it needs waiting on top (F_APPLY), those
+   too: one array, instead of a partial application for each. */
+static Value *apply_waiting(const Value *function, Value *argument)
+{
+    int count = function->a.argument_count;
+    int total = arity_of(function);
+    int waiting = total - count - 1;
+    Value **arguments;
+    int i;
+
+    if (waiting <= 0 || stack_size < waiting) {
+        return apply_partial(function, argument);
+    }
+    for (i = 1; i <= waiting; i++) {
+        if (stack[stack_size - i].kind != F_APPLY) {
+            return apply_partial(function, argument);
+        }
+    }
+    arguments = gc_alloc((size_t)total * sizeof(Value *));
+    if (count > 0) {
+        memcpy(arguments, function->b.arguments, (size_t)count * sizeof(Value *));
+    }
+    arguments[count] = argument;
+    for (i = 1; i <= waiting; i++) {
+        arguments[count + i] = stack[--stack_size].value;
+    }
+    return give_arguments(function, arguments, total);
 }
 
 /* Whether the value has the shape of the pattern. Adds the variables of the
@@ -810,6 +857,16 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 expr = expr->scrutinee;
                 continue;
             case E_LAMBDA:
+                if (stack[stack_size - 1].kind == F_APPLY) {
+                    /* The closure would be applied at once: its parameter
+                       is bound without making it. A function of several
+                       arguments, \a -> \b -> ..., takes them all this
+                       way. */
+                    stack_size--;
+                    env = extend(env, expr->local, stack[stack_size].value);
+                    expr = expr->body;
+                    continue;
+                }
                 value = make_closure(expr, keep_needed(expr, env));
                 break;
             case E_CONSTRUCTOR:
@@ -908,7 +965,7 @@ static Value *run(Expr *expr, Env *env, Value *value)
                     expr = value->b.body;
                 } else if (value->kind == V_BUILTIN
                            || value->kind == V_PARTIAL_CON) {
-                    value = apply_partial(value, frame.value);
+                    value = apply_waiting(value, frame.value);
                 } else {
                     die("applying something that is not a function");
                 }
