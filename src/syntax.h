@@ -150,6 +150,10 @@ enum {
    is needed. */
 struct Binding {
     const char *name;
+    /* The last shape of environment this variable was added to, and the
+       shape that made: see child_shape in eval.c. */
+    const void *shape_parent;
+    const void *shape_child;
     Type *type; /* of a local variable, during type inference */
     int is_fractional; /* a type variable that a signature says is of a
                           class of fractional numbers: see infer.c */
@@ -226,6 +230,11 @@ typedef struct Needed {
     int known;
     int count;
     Binding **bindings;
+    /* Where they are in an environment of the shape `from`, and the shape
+       of the environment with just them: see keep in eval.c. */
+    const void *from;
+    const void *to;
+    int *positions;
 } Needed;
 
 /* Every kind uses only some of the fields. One flat struct is easier to read
@@ -273,6 +282,8 @@ struct Expr {
     Needed needed;             /* the variables the expression mentions;
                                   set by the evaluator, see keep_needed */
     Needed alternatives_needed; /* E_CASE: those its alternatives mention */
+    const void *lookup_shape;  /* E_LOCAL: where the variable was the last */
+    int lookup_index;          /* time, in an environment of that shape */
 };
 
 /* A qualifier that makes a name refer to the Prelude whatever is in scope.

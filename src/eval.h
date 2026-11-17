@@ -48,11 +48,26 @@ struct Value {
     const unsigned char *bytes; /* V_BYTES */
 };
 
-/* The values of the local variables in scope, innermost first. */
+/* Which local variables an environment has, in order: the shape of an
+   environment. Shapes are made once and shared. The shapes that have one
+   more variable than this one are its children, so that the same shape is
+   found again and not made again. The empty environment is NULL. */
+typedef struct Shape Shape;
+struct Shape {
+    int count;
+    Binding **bindings;
+    Shape *children;
+    Shape *next_child;
+};
+
+/* The values of the local variables in scope, the innermost last. An
+   environment is never changed once it is made; one with another variable
+   is a copy. Copying a few pointers costs less than following a list of
+   them, and a thunk keeps only the variables it needs (see keep_needed),
+   so environments are short. */
 struct Env {
-    Binding *binding;
-    Value *value;
-    Env *outer;
+    const Shape *shape;
+    Value *values[1]; /* shape->count of them */
 };
 
 /* A C function callable from Haskell through `foreign import prim`. It gets
@@ -120,7 +135,7 @@ void raise_exception(Value *exception);
 void *gc_alloc(size_t size);
 void *gc_alloc_bytes(size_t size);
 Value *gc_alloc_value(void);
-Env *gc_alloc_env(void);
+Env *gc_alloc_env(int count);
 void *gc_realloc(void *old, size_t size, int bytes);
 void gc_start(const void *bottom);
 void gc_collect(void);

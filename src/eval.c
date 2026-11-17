@@ -144,25 +144,109 @@ Value *make_string(const char *string)
     return list;
 }
 
+/* ---- Environments ---- */
+
+static Shape empty_shape;
+
+/* The shape with one more variable. */
+static const Shape *child_shape(const Shape *parent, Binding *binding)
+{
+    Shape *child;
+
+    /* A variable is mostly added to environments of one shape. The empty
+       shape has a child for every parameter of a function. */
+    if (binding->shape_parent == parent) {
+        return binding->shape_child;
+    }
+    for (child = parent->children; child != NULL; child = child->next_child) {
+        if (child->bindings[parent->count] == binding) {
+            binding->shape_parent = parent;
+            binding->shape_child = child;
+            return child;
+        }
+    }
+    child = xmalloc(sizeof(Shape));
+    child->count = parent->count + 1;
+    child->bindings = xmalloc((size_t)child->count * sizeof(Binding *));
+    if (parent->count > 0) {
+        memcpy(child->bindings, parent->bindings,
+               (size_t)parent->count * sizeof(Binding *));
+    }
+    child->bindings[parent->count] = binding;
+    child->children = NULL;
+    child->next_child = parent->children;
+    ((Shape *)parent)->children = child;
+    binding->shape_parent = parent;
+    binding->shape_child = child;
+    return child;
+}
+
+static const Shape *shape_of(const Env *env)
+{
+    return env != NULL ? env->shape : &empty_shape;
+}
+
+/* A new environment of the shape, with the values of `outer` first and
+   room for the others. */
+static Env *new_env(const Shape *shape, const Env *outer)
+{
+    Env *env = gc_alloc_env(shape->count);
+
+    if (outer != NULL) {
+        memcpy(env->values, outer->values,
+               (size_t)outer->shape->count * sizeof(Value *));
+    }
+    env->shape = shape;
+    return env;
+}
+
 static Env *extend(Env *outer, Binding *binding, Value *value)
 {
-    Env *env = gc_alloc_env();
+    Env *env = new_env(child_shape(shape_of(outer), binding), outer);
 
-    env->binding = binding;
-    env->value = value;
-    env->outer = outer;
+    env->values[env->shape->count - 1] = value;
     return env;
+}
+
+/* Where the variable is in an environment of the shape, or -1. The
+   innermost one counts, though a variable is bound only once in an
+   environment. */
+static int position(const Shape *shape, const Binding *binding)
+{
+    int i;
+
+    for (i = shape->count - 1; i >= 0; i--) {
+        if (shape->bindings[i] == binding) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 static Value *lookup(const Env *env, const Binding *binding)
 {
-    for (; env != NULL; env = env->outer) {
-        if (env->binding == binding) {
-            return env->value;
-        }
+    int i = position(shape_of(env), binding);
+
+    if (i < 0) {
+        die("variable %s is not in the environment", binding->name);
     }
-    die("variable %s is not in the environment", binding->name);
-    return NULL;
+    return env->values[i];
+}
+
+/* The value of the variable of an E_LOCAL. An expression is mostly
+   evaluated in environments of one shape, so where the variable is is
+   remembered. */
+static Value *lookup_local(Expr *expr, const Env *env)
+{
+    if (env != NULL && env->shape == expr->lookup_shape) {
+        return env->values[expr->lookup_index];
+    }
+    expr->lookup_index = position(shape_of(env), expr->local);
+    if (expr->lookup_index < 0) {
+        die("variable %s is not in the environment", expr->local->name);
+    }
+    expr->lookup_shape = shape_of(env);
+    return env->values[expr->lookup_index];
 }
 
 /* ---- What an expression needs of its environment ---- */
@@ -293,21 +377,39 @@ static void note_expr(Needed *owner, const Expr *expr)
     }
 }
 
-/* An environment with just the variables in `needed`. */
-static Env *keep(const Needed *needed, Env *env)
+/* An environment with just the variables in `needed`. Those that are not
+   in `env` are bound inside the expression, and are left out. Where the
+   others are is worked out for one shape of `env` at a time, which is
+   mostly the only one. */
+static Env *keep(Needed *needed, Env *env)
 {
-    Env *kept = NULL;
+    const Shape *from = shape_of(env);
+    const Shape *to;
+    Env *kept;
     int i;
 
-    for (i = 0; i < needed->count; i++) {
-        const Env *cell = env;
+    if (needed->from != from || needed->positions == NULL) {
+        to = &empty_shape;
+        needed->positions =
+            xrealloc(needed->positions, (size_t)(needed->count + 1) * sizeof(int));
+        for (i = 0; i < needed->count; i++) {
+            int place = position(from, needed->bindings[i]);
 
-        while (cell != NULL && cell->binding != needed->bindings[i]) {
-            cell = cell->outer;
+            if (place >= 0) {
+                needed->positions[to->count] = place;
+                to = child_shape(to, needed->bindings[i]);
+            }
         }
-        if (cell != NULL) {
-            kept = extend(kept, needed->bindings[i], cell->value);
-        }
+        needed->from = from;
+        needed->to = to;
+    }
+    to = needed->to;
+    if (to->count == 0) {
+        return NULL;
+    }
+    kept = new_env(to, NULL);
+    for (i = 0; i < to->count; i++) {
+        kept->values[i] = env->values[needed->positions[i]];
     }
     return kept;
 }
@@ -343,7 +445,7 @@ static Env *keep_for_alternatives(Expr *expr, Env *env)
 static Value *delay(Expr *expr, Env *env)
 {
     if (expr->kind == E_LOCAL) {
-        return lookup(env, expr->local);
+        return lookup_local(expr, env);
     }
     if (expr->kind == E_TYPE && prune(expr->type)->kind == TY_RIGID) {
         return lookup(env, prune(expr->type)->variable);
@@ -492,22 +594,23 @@ static int matches(const Pattern *pattern, Value *value, Env **env)
    on that to let go of what the expression refers to. */
 static Env *bind_let(const Expr *let, Env *env)
 {
-    Env **cells = gc_alloc((size_t)let->binding_count * sizeof(Env *) + 1);
+    const Shape *shape = shape_of(env);
+    int first = shape->count;
     int i;
 
     for (i = 0; i < let->binding_count; i++) {
-        env = extend(env, let->bindings[i], NULL);
-        cells[i] = env;
+        shape = child_shape(shape, let->bindings[i]);
     }
+    env = new_env(shape, env);
     /* A definition may mention any of the bindings, so all of them get
        their value before any of them gets its environment. */
     for (i = 0; i < let->binding_count; i++) {
-        cells[i]->value = let->values[i]->kind == E_LAMBDA
+        env->values[first + i] = let->values[i]->kind == E_LAMBDA
             ? make_closure(let->values[i], NULL)
             : make_thunk(let->values[i], NULL);
     }
     for (i = 0; i < let->binding_count; i++) {
-        cells[i]->value->env = keep_needed(let->values[i], env);
+        env->values[first + i]->env = keep_needed(let->values[i], env);
     }
     for (i = 0; i < let->strict_count; i++) {
         force(lookup(env, let->strict[i]));
@@ -626,7 +729,7 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 value = make_constructor(expr->constructor);
                 break;
             case E_LOCAL:
-                value = lookup(env, expr->local);
+                value = lookup_local(expr, env);
                 break;
             case E_GLOBAL:
                 value = global_value(expr->global);

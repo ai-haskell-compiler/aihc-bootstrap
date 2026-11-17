@@ -265,9 +265,13 @@ static void mark_from_roots(void)
             gc_mark(value->bytes);
         } else if (cell.state & CELL_ENV) {
             const Env *env = (const Env *)cell.cell;
+            int i;
 
-            gc_mark(env->value);
-            gc_mark(env->outer);
+            /* The shape is not set yet if the collection came while the
+               environment was being made. */
+            for (i = 0; env->shape != NULL && i < env->shape->count; i++) {
+                gc_mark(env->values[i]);
+            }
         } else {
             gc_mark_range(cell.cell, cell.cell + cell.size);
         }
@@ -431,9 +435,10 @@ Value *gc_alloc_value(void)
     return allocate(sizeof(Value), CELL_VALUE);
 }
 
-Env *gc_alloc_env(void)
+Env *gc_alloc_env(int count)
 {
-    return allocate(sizeof(Env), CELL_ENV);
+    return allocate(sizeof(Env) + (size_t)(count - 1) * sizeof(Value *),
+                    CELL_ENV);
 }
 
 /* The memory made at least `size` bytes long, keeping what is in it. `old`
