@@ -1154,6 +1154,14 @@ static Value *run(Expr *expr, Env *env, Value *value)
 
 Value *force(Value *value)
 {
+    /* Most values are evaluated already: the machine is not needed. */
+    while (value->kind == V_INDIRECTION) {
+        value = value->b.result;
+    }
+    if (value->kind != V_THUNK && value->kind != V_BLACKHOLE
+        && value->kind != V_RAISE) {
+        return value;
+    }
     push(F_STOP, NULL);
     return run(NULL, NULL, value);
 }
