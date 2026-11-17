@@ -147,11 +147,19 @@ Value *make_io_result(Value *result)
     return box;
 }
 
+/* Types are never freed, and a type has no variables in it at run time, so
+   each has one value, outside the collector's memory. */
 Value *make_type(Type *type)
 {
-    Value *value = new_value(V_TYPE);
+    Value *value = type->value;
 
-    value->b.type = type;
+    if (value == NULL) {
+        value = xmalloc(sizeof(Value));
+        memset(value, 0, sizeof(Value));
+        value->kind = V_TYPE;
+        value->b.type = type;
+        type->value = value;
+    }
     return value;
 }
 
@@ -485,16 +493,40 @@ static Env *keep_for_alternatives(Expr *expr, Env *env)
    is a type variable: a function that calls itself passes its own type
    on, and nothing ever looks at it, so a thunk for it would refer to the
    thunk of the call before, and that to the one before it. */
+static Type *close_type(Type *type, const Env *env);
+
 static Value *delay(Expr *expr, Env *env)
 {
-    if (expr->kind == E_LOCAL) {
+    switch (expr->kind) {
+    case E_LOCAL:
         return lookup_local(expr, env);
-    }
-    if (expr->kind == E_TYPE && prune(expr->type)->kind == TY_RIGID) {
-        return lookup(env, prune(expr->type)->variable);
-    }
-    if (expr->kind == E_LAMBDA) {
+    case E_TYPE:
+        if (prune(expr->type)->kind == TY_RIGID) {
+            return lookup(env, prune(expr->type)->variable);
+        }
+        /* What a type's variables stand for are types too, which are
+           quickly found: no thunk is worth making for it. */
+        return make_type(close_type(expr->type, env));
+    case E_LAMBDA:
         return make_closure(expr, keep_needed(expr, env));
+    case E_CONSTRUCTOR:
+        return make_constructor(expr->constructor);
+    case E_CHAR:
+        return make_char(expr->number);
+    case E_INT:
+        if (expr->big == 0) {
+            return make_int(expr->number);
+        }
+        break;
+    case E_GLOBAL:
+        /* A global is worked out the first time it is evaluated, which
+           this is not. */
+        if (expr->global->value != NULL) {
+            return expr->global->value;
+        }
+        break;
+    default:
+        break;
     }
     return make_thunk(expr, keep_needed(expr, env));
 }

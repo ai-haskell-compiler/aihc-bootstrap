@@ -51,6 +51,8 @@ struct Type {
     Binding **variables;  /* TY_FORALL */
     Type *body;           /* TY_FORALL */
     Type *next_same_hash; /* TY_APP: see new_type_application */
+    struct Value *value;  /* the type as a value, once one is made
+                             (make_type in eval.c) */
 };
 
 /* forall variables. type */
