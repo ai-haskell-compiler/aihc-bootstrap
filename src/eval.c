@@ -1098,8 +1098,30 @@ static Value *run(const Code *code, int base, Value *value)
             callee = function->a.function;
             reserve(target + callee->slot_count);
             if (at != target) {
-                memmove(locals + target, locals + at,
-                        (size_t)argc * sizeof(Value *));
+                /* A few pointers, moved down: a call of memmove costs
+                   more than moving them. */
+                Value **to = locals + target;
+                Value **from = locals + at;
+
+                if (argc <= 4) {
+                    Value *first = from[0];
+                    Value *second = argc > 1 ? from[1] : NULL;
+                    Value *third = argc > 2 ? from[2] : NULL;
+                    Value *fourth = argc > 3 ? from[3] : NULL;
+
+                    to[0] = first;
+                    if (argc > 1) {
+                        to[1] = second;
+                    }
+                    if (argc > 2) {
+                        to[2] = third;
+                    }
+                    if (argc > 3) {
+                        to[3] = fourth;
+                    }
+                } else {
+                    memmove(to, from, (size_t)argc * sizeof(Value *));
+                }
             }
             for (i = 0; i < callee->capture_count; i++) {
                 locals[target + callee->arity + i] = function->b.fields[i];
@@ -1115,9 +1137,26 @@ static Value *run(const Code *code, int base, Value *value)
     start:
         /* The locals of `callee` start at `base`, with its parameters and
            what it captured in place. */
-        for (i = callee->arity + callee->capture_count;
-             i < callee->slot_count; i++) {
-            locals[base + i] = NULL;
+        {
+            /* Mostly a slot or two: again not worth a call. */
+            Value **slot = locals + base + callee->arity
+                           + callee->capture_count;
+            int count = callee->slot_count - callee->arity
+                        - callee->capture_count;
+
+            if (count <= 3) {
+                if (count > 0) {
+                    slot[0] = NULL;
+                }
+                if (count > 1) {
+                    slot[1] = NULL;
+                }
+                if (count > 2) {
+                    slot[2] = NULL;
+                }
+            } else {
+                memset(slot, 0, (size_t)count * sizeof(Value *));
+            }
         }
         sp = base + callee->slot_count;
         code = callee->body;
