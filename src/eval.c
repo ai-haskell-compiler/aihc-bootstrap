@@ -714,6 +714,103 @@ static Value *quick_primitive(const Code *code, int base)
     return number_primitive(code->tag, code->slot, a, b);
 }
 
+/* Whether the call can be run by quick_call: it is of a top-level
+   function that only takes its arguments apart (Function.is_leaf), with
+   all its arguments, and those the function looks at are in slots or
+   constants. Sets call->tag to the answer once the function has a value. */
+static int is_quick_call(const Code *call)
+{
+    const Function *function;
+    Value *value;
+    int quick = 1;
+    int i;
+
+    if (call->kind != C_CALL || call->first->kind != C_GLOBAL) {
+        ((Code *)call)->tag = -1;
+        return 0;
+    }
+    value = call->first->u.global->value;
+    if (value == NULL) {
+        return 0;
+    }
+    function = value->a.function;
+    if (value->kind != V_CLOSURE || !function->is_leaf
+        || function->arity != call->count) {
+        quick = 0;
+    }
+    for (i = 0; quick && i < call->count; i++) {
+        if (((function->leaf_reads >> i) & 1) != 0 && call->slots[i] < 0
+            && call->codes[i]->kind != C_CONST) {
+            quick = 0;
+        }
+    }
+    ((Code *)call)->tag = quick ? 1 : -1;
+    return quick;
+}
+
+/* What a call that is_quick_call gives: the function is run right here,
+   on slots of its own, without the steps of a call. NULL if the function
+   needs a value evaluated that is not: then the call is made as any
+   other. The result may be a thunk. */
+static Value *quick_call(const Code *call, int base)
+{
+    Value *slots[LEAF_SLOTS];
+    const Function *function = call->first->u.global->value->a.function;
+    const Code *code;
+    Value *value;
+    int i;
+
+    for (i = 0; i < call->count; i++) {
+        slots[i] = call->slots[i] >= 0 ? SLOT(call->slots[i])
+            : call->codes[i]->kind == C_CONST ? call->codes[i]->u.value
+            : NULL;
+    }
+    for (code = function->body;;) {
+        switch (code->kind) {
+        case C_LOCAL:
+            return slots[code->slot];
+        case C_CONST:
+            return code->u.value;
+        case C_EVAL:
+            value = slots[code->first->slot];
+            while (value->kind == V_INDIRECTION) {
+                value = value->b.result;
+            }
+            if (value->kind >= V_THUNK) {
+                return NULL;
+            }
+            slots[code->slot] = value;
+            code = code->next;
+            break;
+        case C_FIELDS:
+            value = slots[code->slot];
+            for (i = 0; i < code->count; i++) {
+                slots[code->tag + i] = value->b.fields[code->slots[i]];
+            }
+            code = code->next;
+            break;
+        case C_TEST:
+            code = slots[code->slot]->tag == code->tag ? code->first
+                                                       : code->next;
+            break;
+        case C_TEST_CHAR:
+            code = slots[code->slot]->a.number == code->tag ? code->first
+                                                            : code->next;
+            break;
+        case C_SWITCH:
+            code = code->codes[slots[code->slot]->tag] != NULL
+                ? code->codes[slots[code->slot]->tag] : code->next;
+            break;
+        default:
+            return NULL;
+        }
+    }
+}
+
+/* Whether to try quick_call for the call. */
+#define IS_QUICK(call) \
+    ((call)->tag > 0 || ((call)->tag == 0 && is_quick_call(call)))
+
 /* The machine is in one of two states:
      - code != NULL: running `code`, whose slots are the locals from `base`
        on; `sp` is where those slots end;
@@ -939,6 +1036,12 @@ static Value *run(const Code *code, int base, Value *value)
             }
             /* fall through */
         case C_CALL:
+            if (code->kind == C_CALL && IS_QUICK(code)) {
+                value = quick_call(code, base);
+                if (value != NULL) {
+                    break;
+                }
+            }
             /* The last thing the function does: the function that is
                called takes its place. */
             call = code;
@@ -958,6 +1061,13 @@ static Value *run(const Code *code, int base, Value *value)
                 }
                 /* fall through */
             case C_CALL:
+                if (code->first->kind == C_CALL && IS_QUICK(code->first)) {
+                    value = quick_call(code->first, base);
+                    if (value != NULL) {
+                        /* As a value that takes no work, below. */
+                        break;
+                    }
+                }
                 call = code->first;
                 goto call;
             case C_ENTER:
@@ -1063,12 +1173,29 @@ static Value *run(const Code *code, int base, Value *value)
                        && argument->u.function->arity == 0
                        && IS_STRICT(strict, index)) {
                 if (argument->first != NULL) {
-                    if (argument->first->kind == C_PRIM) {
-                        given = quick_primitive(argument->first, base);
-                        if (given != NULL) {
+                    given = argument->first->kind == C_PRIM
+                        ? quick_primitive(argument->first, base)
+                        : IS_QUICK(argument->first)
+                            ? quick_call(argument->first, base) : NULL;
+                    if (given != NULL) {
+                        /* The result of a call may be a thunk. */
+                        while (given->kind == V_INDIRECTION) {
+                            given = given->b.result;
+                        }
+                        if (given->kind < V_THUNK) {
                             locals[sp++] = given;
                             continue;
                         }
+                        LET_GO(argument);
+                        frame = push(F_ARGUMENT, sp);
+                        frame->base = base;
+                        frame->code = eval != NULL ? eval : call;
+                        frame->count = index;
+                        frame->value = function;
+                        frame->tail = tail;
+                        value = given;
+                        code = NULL;
+                        break;
                     }
                     /* What would be a thunk of a call: the call is made
                        here, and its result is the argument. */

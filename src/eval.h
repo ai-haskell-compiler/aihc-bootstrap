@@ -105,7 +105,9 @@ enum CodeKind {
     C_INTEGER,   /* a literal beyond a small number: see Expr.big */
     C_CALL,      /* `first` (a C_LOCAL, C_CONST, C_GLOBAL or C_METHOD)
                     applied to the `count` arguments `codes`; `slots` has
-                    the slot of each that is a C_LOCAL, else -1. An argument
+                    the slot of each that is a C_LOCAL, else -1; `tag` is
+                    1 if it can be run by quick_call (eval.c), -1 if not,
+                    0 while that is not known. An argument
                     that the function always evaluates is evaluated before
                     the call, in place if it is a call itself, and then
                     lets go of slots as a C_EVAL does. */
@@ -164,6 +166,8 @@ struct Code {
     int id;                   /* compile.c: its number in its function */
 };
 
+#define LEAF_SLOTS 8 /* the most slots a leaf function has */
+
 /* A function, or the code of a thunk (no parameters). Its locals are
    `slot_count` slots: first the parameters, then the captured variables,
    then what the body binds. */
@@ -176,6 +180,11 @@ struct Function {
                         parameter lowest. An argument for one of them is
                         evaluated before the call, and no thunk is made
                         for it. */
+    int is_leaf;     /* it only takes its arguments apart: its code has no
+                        call in it and makes nothing, and needs few
+                        slots. The machine runs such a function without
+                        the steps of a call (quick_call in eval.c). */
+    unsigned leaf_reads; /* is_leaf: which parameters it looks at */
     Code *body;      /* NULL for the code of a thunk that has not been run
                         yet: it is compiled when it first is
                         (compile_body), from what follows */

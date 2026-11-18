@@ -655,14 +655,38 @@ static Code *compile_primitive(Scope *scope, const Expr *head,
     return code;
 }
 
+/* A number literal at a type of small numbers that is known here: the
+   number itself. NULL for any other expression. */
+static Code *compile_small_number(Scope *scope, const Expr *expr)
+{
+    int kind;
+
+    if (!is_literal(expr) || expr->argument->big != 0
+        || strcmp(expr->function->global->name, "fromInteger") != 0) {
+        return NULL;
+    }
+    kind = method_number_kind(expr->function, "Num");
+    if (kind < 0) {
+        return NULL;
+    }
+    return new_const(scope, number_constant(kind, expr->argument->number),
+                     expr->token);
+}
+
 static Code *compile_application(Scope *scope, Expr *expr)
 {
     Expr **arguments;
     int count;
-    Expr *head = split_application(expr, &arguments, &count);
+    Expr *head;
     Code *call;
     Code *code;
     int i;
+
+    code = compile_small_number(scope, expr);
+    if (code != NULL) {
+        return code;
+    }
+    head = split_application(expr, &arguments, &count);
 
     if (is_saturated(head, count)) {
         code = head->constructor->is_newtype
@@ -719,15 +743,9 @@ static Code *compile_delayed(Scope *scope, Expr *expr)
     Code *code;
 
     expr = without_annotations(expr);
-    if (is_literal(expr) && expr->argument->big == 0
-        && strcmp(expr->function->global->name, "fromInteger") == 0
-        && method_number_kind(expr->function, "Num") >= 0) {
-        /* A small number: it is known here. */
-        return new_const(scope,
-                         number_constant(
-                             method_number_kind(expr->function, "Num"),
-                             expr->argument->number),
-                         expr->token);
+    code = compile_small_number(scope, expr);
+    if (code != NULL) {
+        return code;
     }
     if (is_literal(expr)) {
         /* Worked out once, the first time something needs it, and not
@@ -2069,8 +2087,57 @@ static unsigned always_evaluated(Strictness *strictness, const Code *code)
     return set;
 }
 
+/* Whether the code from the node on only looks at values: see
+   Function.is_leaf. Notes the slots it reads in `*reads`. `budget` bounds
+   the nodes that are looked at. */
+static int is_leaf_code(const Code *code, int *budget, unsigned *reads)
+{
+    int i;
+
+    if (--*budget < 0) {
+        return 0;
+    }
+    switch (code->kind) {
+    case C_LOCAL:
+        *reads |= 1u << code->slot;
+        return 1;
+    case C_CONST:
+        return 1;
+    case C_EVAL:
+        if (code->first->kind != C_LOCAL) {
+            return 0;
+        }
+        *reads |= 1u << code->first->slot;
+        return is_leaf_code(code->next, budget, reads);
+    case C_FIELDS:
+        *reads |= 1u << code->slot;
+        return is_leaf_code(code->next, budget, reads);
+    case C_TEST:
+    case C_TEST_CHAR:
+        *reads |= 1u << code->slot;
+        return is_leaf_code(code->first, budget, reads)
+            && is_leaf_code(code->next, budget, reads);
+    case C_SWITCH:
+        *reads |= 1u << code->slot;
+        for (i = 0; i < code->count; i++) {
+            if (code->codes[i] != NULL
+                && !is_leaf_code(code->codes[i], budget, reads)) {
+                return 0;
+            }
+        }
+        return is_leaf_code(code->next, budget, reads);
+    default:
+        return 0;
+    }
+}
+
 static void find_strictness(const Scope *scope, Function *function)
 {
+    int budget = 24;
+
+    function->is_leaf = function->capture_count == 0
+        && function->slot_count <= LEAF_SLOTS
+        && is_leaf_code(function->body, &budget, &function->leaf_reads);
     Strictness strictness;
 
     if (function->arity == 0) {
