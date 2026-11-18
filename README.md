@@ -1,6 +1,6 @@
 # aihc-bootstrap
 
-A Haskell interpreter in C89 whose only job is to run
+A Haskell interpreter in C99 whose only job is to run
 [AIHC](https://github.com/ai-haskell-compiler/aihc), so that AIHC can be
 bootstrapped from a C compiler.
 
@@ -8,7 +8,7 @@ bootstrapped from a C compiler.
 
 - As simple as possible. Readability always wins over performance.
 - Support only the Haskell that AIHC and its dependencies need.
-- Strict C89 (`-std=c89 -pedantic -Wall -Wextra -Werror`).
+- Strict C99 (`-std=c99 -pedantic -Wall -Wextra -Werror`).
 - No readable error messages, no defence against bad input.
 
 ## How it grows
