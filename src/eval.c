@@ -32,6 +32,7 @@ typedef struct Frame {
                   those above are no longer needed when it is reached */
     int base;
     int count;
+    int tail;  /* F_ARGUMENT: the call is the last thing its function does */
     const Code *code;
     Value *value;
 } Frame;
@@ -671,6 +672,7 @@ static Value *run(const Code *code, int base, Value *value)
     Value *given;
     unsigned strict = 0;
     int index = 0;
+    int tail = 0; /* the call is the last thing the function does */
     Frame *frame;
     int need;
     int i;
@@ -760,6 +762,7 @@ static Value *run(const Code *code, int base, Value *value)
                     eval = NULL;
                     call = frame->code;
                 }
+                tail = frame->tail;
                 at = sp - index;
                 locals[sp++] = value;
                 strict = function == NULL ? ~0u
@@ -868,9 +871,11 @@ static Value *run(const Code *code, int base, Value *value)
                called takes its place. */
             call = code;
             eval = NULL;
+            tail = 1;
             goto call;
         case C_EVAL:
             eval = code;
+            tail = 0;
             switch (code->first->kind) {
             case C_CALL:
             case C_PRIM:
@@ -978,6 +983,20 @@ static Value *run(const Code *code, int base, Value *value)
             } else if (argument->kind == C_CLOSURE
                        && argument->u.function->arity == 0
                        && IS_STRICT(strict, index)) {
+                if (argument->first != NULL) {
+                    /* What would be a thunk of a call: the call is made
+                       here, and its result is the argument. */
+                    frame = push(F_ARGUMENT, sp);
+                    frame->base = base;
+                    frame->code = eval != NULL ? eval : call;
+                    frame->count = index;
+                    frame->value = function;
+                    frame->tail = tail;
+                    call = argument->first;
+                    eval = NULL;
+                    tail = 0;
+                    goto call;
+                }
                 /* What would be a thunk is run on the spot. */
                 callee = argument->u.function;
                 if (callee->body == NULL) {
@@ -994,6 +1013,7 @@ static Value *run(const Code *code, int base, Value *value)
                 frame->code = eval != NULL ? eval : call;
                 frame->count = index;
                 frame->value = function;
+                frame->tail = tail;
                 base = target;
                 goto start;
             } else {
@@ -1010,6 +1030,7 @@ static Value *run(const Code *code, int base, Value *value)
                     frame->code = eval != NULL ? eval : call;
                     frame->count = index;
                     frame->value = function;
+                    frame->tail = tail;
                     value = given;
                     code = NULL;
                     break;
@@ -1042,8 +1063,13 @@ static Value *run(const Code *code, int base, Value *value)
             frame->base = base;
             frame->code = eval;
             target = at;
-        } else {
+        } else if (tail) {
             target = base;
+        } else {
+            /* An argument that is run in place: its result goes to the
+               call it is an argument of (F_ARGUMENT). */
+            LET_GO(call);
+            target = at;
         }
         /* fall through */
 

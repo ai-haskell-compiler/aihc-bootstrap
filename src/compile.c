@@ -768,7 +768,25 @@ static Code *compile_delayed(Scope *scope, Expr *expr)
     default:
         break;
     }
-    return compile_function(scope, expr, 1);
+    code = compile_function(scope, expr, 1);
+    if (code->kind == C_CLOSURE && expr->kind == E_APP) {
+        /* A call: also as code to run in place, for when the function it
+           is an argument of always evaluates it. */
+        Expr *head = expr;
+
+        while (head->kind == E_APP) {
+            head = without_annotations(head->function);
+        }
+        if (head->kind == E_LOCAL || head->kind == E_GLOBAL
+            || head->kind == E_METHOD) {
+            Code *call = compile_application(scope, expr);
+
+            if (call->kind == C_CALL || call->kind == C_PRIM) {
+                code->first = call;
+            }
+        }
+    }
+    return code;
 }
 
 /* Code for a C_EVAL to evaluate: a value that takes no work to get, a
@@ -1792,6 +1810,46 @@ static void note_held(Analysis *analysis, const Code *code, const Word *held)
     free(after);
 }
 
+/* Gives the arguments of the call the slots to empty when they are
+   evaluated before the call: those of `held` that neither the arguments
+   after it read nor what comes after the call, which is `needed`. An
+   argument that is a call itself (Code.first) is run in place: it lets
+   go of the same when it has its own arguments, which get theirs in
+   turn. `needed` is changed. */
+static void argument_kills(Analysis *analysis, const Function *function,
+                           const Code *call, const Word *held, Word *needed)
+{
+    int slot;
+    int k;
+
+    for (k = call->count - 1; k >= 0; k--) {
+        Code *argument = call->codes[k];
+
+        if (argument->kind == C_LOCAL || argument->kind == C_CLOSURE) {
+            argument->let_go =
+                xmalloc((size_t)function->slot_count * sizeof(int));
+            for (slot = 0; slot < function->slot_count; slot++) {
+                if (has_slot(held, slot) && !has_slot(needed, slot)) {
+                    argument->let_go[argument->let_go_count++] = slot;
+                }
+            }
+            argument->let_go = xrealloc(
+                argument->let_go,
+                (size_t)argument->let_go_count * sizeof(int) + 1);
+        }
+        if (argument->kind == C_CLOSURE && argument->first != NULL) {
+            Word *after = new_set(analysis);
+
+            argument->first->let_go = argument->let_go;
+            argument->first->let_go_count = argument->let_go_count;
+            add_set(analysis, after, needed);
+            argument_kills(analysis, function, argument->first, held, after);
+            free(after);
+        }
+        add_reads(needed, argument);
+    }
+}
+
 /* Gives every C_EVAL of the function, and every argument of its calls,
    the slots to empty. */
 static void find_kills(Scope *scope, Function *function)
@@ -1843,7 +1901,6 @@ static void find_kills(Scope *scope, Function *function)
         Code *code = scope->nodes[i];
         const Code *call = code->kind == C_EVAL ? code->first : code;
         Word *needed;
-        int k;
 
         if ((call->kind != C_CALL && call->kind != C_PRIM)
             || analysis.held[i] == NULL) {
@@ -1853,24 +1910,7 @@ static void find_kills(Scope *scope, Function *function)
         if (code->kind == C_EVAL) {
             add_set(&analysis, needed, slots_read(&analysis, code->next));
         }
-        for (k = call->count - 1; k >= 0; k--) {
-            Code *argument = call->codes[k];
-
-            if (argument->kind == C_LOCAL || argument->kind == C_CLOSURE) {
-                argument->let_go =
-                    xmalloc((size_t)function->slot_count * sizeof(int));
-                for (slot = 0; slot < function->slot_count; slot++) {
-                    if (has_slot(analysis.held[i], slot)
-                        && !has_slot(needed, slot)) {
-                        argument->let_go[argument->let_go_count++] = slot;
-                    }
-                }
-                argument->let_go = xrealloc(
-                    argument->let_go,
-                    (size_t)argument->let_go_count * sizeof(int) + 1);
-            }
-            add_reads(needed, argument);
-        }
+        argument_kills(&analysis, function, call, analysis.held[i], needed);
         free(needed);
     }
     for (i = 0; i < scope->node_count; i++) {

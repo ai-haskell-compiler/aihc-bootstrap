@@ -92,7 +92,9 @@ enum CodeKind {
     C_CONST,     /* `value`, which is not in the collector's memory */
     C_GLOBAL,    /* the top-level variable `global` */
     C_CLOSURE,   /* a new closure or thunk of `function`, capturing the
-                    `count` values in `slots` */
+                    `count` values in `slots`. If the thunk would be of a
+                    call, `first` is that call (a C_CALL or C_PRIM), to
+                    run in place where no thunk is needed. */
     C_CONSTRUCT, /* a new constructor `tag` with the `count` fields `codes` */
     C_TYPE,      /* `type`, with what the `count` variables `bindings` stand
                     for taken from `slots` */
@@ -104,7 +106,8 @@ enum CodeKind {
     C_CALL,      /* `first` (a C_LOCAL, C_CONST, C_GLOBAL or C_METHOD)
                     applied to the `count` arguments `codes`. An argument
                     that the function always evaluates is evaluated before
-                    the call, and then lets go of slots as a C_EVAL does. */
+                    the call, in place if it is a call itself, and then
+                    lets go of slots as a C_EVAL does. */
     C_PRIM,      /* arithmetic on small numbers of one type: operation `tag`
                     at the kind of number `slot` (numbers.c), of the two
                     arguments `codes`, which are evaluated first. Nothing
