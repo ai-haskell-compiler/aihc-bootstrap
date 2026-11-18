@@ -105,6 +105,10 @@ enum CodeKind {
                     applied to the `count` arguments `codes`. An argument
                     that the function always evaluates is evaluated before
                     the call, and then lets go of slots as a C_EVAL does. */
+    C_PRIM,      /* a C_CALL that the machine has seen to be arithmetic on
+                    small numbers of one type: operation `tag` at the kind
+                    of number `slot` (numbers.c), of the two arguments
+                    `codes`. Nothing is looked up or called for it. */
     C_ENTER,     /* runs the body of `function`, which takes no parameters,
                     with the values in `slots` captured: only in a C_EVAL */
     C_EVAL,      /* evaluates `first` (a value that takes no work, a C_METHOD,
@@ -294,6 +298,13 @@ unsigned long integer_low_bits(Value *value);
 char *integer_show(Value *value);
 void integer_top_bits(Value *value, unsigned long *top, long *shift,
                       int *negative);
+
+/* numbers.c: whether the builtin, given the type as its first argument,
+   is arithmetic on two small numbers that needs no call: then sets what
+   number_primitive takes to do it, on two evaluated numbers. */
+int is_number_primitive(const Builtin *builtin, Value *type, int *operation,
+                        int *kind);
+Value *number_primitive(int operation, int kind, Value *a, Value *b);
 
 /* numbers.c: the arithmetic builtins. */
 Value *builtin_numAdd(Value **arguments);

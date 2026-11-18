@@ -756,7 +756,8 @@ static Value *run(const Code *code, int base, Value *value)
                 }
                 at = sp - index;
                 locals[sp++] = value;
-                strict = strictness(function, call->count);
+                strict = function == NULL ? ~0u
+                                          : strictness(function, call->count);
                 index++;
                 code = call;
                 goto arguments;
@@ -856,6 +857,7 @@ static Value *run(const Code *code, int base, Value *value)
                 code->u.string);
             break;
         case C_CALL:
+        case C_PRIM:
             /* The last thing the function does: the function that is
                called takes its place. */
             call = code;
@@ -865,6 +867,7 @@ static Value *run(const Code *code, int base, Value *value)
             eval = code;
             switch (code->first->kind) {
             case C_CALL:
+            case C_PRIM:
                 call = code->first;
                 goto call;
             case C_ENTER:
@@ -921,6 +924,12 @@ static Value *run(const Code *code, int base, Value *value)
         /* The arguments go above the locals that are in use. */
         at = sp;
         reserve(at + call->count);
+        if (call->kind == C_PRIM) {
+            function = NULL;
+            strict = ~0u;
+            index = 0;
+            goto arguments;
+        }
         switch (call->first->kind) {
         case C_LOCAL:
             function = SLOT(call->first->slot);
@@ -942,7 +951,28 @@ static Value *run(const Code *code, int base, Value *value)
         while (function->kind == V_INDIRECTION) {
             function = function->b.result;
         }
-        strict = strictness(function, call->count);
+        if (function->kind == V_BUILTIN && call->tag == 0 && call->count == 2
+            && function->a.argument_count == 1
+            && call->first->kind == C_METHOD && call->first->method != NULL) {
+            /* A method at a type that is known here, which is a builtin
+               that has its type: if it is arithmetic on small numbers,
+               this call is a C_PRIM from now on. Otherwise it is not
+               asked again. */
+            Code *site = (Code *)call;
+            int operation;
+            int kind;
+
+            site->tag = -1;
+            if (is_number_primitive(function->c.builtin,
+                                    function->b.arguments[0], &operation,
+                                    &kind)) {
+                site->kind = C_PRIM;
+                site->tag = operation;
+                site->slot = kind;
+                function = NULL;
+            }
+        }
+        strict = function == NULL ? ~0u : strictness(function, call->count);
         index = 0;
         /* fall through */
 
@@ -997,6 +1027,20 @@ static Value *run(const Code *code, int base, Value *value)
             locals[sp++] = given;
         }
         if (index < call->count) {
+            continue;
+        }
+        if (function == NULL) {
+            /* A C_PRIM: both numbers are there. */
+            value = number_primitive(call->tag, call->slot, locals[at],
+                                     locals[at + 1]);
+            sp = at;
+            if (eval != NULL) {
+                LET_GO(eval);
+                SLOT(eval->slot) = value;
+                code = eval->next;
+            } else {
+                code = NULL;
+            }
             continue;
         }
         argc = call->count;

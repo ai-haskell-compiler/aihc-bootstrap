@@ -424,6 +424,74 @@ Value *builtin_numCompare(Value **arguments)
     return make_con(a < b ? 0 : a == b ? 1 : 2, 0);
 }
 
+/* ---- Arithmetic without a call ----
+
+   Most arithmetic is on small numbers of a type that is known where it
+   is written. The machine does that itself (C_PRIM in eval.h): no method
+   is looked up and no builtin is called. Integer and the floating point
+   types are not small numbers, and go the long way. */
+
+int is_number_primitive(const Builtin *builtin, Value *type, int *operation,
+                        int *kind)
+{
+    static const struct {
+        Value *(*function)(Value **arguments);
+        char operation;
+    } known[] = {
+        { builtin_numAdd, '+' }, { builtin_numSub, '-' },
+        { builtin_numMul, '*' }, { builtin_numEq, '=' },
+        { builtin_numLess, '<' }, { builtin_numLessEq, 'l' },
+        { builtin_numCompare, 'c' }
+    };
+    enum NumberKind number;
+    size_t i;
+
+    for (i = 0; i < sizeof(known) / sizeof(known[0]); i++) {
+        if (builtin->function == known[i].function) {
+            if (type->kind != V_TYPE
+                || prune(type->b.type)->kind != TY_CON
+                || prune(type->b.type)->constructor->number_kind == 0) {
+                return 0;
+            }
+            number = number_kind(type);
+            if (number == K_INTEGER || is_float(number)) {
+                return 0;
+            }
+            *operation = known[i].operation;
+            *kind = (int)number;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+Value *number_primitive(int operation, int kind, Value *a, Value *b)
+{
+    long x = a->a.number;
+    long y = b->a.number;
+    int less = kind == K_WORD64 ? (unsigned long)x < (unsigned long)y : x < y;
+
+    switch (operation) {
+    case '+':
+        return make_number((enum NumberKind)kind,
+                           (unsigned long)x + (unsigned long)y);
+    case '-':
+        return make_number((enum NumberKind)kind,
+                           (unsigned long)x - (unsigned long)y);
+    case '*':
+        return make_number((enum NumberKind)kind,
+                           (unsigned long)x * (unsigned long)y);
+    case '=':
+        return make_bool(x == y);
+    case '<':
+        return make_bool(less);
+    case 'l':
+        return make_bool(less || x == y);
+    default:
+        return make_con(less ? 0 : x == y ? 1 : 2, 0);
+    }
+}
+
 /* numAnd, numOr, numXor :: a -> a -> a */
 static Value *bitwise(char operation, Value **arguments)
 {
