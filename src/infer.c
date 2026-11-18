@@ -630,10 +630,33 @@ static void infer_binding(Inference *inference, Binding *binding)
     }
     binding->state = BINDING_INFERRING;
     if (binding->scheme != NULL) {
-        /* It has a signature. */
+        /* It has a signature. If that starts with a forall, its type
+           variables are in scope in the definition, as those of a
+           top-level signature are: go :: forall value. ... can say
+           eqT @value. */
+        Binding **outer_variables = inference->variables;
+        int outer_count = inference->variable_count;
+
+        if (token_is(&inference->module->tokens[binding->signature_start],
+                     T_VARID, "forall")) {
+            int own = binding->scheme->variable_count;
+
+            inference->variables =
+                xmalloc((size_t)(outer_count + own) * sizeof(Binding *) + 1);
+            for (i = 0; i < outer_count; i++) {
+                inference->variables[i] = outer_variables[i];
+            }
+            for (i = 0; i < own; i++) {
+                inference->variables[outer_count + i] =
+                    binding->scheme->variables[i];
+            }
+            inference->variable_count = outer_count + own;
+        }
         give_parameter_types(*binding->definition, binding->scheme->type);
         unify(infer(inference, *binding->definition), binding->scheme->type,
               token);
+        inference->variables = outer_variables;
+        inference->variable_count = outer_count;
         *binding->definition = add_type_parameters(
             *binding->definition, binding->scheme->variable_count,
             binding->scheme->variables);
