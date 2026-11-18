@@ -5,19 +5,22 @@
 #include "syntax.h"
 
 typedef struct Value Value;
-typedef struct Env Env;
 typedef struct Builtin Builtin;
+typedef struct Code Code;
+typedef struct Function Function;
 
 enum ValueKind {
     V_INT,
     V_CHAR,
     V_CON,         /* a data constructor applied to all its fields */
-    V_CLOSURE,     /* a lambda together with the variables it uses */
+    V_CLOSURE,     /* a function together with the variables it uses */
+    V_PARTIAL,     /* a V_CLOSURE applied to fewer arguments than it takes */
     V_BUILTIN,     /* a C function applied to fewer arguments than it needs */
     V_PARTIAL_CON, /* a constructor applied to fewer fields than it has */
     V_TYPE,        /* a type, passed to a polymorphic function */
     V_BYTES,       /* a ByteString: `number` bytes at `bytes` (bytes.c) */
-    V_THUNK,       /* an expression that has not been evaluated yet */
+    V_THUNK,       /* code that has not been run yet, with the variables it
+                      uses */
     V_BLACKHOLE,   /* a thunk that is being evaluated right now */
     V_INDIRECTION, /* a thunk that has been evaluated; see `result` */
     V_RAISE        /* a thunk whose evaluation raised the exception
@@ -26,10 +29,10 @@ enum ValueKind {
 
 /* Every kind uses only some of the fields. A value is made often, so it is
    small: the fields are in three slots, and the kinds that use a slot share
-   it. No kind uses two names in one slot. A thunk's `result` is not in the
-   slot of its `expr` or `env`, which are cleared after it is set (run).
-   Everything is boxed: there are no unboxed values anywhere in the
-   interpreter. */
+   it. No kind uses two names in one slot. The fields of a constructor, the
+   variables of a closure or a thunk and the arguments of a partial
+   application are in the same cell, right after the value. Everything is
+   boxed: there are no unboxed values anywhere in the interpreter. */
 struct Value {
     unsigned char kind;     /* an enum ValueKind */
     unsigned char is_deep;  /* V_CON: every field is evaluated, all the way
@@ -41,46 +44,132 @@ struct Value {
     union {
         long number;            /* V_INT, V_CHAR, V_BYTES */
         int field_count;        /* V_CON */
-        int argument_count;     /* V_BUILTIN, V_PARTIAL_CON */
-        Binding *parameter;     /* V_CLOSURE */
-        Expr *expr;             /* V_THUNK */
+        int argument_count;     /* V_PARTIAL, V_BUILTIN, V_PARTIAL_CON */
+        const Function *function; /* V_CLOSURE; V_THUNK: NULL once it is
+                                     being evaluated */
     } a;
     union {
-        Value **fields;         /* V_CON */
-        Value **arguments;      /* V_BUILTIN, V_PARTIAL_CON */
-        Expr *body;             /* V_CLOSURE */
+        Value **fields;         /* V_CON; V_CLOSURE, V_THUNK: the values of
+                                   the variables the function captures */
+        Value **arguments;      /* V_PARTIAL, V_BUILTIN, V_PARTIAL_CON */
         Value *result;          /* V_INDIRECTION, V_RAISE */
         Type *type;             /* V_TYPE: has no TY_RIGID in it */
         const unsigned char *bytes; /* V_BYTES: `number` bytes (bytes.c) */
     } b;
     union {
-        Env *env;               /* V_CLOSURE, V_THUNK */
+        Value *function;        /* V_PARTIAL: the V_CLOSURE */
         const Builtin *builtin; /* V_BUILTIN */
         const Constructor *constructor; /* V_PARTIAL_CON */
     } c;
 };
 
-/* Which local variables an environment has, in order: the shape of an
-   environment. Shapes are made once and shared: a shape is found again by
-   its parent, the shape with one variable less, and its last variable.
-   The empty environment is NULL. */
-typedef struct Shape Shape;
-struct Shape {
-    int count;
-    Binding **bindings;
-    const Shape *parent;
-    Shape *next; /* in its bucket of the table of shapes (eval.c) */
+/* ---- Code ----
+
+   A definition is not run as the parser left it. The first time it is
+   needed it is compiled (compile.c) into code for the machine (eval.c):
+
+     - every variable is a slot: a place in the locals of the function that
+       is running. Nothing is looked up by name;
+     - a function takes all its parameters at once, and knows which
+       variables of the functions around it it uses: a closure or a thunk
+       is made with just their values (captured);
+     - patterns are tests on one value at a time, with the code to go to
+       when a test fails.
+
+   Code is a tree. What comes after a node is its `next`, so a function is
+   run from its first node on without going back up: nothing in it is ever
+   in the middle of something else but the value a C_EVAL waits for. Code
+   to go to on a failed test is shared by the tests that go there. */
+
+enum CodeKind {
+    /* A value that takes no work to get: an argument is one of these. */
+    C_LOCAL,     /* the value in `slot` */
+    C_CONST,     /* `value`, which is not in the collector's memory */
+    C_GLOBAL,    /* the top-level variable `global` */
+    C_CLOSURE,   /* a new closure or thunk of `function`, capturing the
+                    `count` values in `slots` */
+    C_CONSTRUCT, /* a new constructor `tag` with the `count` fields `codes` */
+    C_TYPE,      /* `type`, with what the `count` variables `bindings` stand
+                    for taken from `slots` */
+
+    /* What takes work. */
+    C_METHOD,    /* the class method `global` at `type` (as C_TYPE) */
+    C_STRING,    /* the list of the characters of `string` */
+    C_INTEGER,   /* a literal beyond a small number: see Expr.big */
+    C_CALL,      /* `first` (a C_LOCAL, C_CONST, C_GLOBAL or C_METHOD)
+                    applied to the `count` arguments `codes` */
+    C_ENTER,     /* runs the body of `function`, which takes no parameters,
+                    with the values in `slots` captured: only in a C_EVAL */
+    C_EVAL,      /* evaluates `first` (a value that takes no work, a C_METHOD,
+                    C_CALL or C_ENTER), puts the result in `slot`, and goes
+                    on with `next`. The `count` slots in `slots` are not
+                    used after it, and are emptied so that they keep
+                    nothing in use meanwhile. */
+    C_LET,       /* puts the `count` values `codes` in the slots `slots`.
+                    The closures and thunks among them may capture any of
+                    those slots. */
+    C_FIELDS,    /* puts the `count` fields of the constructor in `slot`
+                    whose indices are in `slots` into the slots from `tag`
+                    on */
+    C_TEST,      /* `first` if the constructor in `slot` has tag `tag`, else
+                    `next` */
+    C_TEST_CHAR, /* the same for the character or small number `tag` */
+    C_SWITCH,    /* codes[tag of the constructor in `slot`], or `next` if
+                    that is NULL */
+    C_FAIL       /* no alternative matches */
 };
 
-/* The values of the local variables in scope, the innermost last. An
-   environment is never changed once it is made; one with another variable
-   is a copy. Copying a few pointers costs less than following a list of
-   them, and a thunk keeps only the variables it needs (see keep_needed),
-   so environments are short. */
-struct Env {
-    const Shape *shape;
-    Value *values[1]; /* shape->count of them */
+struct Code {
+    unsigned char kind; /* an enum CodeKind */
+    int slot;
+    int count;
+    int tag;
+    Code *first;
+    Code *next;
+    Code **codes;
+    int *slots;
+    union {
+        Value *value;         /* C_CONST */
+        Global *global;       /* C_GLOBAL, C_METHOD */
+        Function *function;   /* C_CLOSURE, C_ENTER */
+        const char *string;   /* C_STRING; C_INTEGER with tag 2 */
+        long number;          /* C_INTEGER with tag 1 */
+    } u;
+    Type *type;               /* C_TYPE, C_METHOD */
+    Binding **bindings;       /* C_TYPE, C_METHOD */
+    /* C_METHOD at a type without variables: the method found, while
+       all_instances is `method_instances` (eval.c). */
+    Value *method;
+    const void *method_instances;
+    const Token *token;       /* where in the program it comes from */
+    int id;                   /* compile.c: its number in its function */
 };
+
+/* A function, or the code of a thunk (no parameters). Its locals are
+   `slot_count` slots: first the parameters, then the captured variables,
+   then what the body binds. */
+struct Function {
+    int arity;
+    int capture_count;
+    int slot_count;
+    Code *body;
+};
+
+/* compile.c: the value of the top-level variable, whose definition has
+   been elaborated: a closure if it is a function, else a thunk. */
+Value *compile_global(Global *global);
+
+/* eval.c: values for compile.c. The first three are outside the
+   collector's memory. */
+Value *constant_int(long number);
+Value *constant_char(long code);
+Value *constant_closure(const Function *function);
+/* The constructor without its fields, or NULL if that is only made in the
+   collector's memory. */
+Value *constant_constructor(const Constructor *constructor);
+Value *make_thunk(const Function *function);
+/* A thunk that the collector keeps for good, for code to refer to. */
+Value *shared_thunk(const Function *function);
 
 /* A C function callable from Haskell through `foreign import prim`. It gets
    `arity` unevaluated arguments and may call force and apply. If its type
@@ -97,6 +186,10 @@ struct Builtin {
     Value *(*function)(Value **arguments);
 };
 
+/* A constructor without fields is made once for each tag below this,
+   outside the collector's memory. */
+#define SHARED_TAGS 64
+
 /* Constructor tags of the types the interpreter itself knows about. */
 #define TAG_UNIT 0
 #define TAG_NIL 0
@@ -110,7 +203,6 @@ Value *make_int(long number); /* may be shared: never change it */
 Value *make_unshared_int(long number); /* for one that is changed */
 Value *make_char(long code);
 Value *make_con(int tag, int field_count);
-Value *make_thunk(Expr *expr, Env *env);
 Value *make_builtin(const Builtin *builtin);
 Value *make_constructor(const Constructor *constructor);
 Value *make_io_result(Value *result);
@@ -137,12 +229,13 @@ void raise_exception(Value *exception);
 /* gc.c: memory that is freed when nothing refers to it any more. Everything
    the running program makes is allocated here, zeroed. gc_alloc_bytes is
    for memory that holds no pointers: bytes, digits, C strings.
-   gc_alloc_value and gc_alloc_env are for a Value and an Env: the collector
-   then looks only at the fields of those that can point to its memory.
-   gc_alloc_value makes room for `field_count` fields after the value, for a
-   V_CON whose `fields` point there (make_con).
+   gc_alloc_value is for a Value: the collector then looks only at the
+   fields that can point to its memory. It makes room for `field_count`
+   pointers after the value: the fields of a V_CON (make_con), the captured
+   variables of a closure or thunk, the arguments of a partial
+   application.
 
-   A collection can happen in any of the three allocating functions, so a
+   A collection can happen in any of the allocating functions, so a
    pointer to collected memory must be where the collector looks when one
    of them is called: in a C local, in collected memory that is itself
    reachable, or in what mark_roots names. Memory from xmalloc is not
@@ -150,7 +243,6 @@ void raise_exception(Value *exception);
 void *gc_alloc(size_t size);
 void *gc_alloc_bytes(size_t size);
 Value *gc_alloc_value(int field_count);
-Env *gc_alloc_env(int count);
 void *gc_realloc(void *old, size_t size, int bytes);
 void gc_start(const void *bottom);
 void gc_collect(void);

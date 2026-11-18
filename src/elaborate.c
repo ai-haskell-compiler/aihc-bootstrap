@@ -4,11 +4,12 @@
 
 /* The pipeline, run for one top-level variable the first time it is needed:
 
-       tokens --parse--> Expr --resolve--> Expr --infer--> Expr
+       tokens --parse--> Expr --resolve--> Expr --infer--> Expr --compile--> Code
 
    parse    (parse.c)   also rewrites convenience syntax into core forms
    resolve  (resolve.c) names to what they refer to; operator precedence
-   infer    (infer.c)   makes type arguments explicit */
+   infer    (infer.c)   makes type arguments explicit
+   compile  (compile.c) code for the machine: slots, functions, tests */
 static Expr *new_expr(enum ExprKind kind, const Token *token)
 {
     Expr *expr = new_expr_memory();
@@ -145,7 +146,6 @@ Value *global_value(Global *global)
         return global->value;
     }
     elaborate_global(global);
-    /* A thunk, so that the variable is evaluated at most once. */
-    global->value = make_thunk(global->expr, NULL);
+    global->value = compile_global(global);
     return global->value;
 }

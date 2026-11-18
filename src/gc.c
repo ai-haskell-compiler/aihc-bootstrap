@@ -5,8 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Memory for what the running program makes: values, environments, the
-   fields of constructors, byte strings. It is freed when nothing refers
+/* Memory for what the running program makes: values with their fields,
+   byte strings. It is freed when nothing refers
    to it any more.
 
    The collector marks and sweeps, and never moves anything. It mostly
@@ -15,8 +15,8 @@
    pointer: if the word is the address of something inside an allocated
    cell, that cell is in use, and its words are looked at in turn. A number
    that happens to look like an address keeps a cell alive for nothing,
-   which is harmless. Values and Envs, which are most of what there is, are
-   known: only their fields that can point here are looked at.
+   which is harmless. Values, which are most of what there is, are known:
+   only their fields that can point here are looked at.
 
    The roots are the C stack (the machine calls itself through builtins,
    and C locals hold values), the registers, and what mark_roots in eval.c
@@ -37,7 +37,6 @@ enum {
     CELL_MARKED = 2,
     CELL_BYTES = 4,  /* holds no pointers: it is not looked into */
     CELL_VALUE = 8,  /* a Value: only some of its fields are looked at */
-    CELL_ENV = 16,   /* an Env: likewise */
     CELL_OLD = 32,   /* has been through a collection: see "Generations" */
     CELL_PINNED = 64, /* the C stack points to it: it does not get old */
     CELL_REMEMBERED = 128 /* old, and may point to young cells */
@@ -405,24 +404,33 @@ static void mark_from_roots(void)
                     || value->kind == V_PARTIAL_CON);
             gc_mark(value->b.fields);
             on_c_stack = 0;
-            gc_mark(value->c.env);
-            /* The fields that are in the cell, after the value (make_con). */
-            if (value->kind == V_CON
-                && value->b.fields == (Value **)(value + 1)) {
+            gc_mark(value->c.function);
+            /* What is in the cell, after the value: the fields of a
+               constructor (make_con), the arguments of a partial
+               application, what a closure or a thunk captures. A thunk
+               that is being evaluated has let go of that. */
+            if (value->b.fields == (Value **)(value + 1)) {
+                int count = 0;
                 int i;
 
-                for (i = 0; i < value->a.field_count; i++) {
+                switch (value->kind) {
+                case V_CON:
+                case V_PARTIAL:
+                case V_BUILTIN:
+                case V_PARTIAL_CON:
+                    count = value->a.field_count;
+                    break;
+                case V_CLOSURE:
+                case V_THUNK:
+                    count = value->a.function != NULL
+                        ? value->a.function->capture_count : 0;
+                    break;
+                default:
+                    break;
+                }
+                for (i = 0; i < count; i++) {
                     gc_mark(value->b.fields[i]);
                 }
-            }
-        } else if (*cell.state & CELL_ENV) {
-            const Env *env = (const Env *)cell.cell;
-            int i;
-
-            /* The shape is not set yet if the collection came while the
-               environment was being made. */
-            for (i = 0; env->shape != NULL && i < env->shape->count; i++) {
-                gc_mark(env->values[i]);
             }
         } else {
             gc_mark_range(cell.cell, cell.cell + cell.size);
@@ -693,12 +701,6 @@ Value *gc_alloc_value(int field_count)
 {
     return allocate(sizeof(Value) + (size_t)field_count * sizeof(Value *),
                     CELL_VALUE);
-}
-
-Env *gc_alloc_env(int count)
-{
-    return allocate(sizeof(Env) + (size_t)(count - 1) * sizeof(Value *),
-                    CELL_ENV);
 }
 
 /* The memory made at least `size` bytes long, keeping what is in it. `old`

@@ -83,7 +83,8 @@ are therefore never looked at.
 | `src/unicode.c` | What `Data.Char` knows, from a table made with GHC |
 | `src/posix.c` | Everything that needs POSIX: directories, running programs |
 | `src/elaborate.c` | The pipeline for one declaration; new passes are added here |
-| `src/eval.c` | The evaluator: a machine with an explicit stack |
+| `src/compile.c` | Turns a declaration into code for the machine: variables become slots, patterns become tests |
+| `src/eval.c` | The evaluator: a machine with an explicit stack that runs that code |
 | `src/gc.c` | Memory for what the program makes, freed when nothing refers to it |
 | `src/builtins.c` | C functions reachable through `foreign import prim` |
 | `src/survey.c` | Survey mode: what is unsupported, without running |
