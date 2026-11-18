@@ -254,7 +254,9 @@ struct Expr {
     Binding **strict;          /* E_LET: the bindings of the patterns with a !
                                   in front (let !x = e), evaluated before the
                                   body */
-    Type *type;                /* E_TYPE; E_METHOD: the class argument */
+    Type *type;                /* E_TYPE; E_METHOD: the class argument;
+                                  E_CASE: its type, if a signature says
+                                  what it is (infer.c) */
     const Token *token;        /* where the expression starts */
     const char *qualifier;     /* E_NAME: the M of M.x, or NULL */
     const char *name;          /* E_NAME, E_CONSTRUCTOR */
