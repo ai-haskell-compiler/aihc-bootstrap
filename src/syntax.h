@@ -155,10 +155,6 @@ enum {
    is needed. */
 struct Binding {
     const char *name;
-    /* The last shape of environment this variable was added to, and the
-       shape that made: see child_shape in eval.c. */
-    const void *shape_parent;
-    const void *shape_child;
     Type *type; /* of a local variable, during type inference */
     int is_fractional; /* a type variable that a signature says is of a
                           class of fractional numbers: see infer.c */
@@ -232,53 +228,19 @@ enum ExprKind {
     E_METHOD       /* a class method at a type; made by the type pass */
 };
 
-/* The variables an expression mentions, worked out by the evaluator the
-   first time it needs them (see keep_needed in eval.c). */
-typedef struct Needed {
-    int known;
-    int count;
-    Binding **bindings;
-    /* Where they are in an environment of the shape `from`, and the shape
-       of the environment with just them: see keep in eval.c. */
-    const void *from;
-    const void *to;
-    int *positions;
-} Needed;
-
 /* Every kind uses only some of the fields. One flat struct is easier to read
-   than a union, and we do not care about the wasted memory. The fields the
-   evaluator looks at come first, so that they share a cache line or two:
-   the rest are for the passes before it. */
+   than a union, and we do not care about the wasted memory: expressions
+   are not what runs (see Code in eval.h). */
 struct Expr {
     enum ExprKind kind;
-    int lookup_index;          /* E_LOCAL: where the variable was the last */
-    const void *lookup_shape;  /* time, and in an environment of what shape */
     Expr *function;            /* E_APP; E_RECORD: the C or e before { */
     Expr *argument;            /* E_APP */
     Binding *local;            /* E_LOCAL; the parameter of an E_LAMBDA */
     Global *global;            /* E_GLOBAL; the method of an E_METHOD */
     Expr *body;                /* E_LAMBDA, E_ANNOTATION, E_LET */
-    Needed needed;             /* the variables the expression mentions;
-                                  set by the evaluator, see keep_needed */
     Constructor *constructor;  /* E_CONSTRUCTOR */
     Expr *scrutinee;           /* E_CASE */
     Alternative *alternatives; /* E_CASE */
-    /* E_TYPE, E_METHOD: `type` with its links followed, and whether it has
-       type variables in it (1: none, 2: some), once the evaluator has
-       needed it; see run_type in eval.c. */
-    Type *run_type;
-    int run_type_state;
-    /* The body of a lambda: the number of arguments bound for it the last
-       time, and the shape of the environment before and after
-       (bind_waiting in eval.c). */
-    int bind_count;
-    const void *bind_from;
-    const void *bind_to;
-    /* E_METHOD at a type without variables: the method found, while
-       all_instances is `method_instances` (eval.c). */
-    struct Value *method;
-    const void *method_instances;
-    Needed alternatives_needed; /* E_CASE: those its alternatives mention */
     long number;               /* E_INT, E_CHAR */
     int big;                   /* E_INT: see Token.big */
     int is_plain_string;       /* E_STRING: a String. Otherwise the module
@@ -422,6 +384,8 @@ struct Global {
     int elaborating;
     int failed;           /* survey mode: elaborating it failed */
     struct Value *value;  /* NULL until first use */
+    struct Function *stub; /* eval.c: code that evaluates the variable, for
+                              a thunk made before it has a value */
     Global *all_next;     /* every Global there is: see all_globals */
     Global *next;         /* the other definitions of the same instance */
 };
