@@ -86,8 +86,8 @@ static void add_block(Word state[8], const unsigned char *block)
 Value *builtin_sha256(Value **arguments)
 {
     Value *input = force(arguments[0]);
-    const unsigned char *bytes = input->bytes;
-    unsigned long length = (unsigned long)input->number;
+    const unsigned char *bytes = input->b.bytes;
+    unsigned long length = (unsigned long)input->a.number;
     Word state[8] = {
         0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
         0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u
@@ -123,8 +123,8 @@ Value *builtin_sha256(Value **arguments)
     for (i = 0; i < 32; i++) {
         digest[i] = (unsigned char)(state[i / 4] >> (24 - 8 * (i % 4)));
     }
-    result = make_int(32);
+    result = make_unshared_int(32);
     result->kind = V_BYTES;
-    result->bytes = digest;
+    result->b.bytes = digest;
     return result;
 }

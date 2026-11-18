@@ -1080,6 +1080,25 @@ instance Traversable Maybe where
   traverse _ Nothing = pure Nothing
   traverse f (Just a) = fmap Just (f a)
 
+-- A pair and Either are containers of their last component, as in base.
+
+instance Functor ((,) a) where
+  fmap f (a, b) = (a, f b)
+
+instance Foldable ((,) a) where
+  foldr f end (_, b) = f b end
+
+instance Traversable ((,) a) where
+  traverse f (a, b) = fmap ((,) a) (f b)
+
+instance Foldable (Either e) where
+  foldr _ end (Left _) = end
+  foldr f end (Right a) = f a end
+
+instance Traversable (Either e) where
+  traverse _ (Left e) = pure (Left e)
+  traverse f (Right a) = fmap Right (f a)
+
 -- ---- Lists ----
 
 (++) :: [a] -> [a] -> [a]

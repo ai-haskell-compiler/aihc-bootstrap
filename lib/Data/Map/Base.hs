@@ -18,8 +18,10 @@ infixl 9 !
 data Map k a
   = Tip
   | -- The number of elements, a key and its value, and the maps of the
-    -- smaller and the larger keys.
-    Bin Int k a (Map k a) (Map k a)
+    -- smaller and the larger keys. Strict in all but the value, as in
+    -- containers: a lazy size would be a chain of additions, evaluated
+    -- deep inside the machine (nested calls of it) when it is needed.
+    Bin !Int !k a !(Map k a) !(Map k a)
 
 -- ---- The tree ----
 

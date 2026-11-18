@@ -40,8 +40,8 @@ static long look_up(const Run *runs, long count, long character)
    4, 5: 1 if it is upper case, lower case */
 Value *builtin_charInfo(Value **arguments)
 {
-    long what = force(arguments[0])->number;
-    long character = force(arguments[1])->number;
+    long what = force(arguments[0])->a.number;
+    long character = force(arguments[1])->a.number;
 
     switch (what) {
     case 0:

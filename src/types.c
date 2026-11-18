@@ -47,12 +47,36 @@ Type *new_type_constructor(TypeCon *constructor)
     return type;
 }
 
+/* There is one application of a type to a type: asking for it again gives
+   the same one. The program makes types while it runs, whenever a type
+   with variables is passed on, and they are never freed; this way there
+   are only as many as there are different types. A type is never changed
+   once it is made, except that a TY_META is linked to what it stands
+   for. */
+#define APPLICATION_BUCKETS ((size_t)1 << 20)
+static Type **applications = NULL;
+
 Type *new_type_application(Type *function, Type *argument)
 {
-    Type *type = new_type(TY_APP);
+    size_t bucket = ((size_t)function / 8 * 31 + (size_t)argument / 8)
+                    % APPLICATION_BUCKETS;
+    Type *type;
 
+    if (applications == NULL) {
+        applications = xmalloc(APPLICATION_BUCKETS * sizeof(Type *));
+        memset(applications, 0, APPLICATION_BUCKETS * sizeof(Type *));
+    }
+    for (type = applications[bucket]; type != NULL;
+         type = type->next_same_hash) {
+        if (type->function == function && type->argument == argument) {
+            return type;
+        }
+    }
+    type = new_type(TY_APP);
     type->function = function;
     type->argument = argument;
+    type->next_same_hash = applications[bucket];
+    applications[bucket] = type;
     return type;
 }
 
@@ -593,17 +617,25 @@ void prepare_instance(Instance *instance)
         unresolved(instance->module, token, token->text);
     }
     if (instance->derived_type != NULL) {
-        /* deriving on T a b: the head is T a b. */
+        /* deriving on T a b: the head is T a b, or T a for a class of
+           types with a parameter. */
         TypeCon *type = instance->derived_type;
+        const char *class_name = entity->class->name;
+        int count = type->parameter_count;
         int i;
 
+        if (strcmp(class_name, "Functor") == 0
+            || strcmp(class_name, "Foldable") == 0
+            || strcmp(class_name, "Traversable") == 0) {
+            count--;
+        }
         instance->head = new_type_constructor(type);
-        for (i = 0; i < type->parameter_count; i++) {
+        for (i = 0; i < count; i++) {
             instance->head = new_type_application(
                 instance->head, new_rigid(type->parameters[i]));
         }
         instance->variables = type->parameters;
-        instance->variable_count = type->parameter_count;
+        instance->variable_count = count;
     } else {
         instance->head = parse_type(instance->module, instance->head_start,
                                     instance->head_end, &instance->variables,

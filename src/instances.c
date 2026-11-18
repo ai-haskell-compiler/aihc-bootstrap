@@ -1,6 +1,7 @@
 #include "eval.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Finding the definition of a class method at run time. The type the class
@@ -145,13 +146,25 @@ static void collect_instances(Class *class)
     }
 }
 
-/* The first instance of the class that the type matches, or NULL.
-   Overlapping instances are not handled: the first match wins. One case
-   is: an instance for every type (instance C a) is only used if no other
+/* Whether instance `a` is more specific than `b`: its head is a case of
+   b's head, as Cbor [Char] is of Cbor [a]. */
+static int more_specific(Instance *a, Instance *b)
+{
+    Type **bound = new_bound(b->variable_count);
+
+    return match_type(b->head, a->head, b->variable_count, b->variables,
+                      bound);
+}
+
+/* The instance of the class that the type matches, or NULL. If several
+   match (OVERLAPPING and OVERLAPPABLE), the most specific one, as in GHC.
+   An instance for every type (instance C a) is only used if no other
    instance matches. */
 static Instance *find_instance(Class *class, Type *type, Type ***bound)
 {
     Instance *for_every_type = NULL;
+    Instance *found = NULL;
+    Type **found_bound = NULL;
     Instance *instance;
 
     /* Preparing an instance can load a module, with instances of its
@@ -161,15 +174,23 @@ static Instance *find_instance(Class *class, Type *type, Type ***bound)
     }
     for (instance = class->instances; instance != NULL;
          instance = instance->next_of_class) {
+        Type **candidate_bound;
+
         if (prune(instance->head)->kind == TY_RIGID) {
             for_every_type = instance;
             continue;
         }
-        *bound = new_bound(instance->variable_count);
+        candidate_bound = new_bound(instance->variable_count);
         if (match_type(instance->head, type, instance->variable_count,
-                       instance->variables, *bound)) {
-            return instance;
+                       instance->variables, candidate_bound)
+            && (found == NULL || more_specific(instance, found))) {
+            found = instance;
+            found_bound = candidate_bound;
         }
+    }
+    if (found != NULL) {
+        *bound = found_bound;
+        return found;
     }
     if (for_every_type != NULL) {
         *bound = new_bound(for_every_type->variable_count);
@@ -178,7 +199,124 @@ static Instance *find_instance(Class *class, Type *type, Type ***bound)
     return for_every_type;
 }
 
+/* ---- Remembering what was found ----
+
+   A method is looked up every time it is called, and most calls are at a
+   few types. So what find_method gives for a method at a type that has no
+   variables in it is kept, and given again. New instances (from a module
+   that was loaded) could change the answer, so what is kept is forgotten
+   when there are any. The values are roots for the collector. */
+
+typedef struct Remembered {
+    Global *method;
+    Type *type;
+    Value *value;
+    unsigned long hash;
+    struct Remembered *next;
+} Remembered;
+
+#define REMEMBERED_BUCKETS 65536
+
+static Remembered *remembered[REMEMBERED_BUCKETS];
+static Instance *remembered_since = NULL; /* all_instances when it began */
+
+/* A hash of the type, or 0 if the type has something in it that a later
+   lookup could see differently: a variable or an associated type. */
+static unsigned long hash_type(Type *type)
+{
+    unsigned long function;
+    unsigned long argument;
+
+    type = prune(type);
+    switch (type->kind) {
+    case TY_CON:
+        if (type->constructor->is_family) {
+            return 0;
+        }
+        return (unsigned long)(size_t)type->constructor / 8 * 2654435761UL + 1;
+    case TY_APP:
+        function = hash_type(type->function);
+        argument = function == 0 ? 0 : hash_type(type->argument);
+        if (argument == 0) {
+            return 0;
+        }
+        return (function * 31 + argument) * 2654435761UL + 7;
+    case TY_RIGID:
+    case TY_META:
+    case TY_FORALL:
+        break;
+    }
+    return 0;
+}
+
+static void forget_if_instances_came(void)
+{
+    int i;
+
+    if (remembered_since == all_instances) {
+        return;
+    }
+    for (i = 0; i < REMEMBERED_BUCKETS; i++) {
+        while (remembered[i] != NULL) {
+            Remembered *next = remembered[i]->next;
+
+            free(remembered[i]);
+            remembered[i] = next;
+        }
+    }
+    remembered_since = all_instances;
+}
+
+int method_is_remembered(Type *type)
+{
+    return hash_type(type) != 0;
+}
+
+void mark_remembered_methods(void)
+{
+    int i;
+    Remembered *entry;
+
+    for (i = 0; i < REMEMBERED_BUCKETS; i++) {
+        for (entry = remembered[i]; entry != NULL; entry = entry->next) {
+            gc_mark(entry->value);
+        }
+    }
+}
+
+static Value *look_up_method(Global *method, Type *type);
+
 Value *find_method(Global *method, Type *type)
+{
+    unsigned long hash = hash_type(type);
+    Remembered *entry;
+    Value *value;
+
+    if (hash == 0) {
+        return look_up_method(method, type);
+    }
+    hash = hash * 31 + (unsigned long)(size_t)method / 8;
+    forget_if_instances_came();
+    for (entry = remembered[hash % REMEMBERED_BUCKETS]; entry != NULL;
+         entry = entry->next) {
+        if (entry->hash == hash && entry->method == method
+            && types_equal(entry->type, type)) {
+            return entry->value;
+        }
+    }
+    value = look_up_method(method, type);
+    forget_if_instances_came();
+    entry = xmalloc(sizeof(Remembered));
+    entry->method = method;
+    entry->type = type;
+    entry->value = value;
+    entry->hash = hash;
+    entry->next = remembered[hash % REMEMBERED_BUCKETS];
+    remembered[hash % REMEMBERED_BUCKETS] = entry;
+    return value;
+}
+
+static Value *look_up_method(Global *method, Type *type)
 {
     Type **bound = NULL;
     Instance *instance;

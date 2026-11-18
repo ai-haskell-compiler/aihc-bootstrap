@@ -19,38 +19,67 @@ enum ValueKind {
     V_BYTES,       /* a ByteString: `number` bytes at `bytes` (bytes.c) */
     V_THUNK,       /* an expression that has not been evaluated yet */
     V_BLACKHOLE,   /* a thunk that is being evaluated right now */
-    V_INDIRECTION  /* a thunk that has been evaluated; see `result` */
+    V_INDIRECTION, /* a thunk that has been evaluated; see `result` */
+    V_RAISE        /* a thunk whose evaluation raised the exception
+                      `result`: evaluating it raises that again */
 };
 
-/* Every kind uses only some of the fields, as with Expr. Everything is boxed:
-   there are no unboxed values anywhere in the interpreter. */
+/* Every kind uses only some of the fields. A value is made often, so it is
+   small: the fields are in three slots, and the kinds that use a slot share
+   it. No kind uses two names in one slot. A thunk's `result` is not in the
+   slot of its `expr` or `env`, which are cleared after it is set (run).
+   Everything is boxed: there are no unboxed values anywhere in the
+   interpreter. */
 struct Value {
-    enum ValueKind kind;
-    long number;            /* V_INT, V_CHAR */
-    int tag;                /* V_CON: index of the constructor in its type */
-    int field_count;        /* V_CON */
-    Value **fields;         /* V_CON */
-    int is_deep;            /* V_CON: every field is evaluated, all the way
+    unsigned char kind;     /* an enum ValueKind */
+    unsigned char is_deep;  /* V_CON: every field is evaluated, all the way
                                down (deepForce). A builtin that changes a
                                field takes it away. */
-    Binding *parameter;     /* V_CLOSURE */
-    Expr *body;             /* V_CLOSURE */
-    Expr *expr;             /* V_THUNK */
-    Env *env;               /* V_CLOSURE, V_THUNK */
-    const Builtin *builtin; /* V_BUILTIN */
-    const Constructor *constructor; /* V_PARTIAL_CON */
-    int argument_count;     /* V_BUILTIN, V_PARTIAL_CON */
-    Value **arguments;      /* V_BUILTIN, V_PARTIAL_CON */
-    Value *result;          /* V_INDIRECTION */
-    Type *type;             /* V_TYPE: has no TY_RIGID in it */
-    const unsigned char *bytes; /* V_BYTES */
+    unsigned char old;      /* the collector has made it old: see
+                               gc_written_value */
+    int tag;                /* V_CON: index of the constructor in its type */
+    union {
+        long number;            /* V_INT, V_CHAR, V_BYTES */
+        int field_count;        /* V_CON */
+        int argument_count;     /* V_BUILTIN, V_PARTIAL_CON */
+        Binding *parameter;     /* V_CLOSURE */
+        Expr *expr;             /* V_THUNK */
+    } a;
+    union {
+        Value **fields;         /* V_CON */
+        Value **arguments;      /* V_BUILTIN, V_PARTIAL_CON */
+        Expr *body;             /* V_CLOSURE */
+        Value *result;          /* V_INDIRECTION, V_RAISE */
+        Type *type;             /* V_TYPE: has no TY_RIGID in it */
+        const unsigned char *bytes; /* V_BYTES: `number` bytes (bytes.c) */
+    } b;
+    union {
+        Env *env;               /* V_CLOSURE, V_THUNK */
+        const Builtin *builtin; /* V_BUILTIN */
+        const Constructor *constructor; /* V_PARTIAL_CON */
+    } c;
 };
 
-/* The values of the local variables in scope, innermost first. */
+/* Which local variables an environment has, in order: the shape of an
+   environment. Shapes are made once and shared: a shape is found again by
+   its parent, the shape with one variable less, and its last variable.
+   The empty environment is NULL. */
+typedef struct Shape Shape;
+struct Shape {
+    int count;
+    Binding **bindings;
+    const Shape *parent;
+    Shape *next; /* in its bucket of the table of shapes (eval.c) */
+};
+
+/* The values of the local variables in scope, the innermost last. An
+   environment is never changed once it is made; one with another variable
+   is a copy. Copying a few pointers costs less than following a list of
+   them, and a thunk keeps only the variables it needs (see keep_needed),
+   so environments are short. */
 struct Env {
-    Binding *binding;
-    Value *value;
-    Env *outer;
+    const Shape *shape;
+    Value *values[1]; /* shape->count of them */
 };
 
 /* A C function callable from Haskell through `foreign import prim`. It gets
@@ -77,11 +106,13 @@ struct Builtin {
 #define TAG_NOTHING 0
 #define TAG_JUST 1
 
-Value *make_int(long number);
+Value *make_int(long number); /* may be shared: never change it */
+Value *make_unshared_int(long number); /* for one that is changed */
 Value *make_char(long code);
 Value *make_con(int tag, int field_count);
 Value *make_thunk(Expr *expr, Env *env);
 Value *make_builtin(const Builtin *builtin);
+Value *make_constructor(const Constructor *constructor);
 Value *make_io_result(Value *result);
 Value *make_type(Type *type);
 Value *make_string(const char *string); /* a list of characters */
@@ -106,6 +137,10 @@ void raise_exception(Value *exception);
 /* gc.c: memory that is freed when nothing refers to it any more. Everything
    the running program makes is allocated here, zeroed. gc_alloc_bytes is
    for memory that holds no pointers: bytes, digits, C strings.
+   gc_alloc_value and gc_alloc_env are for a Value and an Env: the collector
+   then looks only at the fields of those that can point to its memory.
+   gc_alloc_value makes room for `field_count` fields after the value, for a
+   V_CON whose `fields` point there (make_con).
 
    A collection can happen in any of the three allocating functions, so a
    pointer to collected memory must be where the collector looks when one
@@ -114,10 +149,19 @@ void raise_exception(Value *exception);
    looked into. */
 void *gc_alloc(size_t size);
 void *gc_alloc_bytes(size_t size);
+Value *gc_alloc_value(int field_count);
+Env *gc_alloc_env(int count);
 void *gc_realloc(void *old, size_t size, int bytes);
 void gc_start(const void *bottom);
 void gc_collect(void);
 void gc_mark(const void *pointer);
+/* Says that a pointer was put into memory from here that was made before:
+   see "Generations" in gc.c. */
+void gc_written(const void *address);
+/* gc_written for a value: only an old one needs it, which the value
+   itself says, so most values need no look into the collector's tables. */
+#define gc_written_value(value) \
+    ((value)->old ? gc_written(value) : (void)0)
 void gc_mark_range(const void *start, const void *end);
 /* eval.c: marks what the machine itself holds on to. */
 void mark_roots(void);
@@ -246,6 +290,9 @@ const Builtin *find_builtin(const char *name);
 /* instances.c: the definition of the class method for the type the class is
    used at. */
 Value *find_method(Global *method, Type *type);
+/* Whether find_method remembers what it finds for the type. */
+int method_is_remembered(Type *type);
+void mark_remembered_methods(void); /* for the collector */
 
 /* elaborate.c: the value of a top-level variable, preparing it on first
    use. */

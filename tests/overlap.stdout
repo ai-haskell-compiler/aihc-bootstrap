@@ -1,0 +1,6 @@
+text "abc"
+list of 2: int 1int 2
+list of 2: text "ab"text "c"
+x
+maybe an int
+list of 1: text "s"

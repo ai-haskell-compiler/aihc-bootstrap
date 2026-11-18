@@ -45,8 +45,8 @@ static Value *builtin_getArgs(Value **arguments)
     for (i = program_argument_count - 1; i >= 0; i--) {
         Value *cell = make_con(TAG_CONS, 2);
 
-        cell->fields[0] = make_string(program_arguments[i]);
-        cell->fields[1] = list;
+        cell->b.fields[0] = make_string(program_arguments[i]);
+        cell->b.fields[1] = list;
         list = cell;
     }
     return make_io_result(list);
@@ -62,7 +62,7 @@ static Value *builtin_lookupEnv(Value **arguments)
         return make_io_result(make_con(TAG_NOTHING, 0));
     }
     result = make_con(TAG_JUST, 1);
-    result->fields[0] = make_string(value);
+    result->b.fields[0] = make_string(value);
     return make_io_result(result);
 }
 
@@ -102,14 +102,14 @@ static Value *builtin_newRef(Value **arguments)
 {
     Value *cell = make_con(0, 1);
 
-    cell->fields[0] = arguments[1];
+    cell->b.fields[0] = arguments[1];
     return make_io_result(cell);
 }
 
 /* readRef :: Ref a -> IO a */
 static Value *builtin_readRef(Value **arguments)
 {
-    return make_io_result(force(arguments[1])->fields[0]);
+    return make_io_result(force(arguments[1])->b.fields[0]);
 }
 
 /* writeRef :: Ref a -> a -> IO () */
@@ -117,7 +117,8 @@ static Value *builtin_writeRef(Value **arguments)
 {
     Value *ref = force(arguments[1]);
 
-    ref->fields[0] = arguments[2];
+    ref->b.fields[0] = arguments[2];
+    gc_written(ref->b.fields);
     ref->is_deep = 0;
     return make_io_result(make_con(TAG_UNIT, 0));
 }
@@ -132,9 +133,9 @@ static Value *builtin_writeRef(Value **arguments)
 static Value *array_argument(Value *value, long index)
 {
     value = force(value);
-    if (index < 0 || index >= value->field_count) {
+    if (index < 0 || index >= value->a.field_count) {
         die("array index %ld is out of range (length %d)", index,
-            value->field_count);
+            value->a.field_count);
     }
     return value;
 }
@@ -143,12 +144,12 @@ static Value *array_argument(Value *value, long index)
    An array of that length with every element the given value. */
 static Value *builtin_arrayNew(Value **arguments)
 {
-    long length = force(arguments[1])->number;
+    long length = force(arguments[1])->a.number;
     Value *array = make_con(0, length < 0 ? 0 : (int)length);
     long i;
 
     for (i = 0; i < length; i++) {
-        array->fields[i] = arguments[2];
+        array->b.fields[i] = arguments[2];
     }
     return make_io_result(array);
 }
@@ -156,18 +157,19 @@ static Value *builtin_arrayNew(Value **arguments)
 /* arrayRead :: MutableArray a -> Int -> IO a */
 static Value *builtin_arrayRead(Value **arguments)
 {
-    long index = force(arguments[2])->number;
+    long index = force(arguments[2])->a.number;
 
-    return make_io_result(array_argument(arguments[1], index)->fields[index]);
+    return make_io_result(array_argument(arguments[1], index)->b.fields[index]);
 }
 
 /* arrayWrite :: MutableArray a -> Int -> a -> IO () */
 static Value *builtin_arrayWrite(Value **arguments)
 {
-    long index = force(arguments[2])->number;
+    long index = force(arguments[2])->a.number;
     Value *array = array_argument(arguments[1], index);
 
-    array->fields[index] = arguments[3];
+    array->b.fields[index] = arguments[3];
+    gc_written(array->b.fields);
     array->is_deep = 0;
     return make_io_result(make_con(TAG_UNIT, 0));
 }
@@ -175,16 +177,16 @@ static Value *builtin_arrayWrite(Value **arguments)
 /* arrayLength :: MutableArray a -> Int */
 static Value *builtin_arrayLength(Value **arguments)
 {
-    return make_int(force(arguments[1])->field_count);
+    return make_int(force(arguments[1])->a.field_count);
 }
 
 /* arrayIndex :: MutableArray a -> Int -> a
    For an array that is not changed any more. */
 static Value *builtin_arrayIndex(Value **arguments)
 {
-    long index = force(arguments[2])->number;
+    long index = force(arguments[2])->a.number;
 
-    return force(array_argument(arguments[1], index)->fields[index]);
+    return force(array_argument(arguments[1], index)->b.fields[index]);
 }
 
 /* arrayCopy :: MutableArray a -> Int -> MutableArray a -> Int -> Int -> IO ()
@@ -194,17 +196,17 @@ static Value *builtin_arrayIndex(Value **arguments)
 static Value *builtin_arrayCopy(Value **arguments)
 {
     Value *source = force(arguments[1]);
-    long from = force(arguments[2])->number;
+    long from = force(arguments[2])->a.number;
     Value *target = force(arguments[3]);
-    long to = force(arguments[4])->number;
-    long count = force(arguments[5])->number;
+    long to = force(arguments[4])->a.number;
+    long count = force(arguments[5])->a.number;
 
     if (count > 0) {
         array_argument(source, from);
         array_argument(source, from + count - 1);
         array_argument(target, to);
         array_argument(target, to + count - 1);
-        memmove(target->fields + to, source->fields + from,
+        memmove(target->b.fields + to, source->b.fields + from,
                 (size_t)count * sizeof(Value *));
         target->is_deep = 0;
     }
@@ -236,15 +238,15 @@ static Value *builtin_unsafeCoerce(Value **arguments)
    The Int is a file descriptor: 1 for stdout, 2 for stderr. */
 static Value *builtin_hPutStr(Value **arguments)
 {
-    FILE *file = handle_stream(force(arguments[0])->number);
+    FILE *file = handle_stream(force(arguments[0])->a.number);
     Value *list = force(arguments[1]);
 
     while (list->tag == TAG_CONS) {
         char bytes[4];
-        int count = utf8_encode_exact(force(list->fields[0])->number, bytes);
+        int count = utf8_encode_exact(force(list->b.fields[0])->a.number, bytes);
 
         fwrite(bytes, 1, (size_t)count, file);
-        list = force(list->fields[1]);
+        list = force(list->b.fields[1]);
     }
     return make_io_result(make_con(TAG_UNIT, 0));
 }
@@ -253,7 +255,7 @@ static Value *builtin_hPutStr(Value **arguments)
 static Value *builtin_exit(Value **arguments)
 {
     fflush(stdout);
-    exit((int)force(arguments[1])->number);
+    exit((int)force(arguments[1])->a.number);
     return NULL;
 }
 
@@ -284,11 +286,11 @@ static Value *builtin_cast(Value **arguments)
 {
     Value *result;
 
-    if (!types_equal(force(arguments[0])->type, force(arguments[1])->type)) {
+    if (!types_equal(force(arguments[0])->b.type, force(arguments[1])->b.type)) {
         return make_con(TAG_NOTHING, 0);
     }
     result = make_con(TAG_JUST, 1);
-    result->fields[0] = arguments[2];
+    result->b.fields[0] = arguments[2];
     return result;
 }
 

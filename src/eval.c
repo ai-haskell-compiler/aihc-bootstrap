@@ -52,35 +52,90 @@ static void push(enum FrameKind kind, Value *value)
 
 static Value *new_value(enum ValueKind kind)
 {
-    Value *value = gc_alloc(sizeof(Value));
+    Value *value = gc_alloc_value(0);
 
     value->kind = kind;
     return value;
 }
 
-Value *make_int(long number)
+/* Small numbers and characters are made once: the lexer of aihc-parser
+   makes a value for every character it reads. They are outside the
+   collector's memory, and never change. */
+#define SHARED_INT_LOW (-128)
+#define SHARED_INT_HIGH 1024
+#define SHARED_CHARS 256
+
+static Value shared_ints[SHARED_INT_HIGH - SHARED_INT_LOW];
+static Value shared_chars[SHARED_CHARS];
+
+Value *make_unshared_int(long number)
 {
     Value *value = new_value(V_INT);
 
-    value->number = number;
+    value->a.number = number;
+    return value;
+}
+
+Value *make_int(long number)
+{
+    Value *value;
+
+    if (number < SHARED_INT_LOW || number >= SHARED_INT_HIGH) {
+        return make_unshared_int(number);
+    }
+    value = &shared_ints[number - SHARED_INT_LOW];
+    if (value->kind != V_INT || value->a.number != number) {
+        value->kind = V_INT;
+        value->a.number = number;
+    }
     return value;
 }
 
 Value *make_char(long code)
 {
-    Value *value = new_value(V_CHAR);
+    Value *value;
 
-    value->number = code;
+    if (code >= 0 && code < SHARED_CHARS) {
+        value = &shared_chars[code];
+        value->kind = V_CHAR;
+        value->a.number = code;
+        return value;
+    }
+    value = new_value(V_CHAR);
+    value->a.number = code;
     return value;
 }
 
+/* The fields of a constructor that has none. */
+static Value *no_fields[1];
+
+/* A constructor without fields is made once for each tag, outside the
+   collector's memory, as small numbers are: True, Nothing, (). */
+#define SHARED_TAGS 64
+static Value shared_nullary[SHARED_TAGS];
+
+/* The fields are in the cell of the value, right after it: one allocation
+   instead of two, and they are next to it in memory. */
 Value *make_con(int tag, int field_count)
 {
-    Value *value = new_value(V_CON);
+    Value *value;
 
+    if (field_count == 0 && tag >= 0 && tag < SHARED_TAGS) {
+        value = &shared_nullary[tag];
+        if (value->kind != V_CON) {
+            value->kind = V_CON;
+            value->tag = tag;
+            value->is_deep = 1;
+            value->b.fields = no_fields;
+        }
+        return value;
+    }
+    value = gc_alloc_value(field_count);
+
+    value->kind = V_CON;
     value->tag = tag;
-    value->field_count = field_count;
-    value->fields = gc_alloc((size_t)field_count * sizeof(Value *) + 1);
+    value->a.field_count = field_count;
+    value->b.fields = field_count > 0 ? (Value **)(value + 1) : no_fields;
     return value;
 }
 
@@ -88,8 +143,8 @@ Value *make_thunk(Expr *expr, Env *env)
 {
     Value *value = new_value(V_THUNK);
 
-    value->expr = expr;
-    value->env = env;
+    value->a.expr = expr;
+    value->c.env = env;
     return value;
 }
 
@@ -97,7 +152,7 @@ Value *make_builtin(const Builtin *builtin)
 {
     Value *value = new_value(V_BUILTIN);
 
-    value->builtin = builtin;
+    value->c.builtin = builtin;
     return value;
 }
 
@@ -105,15 +160,23 @@ Value *make_io_result(Value *result)
 {
     Value *box = make_con(0, 1);
 
-    box->fields[0] = result;
+    box->b.fields[0] = result;
     return box;
 }
 
+/* Types are never freed, and a type has no variables in it at run time, so
+   each has one value, outside the collector's memory. */
 Value *make_type(Type *type)
 {
-    Value *value = new_value(V_TYPE);
+    Value *value = type->value;
 
-    value->type = type;
+    if (value == NULL) {
+        value = xmalloc(sizeof(Value));
+        memset(value, 0, sizeof(Value));
+        value->kind = V_TYPE;
+        value->b.type = type;
+        type->value = value;
+    }
     return value;
 }
 
@@ -121,9 +184,9 @@ static Value *make_closure(Expr *lambda, Env *env)
 {
     Value *value = new_value(V_CLOSURE);
 
-    value->parameter = lambda->local;
-    value->body = lambda->body;
-    value->env = env;
+    value->a.parameter = lambda->local;
+    value->b.body = lambda->body;
+    value->c.env = env;
     return value;
 }
 
@@ -136,33 +199,162 @@ Value *make_string(const char *string)
     while (*string != '\0') {
         Value *cell = make_con(TAG_CONS, 2);
 
-        cell->fields[0] = make_char(utf8_decode(&string));
-        cell->fields[1] = *last;
+        cell->b.fields[0] = make_char(utf8_decode(&string));
+        cell->b.fields[1] = *last;
         *last = cell;
-        last = &cell->fields[1];
+        last = &cell->b.fields[1];
     }
     return list;
 }
 
-static Env *extend(Env *outer, Binding *binding, Value *value)
-{
-    Env *env = gc_alloc(sizeof(Env));
+/* ---- Environments ---- */
 
-    env->binding = binding;
-    env->value = value;
-    env->outer = outer;
+static Shape empty_shape;
+
+#define SHAPE_BUCKETS 65536
+static Shape *shapes[SHAPE_BUCKETS];
+
+/* The shape with one more variable. */
+static const Shape *child_shape(const Shape *parent, Binding *binding)
+{
+    size_t bucket = ((size_t)parent / 16 * 31 + (size_t)binding / 16)
+                    % SHAPE_BUCKETS;
+    Shape *child;
+
+    /* A variable is mostly added to environments of one shape. */
+    if (binding->shape_parent == parent) {
+        return binding->shape_child;
+    }
+    for (child = shapes[bucket]; child != NULL; child = child->next) {
+        if (child->parent == parent
+            && child->bindings[parent->count] == binding) {
+            binding->shape_parent = parent;
+            binding->shape_child = child;
+            return child;
+        }
+    }
+    child = xmalloc(sizeof(Shape));
+    child->count = parent->count + 1;
+    child->bindings = xmalloc((size_t)child->count * sizeof(Binding *));
+    if (parent->count > 0) {
+        memcpy(child->bindings, parent->bindings,
+               (size_t)parent->count * sizeof(Binding *));
+    }
+    child->bindings[parent->count] = binding;
+    child->parent = parent;
+    child->next = shapes[bucket];
+    shapes[bucket] = child;
+    binding->shape_parent = parent;
+    binding->shape_child = child;
+    return child;
+}
+
+static const Shape *shape_of(const Env *env)
+{
+    return env != NULL ? env->shape : &empty_shape;
+}
+
+/* A new environment of the shape, with the values of `outer` first and
+   room for the others. */
+static Env *new_env(const Shape *shape, const Env *outer)
+{
+    Env *env = gc_alloc_env(shape->count);
+
+    if (outer != NULL) {
+        memcpy(env->values, outer->values,
+               (size_t)outer->shape->count * sizeof(Value *));
+    }
+    env->shape = shape;
     return env;
+}
+
+/* Binds `parameter` to the argument on top of the machine's stack (an
+   F_APPLY frame), and the parameters of the lambdas the body starts with
+   to the arguments under it, as long as there are some waiting: one new
+   environment for all of them, instead of one for each. Sets `*body` to
+   what is left to evaluate. */
+static Env *bind_waiting(Env *env, Binding *parameter, Expr **body)
+{
+    const Shape *shape = shape_of(env);
+    Expr *start = *body;
+    Expr *rest = start;
+    Env *bound;
+    int first;
+    int count = 1;
+    int i;
+
+    while (rest->kind == E_LAMBDA && count < stack_size
+           && stack[stack_size - 1 - count].kind == F_APPLY) {
+        rest = rest->body;
+        count++;
+    }
+    /* Mostly the same shape as the last time. */
+    if (start->bind_from == shape && start->bind_count == count) {
+        shape = start->bind_to;
+    } else {
+        const Shape *from = shape;
+        Expr *lambda = start;
+
+        shape = child_shape(shape, parameter);
+        for (i = 1; i < count; i++) {
+            shape = child_shape(shape, lambda->local);
+            lambda = lambda->body;
+        }
+        start->bind_from = from;
+        start->bind_to = shape;
+        start->bind_count = count;
+    }
+    /* The arguments stay on the stack, where the collector finds them,
+       until they are in the environment. */
+    bound = new_env(shape, env);
+    first = shape->count - count;
+    for (i = 0; i < count; i++) {
+        bound->values[first + i] = stack[stack_size - 1 - i].value;
+    }
+    stack_size -= count;
+    *body = rest;
+    return bound;
+}
+
+/* Where the variable is in an environment of the shape, or -1. The
+   innermost one counts, though a variable is bound only once in an
+   environment. */
+static int position(const Shape *shape, const Binding *binding)
+{
+    int i;
+
+    for (i = shape->count - 1; i >= 0; i--) {
+        if (shape->bindings[i] == binding) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 static Value *lookup(const Env *env, const Binding *binding)
 {
-    for (; env != NULL; env = env->outer) {
-        if (env->binding == binding) {
-            return env->value;
-        }
+    int i = position(shape_of(env), binding);
+
+    if (i < 0) {
+        die("variable %s is not in the environment", binding->name);
     }
-    die("variable %s is not in the environment", binding->name);
-    return NULL;
+    return env->values[i];
+}
+
+/* The value of the variable of an E_LOCAL. An expression is mostly
+   evaluated in environments of one shape, so where the variable is is
+   remembered. */
+static Value *lookup_local(Expr *expr, const Env *env)
+{
+    if (env != NULL && env->shape == expr->lookup_shape) {
+        return env->values[expr->lookup_index];
+    }
+    expr->lookup_index = position(shape_of(env), expr->local);
+    if (expr->lookup_index < 0) {
+        die("variable %s is not in the environment", expr->local->name);
+    }
+    expr->lookup_shape = shape_of(env);
+    return env->values[expr->lookup_index];
 }
 
 /* ---- What an expression needs of its environment ---- */
@@ -177,24 +369,24 @@ static Value *lookup(const Env *env, const Binding *binding)
    kept. The list also has the variables that are bound inside the
    expression; those are not in the environment, and are skipped. */
 
-static void note_expr(Expr *owner, const Expr *expr);
+static void note_expr(Needed *owner, const Expr *expr);
 
-static void note_variable(Expr *owner, Binding *binding)
+static void note_variable(Needed *owner, Binding *binding)
 {
     int i;
 
-    for (i = 0; i < owner->needed_count; i++) {
-        if (owner->needed[i] == binding) {
+    for (i = 0; i < owner->count; i++) {
+        if (owner->bindings[i] == binding) {
             return;
         }
     }
-    owner->needed = xrealloc(owner->needed, (size_t)(owner->needed_count + 1)
-                                                * sizeof(Binding *));
-    owner->needed[owner->needed_count++] = binding;
+    owner->bindings = xrealloc(owner->bindings, (size_t)(owner->count + 1)
+                                                    * sizeof(Binding *));
+    owner->bindings[owner->count++] = binding;
 }
 
 /* The same types as close_type looks into. */
-static void note_type(Expr *owner, Type *type)
+static void note_type(Needed *owner, Type *type)
 {
     type = prune(type);
     if (type->kind == TY_RIGID) {
@@ -205,7 +397,7 @@ static void note_type(Expr *owner, Type *type)
     }
 }
 
-static void note_pattern(Expr *owner, const Pattern *pattern)
+static void note_pattern(Needed *owner, const Pattern *pattern)
 {
     int i;
 
@@ -223,11 +415,41 @@ static void note_pattern(Expr *owner, const Pattern *pattern)
     }
 }
 
-static void note_expr(Expr *owner, const Expr *expr)
+/* What the alternatives of a case mention. */
+static void note_alternatives(Needed *owner, const Expr *expr)
 {
     const Alternative *alternative;
     const Guard *guard;
     const Qualifier *qualifier;
+
+    for (alternative = expr->alternatives; alternative != NULL;
+         alternative = alternative->next) {
+        note_pattern(owner, alternative->pattern);
+        if (alternative->where != NULL) {
+            note_expr(owner, alternative->where);
+        }
+        if (alternative->body != NULL) {
+            note_expr(owner, alternative->body);
+        }
+        for (guard = alternative->guards; guard != NULL; guard = guard->next) {
+            for (qualifier = guard->qualifiers; qualifier != NULL;
+                 qualifier = qualifier->next) {
+                if (qualifier->let != NULL) {
+                    note_expr(owner, qualifier->let);
+                    continue;
+                }
+                if (qualifier->pattern != NULL) {
+                    note_pattern(owner, qualifier->pattern);
+                }
+                note_expr(owner, qualifier->expr);
+            }
+            note_expr(owner, guard->body);
+        }
+    }
+}
+
+static void note_expr(Needed *owner, const Expr *expr)
+{
     int i;
 
     switch (expr->kind) {
@@ -252,30 +474,7 @@ static void note_expr(Expr *owner, const Expr *expr)
         break;
     case E_CASE:
         note_expr(owner, expr->scrutinee);
-        for (alternative = expr->alternatives; alternative != NULL;
-             alternative = alternative->next) {
-            note_pattern(owner, alternative->pattern);
-            if (alternative->where != NULL) {
-                note_expr(owner, alternative->where);
-            }
-            if (alternative->body != NULL) {
-                note_expr(owner, alternative->body);
-            }
-            for (guard = alternative->guards; guard != NULL; guard = guard->next) {
-                for (qualifier = guard->qualifiers; qualifier != NULL;
-                     qualifier = qualifier->next) {
-                    if (qualifier->let != NULL) {
-                        note_expr(owner, qualifier->let);
-                        continue;
-                    }
-                    if (qualifier->pattern != NULL) {
-                        note_pattern(owner, qualifier->pattern);
-                    }
-                    note_expr(owner, qualifier->expr);
-                }
-                note_expr(owner, guard->body);
-            }
-        }
+        note_alternatives(owner, expr);
         break;
     case E_TYPE:
     case E_METHOD:
@@ -286,27 +485,69 @@ static void note_expr(Expr *owner, const Expr *expr)
     }
 }
 
+/* An environment with just the variables in `needed`. Those that are not
+   in `env` are bound inside the expression, and are left out. Where the
+   others are is worked out for one shape of `env` at a time, which is
+   mostly the only one. */
+static Env *keep(Needed *needed, Env *env)
+{
+    const Shape *from = shape_of(env);
+    const Shape *to;
+    Env *kept;
+    int i;
+
+    if (needed->from != from || needed->positions == NULL) {
+        to = &empty_shape;
+        needed->positions =
+            xrealloc(needed->positions, (size_t)(needed->count + 1) * sizeof(int));
+        for (i = 0; i < needed->count; i++) {
+            int place = position(from, needed->bindings[i]);
+
+            if (place >= 0) {
+                needed->positions[to->count] = place;
+                to = child_shape(to, needed->bindings[i]);
+            }
+        }
+        needed->from = from;
+        needed->to = to;
+    }
+    to = needed->to;
+    if (to->count == 0) {
+        return NULL;
+    }
+    /* All of them, in the same order: an environment never changes, so
+       this one will do. */
+    if (to == from) {
+        return env;
+    }
+    kept = new_env(to, NULL);
+    for (i = 0; i < to->count; i++) {
+        kept->values[i] = env->values[needed->positions[i]];
+    }
+    return kept;
+}
+
 /* An environment with just the variables that the expression mentions. */
 static Env *keep_needed(Expr *expr, Env *env)
 {
-    Env *kept = NULL;
-    int i;
-
-    if (!expr->needed_known) {
-        note_expr(expr, expr);
-        expr->needed_known = 1;
+    if (!expr->needed.known) {
+        note_expr(&expr->needed, expr);
+        expr->needed.known = 1;
     }
-    for (i = 0; i < expr->needed_count; i++) {
-        const Env *cell = env;
+    return keep(&expr->needed, env);
+}
 
-        while (cell != NULL && cell->binding != expr->needed[i]) {
-            cell = cell->outer;
-        }
-        if (cell != NULL) {
-            kept = extend(kept, expr->needed[i], cell->value);
-        }
+/* What a case keeps while its scrutinee is evaluated: the variables its
+   alternatives mention. The scrutinee often is the last use of a variable
+   (case run p s of ...), and the value of that variable must not stay in
+   use until the scrutinee is done. */
+static Env *keep_for_alternatives(Expr *expr, Env *env)
+{
+    if (!expr->alternatives_needed.known) {
+        note_alternatives(&expr->alternatives_needed, expr);
+        expr->alternatives_needed.known = 1;
     }
-    return kept;
+    return keep(&expr->alternatives_needed, env);
 }
 
 /* The value of the expression, to be worked out when something needs it.
@@ -314,16 +555,114 @@ static Env *keep_needed(Expr *expr, Env *env)
    is a type variable: a function that calls itself passes its own type
    on, and nothing ever looks at it, so a thunk for it would refer to the
    thunk of the call before, and that to the one before it. */
+static Type *close_type(Type *type, const Env *env);
+
+/* The type with every link followed. Type applications are made once, so
+   a type without variables in it is one pointer to compare. */
+static Type *follow_links(Type *type)
+{
+    Type *function;
+    Type *argument;
+
+    type = prune(type);
+    if (type->kind != TY_APP) {
+        return type;
+    }
+    function = follow_links(type->function);
+    argument = follow_links(type->argument);
+    if (function == type->function && argument == type->argument) {
+        return type;
+    }
+    return new_type_application(function, argument);
+}
+
+static int has_variables(Type *type)
+{
+    switch (type->kind) {
+    case TY_RIGID:
+        return 1;
+    case TY_APP:
+        return has_variables(type->function)
+               || has_variables(type->argument);
+    default:
+        return 0;
+    }
+}
+
+/* The type of an E_TYPE or E_METHOD, worked out the first time. The type
+   checker is done with it when it runs: its links do not change. */
+static Type *run_type(Expr *expr)
+{
+    if (expr->run_type_state == 0) {
+        expr->run_type = follow_links(expr->type);
+        expr->run_type_state = has_variables(expr->run_type) ? 2 : 1;
+    }
+    return expr->run_type;
+}
+
+/* The type of an E_TYPE or E_METHOD with its variables replaced by what
+   they stand for in the environment. */
+static Type *closed_type(Expr *expr, const Env *env)
+{
+    Type *type = run_type(expr);
+
+    return expr->run_type_state == 1 ? type : close_type(type, env);
+}
+
+/* The method of an E_METHOD. Found once if its type has no variables in
+   it, as long as no instances come: find_method keeps the value in use
+   meanwhile. */
+static Value *method_of(Expr *expr, const Env *env)
+{
+    Type *type = closed_type(expr, env);
+
+    if (expr->run_type_state != 1) {
+        return find_method(expr->global, type);
+    }
+    if (expr->method == NULL || expr->method_instances != all_instances) {
+        Value *method = find_method(expr->global, type);
+
+        if (!method_is_remembered(type)) {
+            return method;
+        }
+        expr->method = method;
+        expr->method_instances = all_instances;
+    }
+    return expr->method;
+}
+
 static Value *delay(Expr *expr, Env *env)
 {
-    if (expr->kind == E_LOCAL) {
-        return lookup(env, expr->local);
-    }
-    if (expr->kind == E_TYPE && prune(expr->type)->kind == TY_RIGID) {
-        return lookup(env, prune(expr->type)->variable);
-    }
-    if (expr->kind == E_LAMBDA) {
+    switch (expr->kind) {
+    case E_LOCAL:
+        return lookup_local(expr, env);
+    case E_TYPE:
+        if (run_type(expr)->kind == TY_RIGID) {
+            return lookup(env, run_type(expr)->variable);
+        }
+        /* What a type's variables stand for are types too, which are
+           quickly found: no thunk is worth making for it. */
+        return make_type(closed_type(expr, env));
+    case E_LAMBDA:
         return make_closure(expr, keep_needed(expr, env));
+    case E_CONSTRUCTOR:
+        return make_constructor(expr->constructor);
+    case E_CHAR:
+        return make_char(expr->number);
+    case E_INT:
+        if (expr->big == 0) {
+            return make_int(expr->number);
+        }
+        break;
+    case E_GLOBAL:
+        /* A global is worked out the first time it is evaluated, which
+           this is not. */
+        if (expr->global->value != NULL) {
+            return expr->global->value;
+        }
+        break;
+    default:
+        break;
     }
     return make_thunk(expr, keep_needed(expr, env));
 }
@@ -335,10 +674,18 @@ static Type *close_type(Type *type, const Env *env)
     type = prune(type);
     switch (type->kind) {
     case TY_RIGID:
-        return force(lookup(env, type->variable))->type;
-    case TY_APP:
-        return new_type_application(close_type(type->function, env),
-                                    close_type(type->argument, env));
+        return force(lookup(env, type->variable))->b.type;
+    case TY_APP: {
+        /* Types made here are never freed, so one without variables in it
+           is not made again. */
+        Type *function = close_type(type->function, env);
+        Type *argument = close_type(type->argument, env);
+
+        if (function == type->function && argument == type->argument) {
+            return type;
+        }
+        return new_type_application(function, argument);
+    }
     case TY_META:
     case TY_CON:
     case TY_FORALL:
@@ -348,88 +695,201 @@ static Type *close_type(Type *type, const Env *env)
 }
 
 /* The value of a constructor that has not been given any fields yet. */
-static Value *make_constructor(const Constructor *constructor)
+Value *make_constructor(const Constructor *constructor)
 {
     Value *value;
 
     if (constructor->arity + constructor->existential_count == 0) {
         return make_con(constructor->tag, 0);
     }
-    value = new_value(V_PARTIAL_CON);
-    value->constructor = constructor;
-    return value;
+    /* It never changes: giving it a field makes a new value. So it is made
+       once, outside the collector's memory, as a type's value is. */
+    if (constructor->unapplied == NULL) {
+        value = xmalloc(sizeof(Value));
+        memset(value, 0, sizeof(Value));
+        value->kind = V_PARTIAL_CON;
+        value->c.constructor = constructor;
+        ((Constructor *)constructor)->unapplied = value;
+    }
+    return constructor->unapplied;
 }
 
-/* Gives a builtin or a constructor one more argument. If that was the last
-   one, calls the builtin or builds the constructed value. */
-static Value *apply_partial(const Value *function, Value *argument)
+/* How many arguments a builtin or a constructor takes in all. */
+static int arity_of(const Value *function)
 {
-    int count = function->argument_count;
-    Value **arguments = gc_alloc((size_t)(count + 1) * sizeof(Value *));
+    if (function->kind == V_BUILTIN) {
+        return function->c.builtin->arity;
+    }
+    return function->c.constructor->arity
+           + function->c.constructor->existential_count;
+}
+
+/* The builtin or constructor given `count` arguments in all, all of them
+   in `arguments`, a new array: calls the builtin if that is all of them.
+   A constructor with all of them is made by take_arguments, but for a
+   newtype, which is its argument. */
+static Value *give_arguments(const Value *function, Value **arguments,
+                             int count)
+{
     Value *result;
 
-    if (count > 0) {
-        memcpy(arguments, function->arguments, (size_t)count * sizeof(Value *));
-    }
-    arguments[count] = argument;
-    if (function->kind == V_BUILTIN) {
-        if (count + 1 == function->builtin->arity) {
-            return function->builtin->function(arguments);
+    if (count == arity_of(function)) {
+        if (function->kind == V_BUILTIN) {
+            return function->c.builtin->function(arguments);
         }
-    } else if (count + 1 == function->constructor->arity
-                            + function->constructor->existential_count) {
-        const Constructor *constructor = function->constructor;
-        int i;
-
-        if (constructor->is_newtype) {
-            return argument;
-        }
-        for (i = 0; i < constructor->arity; i++) {
-            if (constructor->field_strict != NULL
-                && constructor->field_strict[i]) {
-                force(arguments[constructor->existential_count + i]);
-            }
-        }
-        result = new_value(V_CON);
-        result->tag = function->constructor->tag;
-        result->field_count = count + 1;
-        result->fields = arguments;
-        return result;
+        return arguments[count - 1];
     }
     result = new_value(function->kind);
-    result->builtin = function->builtin;
-    result->constructor = function->constructor;
-    result->argument_count = count + 1;
-    result->arguments = arguments;
+    result->c.builtin = function->c.builtin;
+    result->c.constructor = function->c.constructor;
+    result->a.argument_count = count;
+    result->b.arguments = arguments;
     return result;
 }
 
-/* Whether the value has the shape of the pattern. Adds the variables of the
-   pattern to `*env`. Sub-patterns evaluate the fields they look at with a
-   nested call of the machine; flattening nested patterns in a desugaring
-   pass would avoid that. */
-static int matches(const Pattern *pattern, Value *value, Env **env)
+#define BUILTIN_ARGUMENTS 10 /* more than any builtin takes */
+
+/* Gives a builtin or a constructor `argument`, and the `waiting` arguments
+   on top of the machine's stack after it. A constructor that gets its last
+   argument is made with its fields in its cell, without an array first. */
+static Value *take_arguments(const Value *function, Value *argument,
+                             int waiting)
+{
+    int count = function->a.argument_count;
+    int total = count + 1 + waiting;
+    Value *constructed = NULL;
+    /* A builtin that gets all its arguments gets them on the C stack: no
+       builtin keeps the array. */
+    Value *on_c_stack[BUILTIN_ARGUMENTS];
+    Value **arguments;
+    int i;
+
+    if (function->kind == V_PARTIAL_CON && total == arity_of(function)
+        && !function->c.constructor->is_newtype) {
+        constructed = make_con(function->c.constructor->tag, total);
+        arguments = constructed->b.fields;
+    } else if (function->kind == V_BUILTIN && total == arity_of(function)
+               && total <= BUILTIN_ARGUMENTS) {
+        arguments = on_c_stack;
+    } else {
+        arguments = gc_alloc((size_t)total * sizeof(Value *));
+    }
+    if (count > 0) {
+        memcpy(arguments, function->b.arguments, (size_t)count * sizeof(Value *));
+    }
+    arguments[count] = argument;
+    for (i = 1; i <= waiting; i++) {
+        arguments[count + i] = stack[--stack_size].value;
+    }
+    if (constructed != NULL) {
+        const Constructor *constructor = function->c.constructor;
+
+        for (i = 0; constructor->field_strict != NULL
+                    && i < constructor->arity; i++) {
+            if (constructor->field_strict[i]) {
+                force(arguments[constructor->existential_count + i]);
+            }
+        }
+        return constructed;
+    }
+    return give_arguments(function, arguments, total);
+}
+
+/* Gives a builtin or a constructor one more argument. */
+static Value *apply_partial(const Value *function, Value *argument)
+{
+    return take_arguments(function, argument, 0);
+}
+
+/* Gives a builtin or a constructor `argument` and, if the machine's stack
+   has the rest of the arguments it needs waiting on top (F_APPLY), those
+   too: one array, instead of a partial application for each. */
+static Value *apply_waiting(const Value *function, Value *argument)
+{
+    int waiting = arity_of(function) - function->a.argument_count - 1;
+    int i;
+
+    if (waiting <= 0 || stack_size < waiting) {
+        return apply_partial(function, argument);
+    }
+    for (i = 1; i <= waiting; i++) {
+        if (stack[stack_size - i].kind != F_APPLY) {
+            return apply_partial(function, argument);
+        }
+    }
+    return take_arguments(function, argument, waiting);
+}
+
+/* The variables a pattern binds, collected while it is matched, so that
+   they go into one new environment at the end instead of one each. The
+   values are on the C stack meanwhile, where the collector sees them. */
+#define BINDER_SIZE 16
+
+typedef struct Binder {
+    Env *env; /* with the variables bound before these */
+    int count;
+    Binding *bindings[BINDER_SIZE];
+    Value *values[BINDER_SIZE];
+} Binder;
+
+/* The environment with every variable bound so far. */
+static Env *bound(Binder *binder)
+{
+    const Shape *shape = shape_of(binder->env);
+    int first = shape->count;
+    Env *env;
+    int i;
+
+    if (binder->count == 0) {
+        return binder->env;
+    }
+    for (i = 0; i < binder->count; i++) {
+        shape = child_shape(shape, binder->bindings[i]);
+    }
+    env = new_env(shape, binder->env);
+    for (i = 0; i < binder->count; i++) {
+        env->values[first + i] = binder->values[i];
+    }
+    binder->env = env;
+    binder->count = 0;
+    return env;
+}
+
+static void bind(Binder *binder, Binding *binding, Value *value)
+{
+    if (binder->count == BINDER_SIZE) {
+        bound(binder);
+    }
+    binder->bindings[binder->count] = binding;
+    binder->values[binder->count] = value;
+    binder->count++;
+}
+
+/* Whether the value has the shape of the pattern. Sub-patterns evaluate
+   the fields they look at with a nested call of the machine; flattening
+   nested patterns in a desugaring pass would avoid that. */
+static int match_into(const Pattern *pattern, Value *value, Binder *binder)
 {
     int skip;
     int i;
 
     switch (pattern->kind) {
     case P_VARIABLE:
-        *env = extend(*env, pattern->variable, value);
+        bind(binder, pattern->variable, value);
         return 1;
     case P_WILDCARD:
         return 1;
     case P_CHAR:
-        return force(value)->number == pattern->number;
+        return force(value)->a.number == pattern->number;
     case P_LITERAL: {
-        Value *equals = delay(pattern->equals, *env);
-        Value *literal = delay(pattern->literal, *env);
+        Value *equals = delay(pattern->equals, bound(binder));
+        Value *literal = delay(pattern->literal, bound(binder));
 
         return apply(apply(equals, value), literal)->tag == TAG_TRUE;
     }
     case P_CONSTRUCTOR:
         if (pattern->constructor->is_newtype) {
-            return matches(pattern->arguments[0], value, env);
+            return match_into(pattern->arguments[0], value, binder);
         }
         value = force(value);
         if (value->tag != pattern->constructor->tag) {
@@ -438,48 +898,75 @@ static int matches(const Pattern *pattern, Value *value, Env **env)
         /* The types the value stores come before its fields. */
         skip = pattern->constructor->existential_count;
         for (i = 0; i < skip; i++) {
-            *env = extend(*env, pattern->existentials[i], value->fields[i]);
+            bind(binder, pattern->existentials[i], value->b.fields[i]);
         }
         for (i = 0; i < pattern->argument_count; i++) {
-            if (!matches(pattern->arguments[i], value->fields[skip + i], env)) {
+            if (!match_into(pattern->arguments[i], value->b.fields[skip + i],
+                            binder)) {
                 return 0;
             }
         }
         return 1;
     case P_AS:
-        *env = extend(*env, pattern->variable, value);
-        return matches(pattern->inner, value, env);
+        bind(binder, pattern->variable, value);
+        return match_into(pattern->inner, value, binder);
     case P_BANG:
-        return matches(pattern->inner, force(value), env);
+        return match_into(pattern->inner, force(value), binder);
     case P_VIEW:
-        return matches(pattern->inner,
-                       apply(delay(pattern->literal, *env), value), env);
+        return match_into(pattern->inner,
+                          apply(delay(pattern->literal, bound(binder)), value),
+                          binder);
     case P_RECORD:
         break;
     }
     return 0;
 }
 
+/* Whether the value has the shape of the pattern. Adds the variables of the
+   pattern to `*env` if it has. */
+static int matches(const Pattern *pattern, Value *value, Env **env)
+{
+    Binder binder;
+
+    binder.env = *env;
+    binder.count = 0;
+    if (!match_into(pattern, value, &binder)) {
+        return 0;
+    }
+    *env = bound(&binder);
+    return 1;
+}
+
 /* The environment extended with the bindings of an E_LET. Every definition
-   is a thunk that can see all the bindings, itself included. */
+   is a thunk that can see all the bindings, itself included. A binding with
+   a ! in front is evaluated before the body, as in GHC; a program may rely
+   on that to let go of what the expression refers to. */
 static Env *bind_let(const Expr *let, Env *env)
 {
-    Env **cells = gc_alloc((size_t)let->binding_count * sizeof(Env *) + 1);
+    const Shape *shape = shape_of(env);
+    int first = shape->count;
     int i;
 
     for (i = 0; i < let->binding_count; i++) {
-        env = extend(env, let->bindings[i], NULL);
-        cells[i] = env;
+        shape = child_shape(shape, let->bindings[i]);
     }
+    env = new_env(shape, env);
     /* A definition may mention any of the bindings, so all of them get
        their value before any of them gets its environment. */
     for (i = 0; i < let->binding_count; i++) {
-        cells[i]->value = let->values[i]->kind == E_LAMBDA
+        env->values[first + i] = let->values[i]->kind == E_LAMBDA
             ? make_closure(let->values[i], NULL)
             : make_thunk(let->values[i], NULL);
     }
     for (i = 0; i < let->binding_count; i++) {
-        cells[i]->value->env = keep_needed(let->values[i], env);
+        Env *kept = keep_needed(let->values[i], env);
+
+        /* A collection in between may have made the thunk old. */
+        env->values[first + i]->c.env = kept;
+        gc_written_value(env->values[first + i]);
+    }
+    for (i = 0; i < let->strict_count; i++) {
+        force(lookup(env, let->strict[i]));
     }
     return env;
 }
@@ -585,17 +1072,28 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 }
                 push(F_CASE, NULL);
                 stack[stack_size - 1].expr = expr;
-                stack[stack_size - 1].env = env;
+                stack[stack_size - 1].env = keep_for_alternatives(expr, env);
                 expr = expr->scrutinee;
                 continue;
             case E_LAMBDA:
+                if (stack[stack_size - 1].kind == F_APPLY) {
+                    /* The closure would be applied at once: its parameter
+                       is bound without making it. A function of several
+                       arguments, \a -> \b -> ..., takes them all this
+                       way. */
+                    Binding *parameter = expr->local;
+
+                    expr = expr->body;
+                    env = bind_waiting(env, parameter, &expr);
+                    continue;
+                }
                 value = make_closure(expr, keep_needed(expr, env));
                 break;
             case E_CONSTRUCTOR:
                 value = make_constructor(expr->constructor);
                 break;
             case E_LOCAL:
-                value = lookup(env, expr->local);
+                value = lookup_local(expr, env);
                 break;
             case E_GLOBAL:
                 value = global_value(expr->global);
@@ -621,10 +1119,10 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 expr = expr->body;
                 continue;
             case E_TYPE:
-                value = make_type(close_type(expr->type, env));
+                value = make_type(closed_type(expr, env));
                 break;
             case E_METHOD:
-                value = find_method(expr->global, close_type(expr->type, env));
+                value = method_of(expr, env);
                 break;
             case E_NAME:
             case E_OPERATORS:
@@ -634,32 +1132,33 @@ static Value *run(Expr *expr, Env *env, Value *value)
             }
             expr = NULL;
         } else if (value->kind == V_THUNK) {
-            expr = value->expr;
-            env = value->env;
+            expr = value->a.expr;
+            env = value->c.env;
             if (stack[stack_size - 1].kind == F_UPDATE) {
                 /* The thunk on top of the stack is waiting for exactly
                    this value, so this thunk shares its frame: it becomes
                    that thunk. A loop that ends in a `seq` b, where b is a
-                   thunk, would otherwise leave a frame for every turn.
-                   The waiting thunk takes over the expression: that is
-                   what it is put back to if an exception passes, and it
-                   lets go of what its own expression could see. */
-                Value *waiting = stack[stack_size - 1].value;
-
-                waiting->expr = expr;
-                waiting->env = env;
+                   thunk, would otherwise leave a frame for every turn. */
                 value->kind = V_INDIRECTION;
-                value->result = waiting;
-                value->expr = NULL;
-                value->env = NULL;
+                value->b.result = stack[stack_size - 1].value;
+                gc_written_value(value);
             } else {
                 push(F_UPDATE, value);
                 value->kind = V_BLACKHOLE;
             }
+            /* A thunk that is being evaluated lets go of what its
+               expression could see: the machine has that now, and lets go
+               of each part when it is done with it. A parser that keeps
+               its input in a variable would otherwise keep all of it until
+               the parse is over. */
+            value->a.expr = NULL;
+            value->c.env = NULL;
         } else if (value->kind == V_INDIRECTION) {
-            value = value->result;
+            value = value->b.result;
         } else if (value->kind == V_BLACKHOLE) {
             die("<<loop>>");
+        } else if (value->kind == V_RAISE) {
+            raise_exception(value->b.result);
         } else {
             /* A finished value: give it to the frame that is waiting. */
             Frame frame = stack[--stack_size];
@@ -669,11 +1168,12 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 return value;
             case F_UPDATE:
                 frame.value->kind = V_INDIRECTION;
-                frame.value->result = value;
+                frame.value->b.result = value;
+                gc_written_value(frame.value);
                 /* What the expression could see is no longer needed, and
                    must not stay in use because of this. */
-                frame.value->expr = NULL;
-                frame.value->env = NULL;
+                frame.value->a.expr = NULL;
+                frame.value->c.env = NULL;
                 break;
             case F_CASE:
                 env = frame.env;
@@ -681,11 +1181,12 @@ static Value *run(Expr *expr, Env *env, Value *value)
                 break;
             case F_APPLY:
                 if (value->kind == V_CLOSURE) {
-                    env = extend(value->env, value->parameter, frame.value);
-                    expr = value->body;
+                    stack_size++; /* the argument is taken from there */
+                    expr = value->b.body;
+                    env = bind_waiting(value->c.env, value->a.parameter, &expr);
                 } else if (value->kind == V_BUILTIN
                            || value->kind == V_PARTIAL_CON) {
-                    value = apply_partial(value, frame.value);
+                    value = apply_waiting(value, frame.value);
                 } else {
                     die("applying something that is not a function");
                 }
@@ -697,6 +1198,14 @@ static Value *run(Expr *expr, Env *env, Value *value)
 
 Value *force(Value *value)
 {
+    /* Most values are evaluated already: the machine is not needed. */
+    while (value->kind == V_INDIRECTION) {
+        value = value->b.result;
+    }
+    if (value->kind != V_THUNK && value->kind != V_BLACKHOLE
+        && value->kind != V_RAISE) {
+        return value;
+    }
     push(F_STOP, NULL);
     return run(NULL, NULL, value);
 }
@@ -717,6 +1226,7 @@ void mark_roots(void)
 
     gc_mark_range(stack, stack + stack_size);
     gc_mark(raised);
+    mark_remembered_methods();
     for (global = all_globals; global != NULL; global = global->all_next) {
         gc_mark(global->value);
     }
@@ -759,13 +1269,16 @@ Value *catch_exception(Value *function, Value *argument, Value **exception)
         return result;
     }
     /* raise_exception jumped here. Drop what the machine was doing. A thunk
-       that was being evaluated goes back to being a thunk: evaluating it
-       again raises the exception again. */
+       that was being evaluated raises the same exception when it is
+       evaluated again, as in GHC: what it would need to start again is
+       gone (see run). */
     handlers = handler.outer;
     while (stack_size > handler.stack_size) {
         stack_size--;
         if (stack[stack_size].kind == F_UPDATE) {
-            stack[stack_size].value->kind = V_THUNK;
+            stack[stack_size].value->kind = V_RAISE;
+            stack[stack_size].value->b.result = raised;
+            gc_written_value(stack[stack_size].value);
         }
     }
     *exception = raised;
