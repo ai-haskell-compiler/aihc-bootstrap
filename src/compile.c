@@ -328,11 +328,18 @@ static Code *compile_function(Scope *outer, Expr *expr, int thunk)
     }
     free(mentioned.bindings);
     function->capture_count = count;
-    function->body = compile(&scope, expr);
-    function->slot_count = scope.slot_count;
-    find_kills(&scope, function);
-    find_strictness(&scope, function);
-    free(scope.bindings);
+    if (thunk) {
+        /* Its code is compiled when it is first run: see compile_body. */
+        function->source = expr;
+        function->bindings = scope.bindings;
+        function->slot_count = count;
+    } else {
+        function->body = compile(&scope, expr);
+        function->slot_count = scope.slot_count;
+        find_kills(&scope, function);
+        find_strictness(&scope, function);
+        free(scope.bindings);
+    }
     free(scope.slots);
     free(scope.nodes);
     if (count == 0 && function->arity > 0) {
@@ -360,6 +367,26 @@ static Code *compile_function(Scope *outer, Expr *expr, int thunk)
     code->slots = captures;
     code->count = count;
     return code;
+}
+
+void compile_body(Function *function)
+{
+    Scope scope;
+    int i;
+
+    memset(&scope, 0, sizeof(scope));
+    for (i = 0; i < function->capture_count; i++) {
+        bind(&scope, function->bindings[i], new_slot(&scope));
+    }
+    function->body = compile(&scope, function->source);
+    function->slot_count = scope.slot_count;
+    find_kills(&scope, function);
+    free(scope.bindings);
+    free(scope.slots);
+    free(scope.nodes);
+    free(function->bindings);
+    function->bindings = NULL;
+    function->source = NULL;
 }
 
 /* The type with every link followed. Type applications are made once, so

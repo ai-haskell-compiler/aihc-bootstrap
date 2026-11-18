@@ -682,6 +682,9 @@ static Value *run(const Code *code, int base, Value *value)
                 /* Its code runs above the locals that the top frame still
                    needs. */
                 callee = value->a.function;
+                if (callee->body == NULL) {
+                    compile_body((Function *)callee);
+                }
                 target = stack[stack_size - 1].top;
                 reserve(target + callee->slot_count);
                 for (i = 0; i < callee->capture_count; i++) {
@@ -875,6 +878,9 @@ static Value *run(const Code *code, int base, Value *value)
                 goto call;
             case C_ENTER:
                 callee = code->first->u.function;
+                if (callee->body == NULL) {
+                    compile_body((Function *)callee);
+                }
                 target = sp;
                 reserve(target + callee->slot_count);
                 for (i = 0; i < callee->capture_count; i++) {
@@ -974,6 +980,9 @@ static Value *run(const Code *code, int base, Value *value)
                        && IS_STRICT(strict, index)) {
                 /* What would be a thunk is run on the spot. */
                 callee = argument->u.function;
+                if (callee->body == NULL) {
+                    compile_body((Function *)callee);
+                }
                 target = sp;
                 reserve(target + callee->slot_count);
                 for (i = 0; i < callee->capture_count; i++) {

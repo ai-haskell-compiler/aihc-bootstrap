@@ -172,8 +172,17 @@ struct Function {
                         parameter lowest. An argument for one of them is
                         evaluated before the call, and no thunk is made
                         for it. */
-    Code *body;
+    Code *body;      /* NULL for the code of a thunk that has not been run
+                        yet: it is compiled when it first is
+                        (compile_body), from what follows */
+    Expr *source;
+    Binding **bindings; /* the variables it captures */
 };
+
+/* compile.c: compiles the code of a thunk that is about to be run for the
+   first time. Much of a program is never run, and an expression that is
+   kept for later mostly is not kept at all (see C_CALL). */
+void compile_body(Function *function);
 
 /* compile.c: the value of the top-level variable, whose definition has
    been elaborated: a closure if it is a function, else a thunk. */
