@@ -283,6 +283,7 @@ static Code *compile(Scope *scope, Expr *expr);
 static Code *compile_delayed(Scope *scope, Expr *expr);
 static Code *compile_scrutinee(Scope *scope, Expr *expr);
 static void find_kills(Scope *scope, Function *function);
+static void find_strictness(const Scope *scope, Function *function);
 
 static Expr *without_annotations(Expr *expr)
 {
@@ -330,6 +331,7 @@ static Code *compile_function(Scope *outer, Expr *expr, int thunk)
     function->body = compile(&scope, expr);
     function->slot_count = scope.slot_count;
     find_kills(&scope, function);
+    find_strictness(&scope, function);
     free(scope.bindings);
     free(scope.slots);
     free(scope.nodes);
@@ -1682,7 +1684,8 @@ static void note_held(Analysis *analysis, const Code *code, const Word *held)
     free(after);
 }
 
-/* Gives every C_EVAL of the function the slots to empty. */
+/* Gives every C_EVAL of the function, and every argument of its calls,
+   the slots to empty. */
 static void find_kills(Scope *scope, Function *function)
 {
     Analysis analysis;
@@ -1715,15 +1718,51 @@ static void find_kills(Scope *scope, Function *function)
             continue;
         }
         read = slots_read(&analysis, code->next);
-        code->slots = xmalloc((size_t)function->slot_count * sizeof(int));
+        code->let_go = xmalloc((size_t)function->slot_count * sizeof(int));
         for (slot = 0; slot < function->slot_count; slot++) {
             if (slot != code->slot && has_slot(analysis.held[i], slot)
                 && !has_slot(read, slot)) {
-                code->slots[code->count++] = slot;
+                code->let_go[code->let_go_count++] = slot;
             }
         }
-        code->slots = xrealloc(code->slots,
-                               (size_t)code->count * sizeof(int) + 1);
+        code->let_go = xrealloc(code->let_go, (size_t)code->let_go_count
+                                                  * sizeof(int) + 1);
+    }
+    /* The arguments of a call: one that is evaluated before the call lets
+       go of what neither the arguments after it nor the code after the
+       call reads. */
+    for (i = 0; i < scope->node_count; i++) {
+        Code *code = scope->nodes[i];
+        const Code *call = code->kind == C_EVAL ? code->first : code;
+        Word *needed;
+        int k;
+
+        if (call->kind != C_CALL || analysis.held[i] == NULL) {
+            continue;
+        }
+        needed = new_set(&analysis);
+        if (code->kind == C_EVAL) {
+            add_set(&analysis, needed, slots_read(&analysis, code->next));
+        }
+        for (k = call->count - 1; k >= 0; k--) {
+            Code *argument = call->codes[k];
+
+            if (argument->kind == C_LOCAL || argument->kind == C_CLOSURE) {
+                argument->let_go =
+                    xmalloc((size_t)function->slot_count * sizeof(int));
+                for (slot = 0; slot < function->slot_count; slot++) {
+                    if (has_slot(analysis.held[i], slot)
+                        && !has_slot(needed, slot)) {
+                        argument->let_go[argument->let_go_count++] = slot;
+                    }
+                }
+                argument->let_go = xrealloc(
+                    argument->let_go,
+                    (size_t)argument->let_go_count * sizeof(int) + 1);
+            }
+            add_reads(needed, argument);
+        }
+        free(needed);
     }
     for (i = 0; i < scope->node_count; i++) {
         free(analysis.read[i]);
@@ -1731,6 +1770,151 @@ static void find_kills(Scope *scope, Function *function)
     }
     free(analysis.read);
     free(analysis.held);
+}
+
+/* ---- What a function always evaluates ----
+
+   A function that always evaluates a parameter gets the argument for it
+   evaluated: the machine does that before the call, without making a
+   thunk first (C_CALL). "Always" is what can be seen in its code without
+   looking into other functions: the parameter is evaluated on every way
+   through the code, or handed to a builtin that evaluates it. */
+
+typedef struct Strictness {
+    const Function *function;
+    unsigned *known; /* by Code.id */
+    char *done;
+} Strictness;
+
+static unsigned parameter_bit(const Strictness *strictness, int slot)
+{
+    return slot < strictness->function->arity && slot < 32 ? 1u << slot : 0;
+}
+
+/* Whether the call gives a builtin that always evaluates some of its
+   arguments all of them. Those builtins only work something out: they
+   have no effect. */
+static int is_pure_builtin(const Code *call)
+{
+    const Builtin *builtin;
+
+    if (call->first->kind != C_GLOBAL || call->first->u.global->builtin == NULL) {
+        return 0;
+    }
+    builtin = find_builtin(call->first->u.global->builtin);
+    return builtin->arity > 0 && call->count >= builtin->arity
+        && global_value(call->first->u.global)->tag != 0;
+}
+
+/* The parameters that a call evaluates before it does anything else. */
+static unsigned call_evaluates(const Strictness *strictness, const Code *call)
+{
+    unsigned set = 0;
+    unsigned strict;
+    int i;
+
+    if (call->first->kind == C_LOCAL) {
+        /* It is the function that is called. */
+        return parameter_bit(strictness, call->first->slot);
+    }
+    if (!is_pure_builtin(call)) {
+        return 0;
+    }
+    strict = (unsigned)global_value(call->first->u.global)->tag;
+    for (i = 0; i < call->count && i < 32; i++) {
+        if (call->codes[i]->kind == C_LOCAL && ((strict >> i) & 1) != 0) {
+            set |= parameter_bit(strictness, call->codes[i]->slot);
+        }
+    }
+    return set;
+}
+
+/* The parameters that are evaluated whichever way the code from the node
+   on goes. */
+static unsigned always_evaluated(Strictness *strictness, const Code *code)
+{
+    unsigned set = 0;
+    int all = 1;
+    int i;
+
+    if (strictness->done[code->id]) {
+        return strictness->known[code->id];
+    }
+    switch (code->kind) {
+    case C_LOCAL:
+        set = parameter_bit(strictness, code->slot);
+        break;
+    case C_EVAL:
+        /* What the code after a call evaluates does not count, unless
+           the call is of a builtin that only works something out: a
+           call can be of an action, and what comes after an action must
+           not be evaluated before it has had its effect. */
+        if (code->first->kind == C_LOCAL) {
+            set = parameter_bit(strictness, code->first->slot)
+                | always_evaluated(strictness, code->next);
+        } else if (code->first->kind == C_CONST) {
+            set = always_evaluated(strictness, code->next);
+        } else if (code->first->kind == C_CALL) {
+            set = call_evaluates(strictness, code->first);
+            if (is_pure_builtin(code->first)) {
+                set |= always_evaluated(strictness, code->next);
+            }
+        }
+        break;
+    case C_LET:
+    case C_FIELDS:
+        set = always_evaluated(strictness, code->next);
+        break;
+    case C_TEST:
+    case C_TEST_CHAR:
+        set = always_evaluated(strictness, code->first)
+            & always_evaluated(strictness, code->next);
+        break;
+    case C_SWITCH:
+        set = ~0u;
+        for (i = 0; i < code->count; i++) {
+            if (code->codes[i] != NULL) {
+                set &= always_evaluated(strictness, code->codes[i]);
+            } else {
+                all = 0;
+            }
+        }
+        if (!all) {
+            set &= always_evaluated(strictness, code->next);
+        }
+        break;
+    case C_FAIL:
+        /* It does not come back. */
+        set = ~0u;
+        break;
+    case C_CALL:
+        set = call_evaluates(strictness, code);
+        break;
+    default:
+        break;
+    }
+    strictness->known[code->id] = set;
+    strictness->done[code->id] = 1;
+    return set;
+}
+
+static void find_strictness(const Scope *scope, Function *function)
+{
+    Strictness strictness;
+
+    if (function->arity == 0) {
+        return;
+    }
+    strictness.function = function;
+    strictness.known = xmalloc((size_t)scope->node_count * sizeof(unsigned));
+    strictness.done = xmalloc((size_t)scope->node_count);
+    memset(strictness.done, 0, (size_t)scope->node_count);
+    function->strict = always_evaluated(&strictness, function->body);
+    if (function->arity < 32) {
+        function->strict &= (1u << function->arity) - 1;
+    }
+    free(strictness.known);
+    free(strictness.done);
 }
 
 /* ---- Top-level variables ---- */

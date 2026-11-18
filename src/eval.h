@@ -40,7 +40,10 @@ struct Value {
                                field takes it away. */
     unsigned char old;      /* the collector has made it old: see
                                gc_written_value */
-    int tag;                /* V_CON: index of the constructor in its type */
+    int tag;                /* V_CON: index of the constructor in its type;
+                               V_BUILTIN: which of its arguments the
+                               builtin always evaluates, a bit for each
+                               that is still to come (the next one first) */
     union {
         long number;            /* V_INT, V_CHAR, V_BYTES */
         int field_count;        /* V_CON */
@@ -97,14 +100,16 @@ enum CodeKind {
     C_STRING,    /* the list of the characters of `string` */
     C_INTEGER,   /* a literal beyond a small number: see Expr.big */
     C_CALL,      /* `first` (a C_LOCAL, C_CONST, C_GLOBAL or C_METHOD)
-                    applied to the `count` arguments `codes` */
+                    applied to the `count` arguments `codes`. An argument
+                    that the function always evaluates is evaluated before
+                    the call, and then lets go of slots as a C_EVAL does. */
     C_ENTER,     /* runs the body of `function`, which takes no parameters,
                     with the values in `slots` captured: only in a C_EVAL */
     C_EVAL,      /* evaluates `first` (a value that takes no work, a C_METHOD,
                     C_CALL or C_ENTER), puts the result in `slot`, and goes
-                    on with `next`. The `count` slots in `slots` are not
-                    used after it, and are emptied so that they keep
-                    nothing in use meanwhile. */
+                    on with `next`. The slots in `let_go` are not used
+                    after it, and are emptied so that they keep nothing
+                    in use meanwhile. */
     C_LET,       /* puts the `count` values `codes` in the slots `slots`.
                     The closures and thunks among them may capture any of
                     those slots. */
@@ -128,6 +133,8 @@ struct Code {
     Code *next;
     Code **codes;
     int *slots;
+    int *let_go;              /* C_EVAL, an argument of a C_CALL */
+    int let_go_count;
     union {
         Value *value;         /* C_CONST */
         Global *global;       /* C_GLOBAL, C_METHOD */
@@ -152,6 +159,11 @@ struct Function {
     int arity;
     int capture_count;
     int slot_count;
+    unsigned strict; /* which parameters it always evaluates when it is
+                        called with all of them: a bit for each, the first
+                        parameter lowest. An argument for one of them is
+                        evaluated before the call, and no thunk is made
+                        for it. */
     Code *body;
 };
 
@@ -181,7 +193,8 @@ Value *shared_thunk(const Function *function);
    effect when that argument arrives, and returns make_io_result. The box
    lets an action finish without evaluating its result. */
 struct Builtin {
-    const char *name;
+    const char *name; /* a name that starts with "num" says that the
+                         builtin always evaluates all its arguments */
     int arity;
     Value *(*function)(Value **arguments);
 };

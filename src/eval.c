@@ -20,6 +20,9 @@ enum FrameKind {
     F_UPDATE, /* then store the result in the thunk `value` */
     F_RESUME, /* then put the result in the slot of the C_EVAL `code` and
                  go on after it, with the locals from `base` on */
+    F_ARGUMENT, /* then go on with the call `code` (a C_CALL, or the C_EVAL
+                   it is in) of `value`: the result is its argument
+                   number `count` */
     F_STOP    /* then leave run() */
 };
 
@@ -247,11 +250,36 @@ Value *constant_closure(const Function *function)
     return value;
 }
 
+/* Which arguments the builtin always evaluates: a bit for each. A thunk
+   that the builtin would evaluate at once is not worth making. */
+static int strict_arguments(const Builtin *builtin)
+{
+    static const char *const all[] = {
+        "bytesLength", "bytesIndex", "bytesSlice", "bytesCompare", NULL
+    };
+    int i;
+
+    if (strncmp(builtin->name, "num", 3) == 0) {
+        return ~0;
+    }
+    if (strcmp(builtin->name, "seq") == 0) {
+        /* seq :: a -> b -> b, after the two types: the first value. */
+        return 4;
+    }
+    for (i = 0; all[i] != NULL; i++) {
+        if (strcmp(builtin->name, all[i]) == 0) {
+            return ~0;
+        }
+    }
+    return 0;
+}
+
 Value *make_builtin(const Builtin *builtin)
 {
     Value *value = new_value(V_BUILTIN);
 
     value->c.builtin = builtin;
+    value->tag = strict_arguments(builtin);
     return value;
 }
 
@@ -500,6 +528,30 @@ static int arguments_needed(const Value *function)
     return 0;
 }
 
+/* Which of the `count` arguments the function is about to be given it
+   always evaluates: a bit for each, the first lowest. Only when they are
+   all it needs: with fewer it does not run. */
+static unsigned strictness(const Value *function, int count)
+{
+    int had;
+
+    switch (function->kind) {
+    case V_CLOSURE:
+        return count >= function->a.function->arity
+            ? function->a.function->strict : 0;
+    case V_PARTIAL:
+        had = function->a.argument_count;
+        return had + count >= function->c.function->a.function->arity
+            ? function->c.function->a.function->strict >> had : 0;
+    case V_BUILTIN:
+        return function->a.argument_count + count
+                >= function->c.builtin->arity
+            ? (unsigned)function->tag : 0;
+    default:
+        return 0;
+    }
+}
+
 /* The function given the `count` locals from `first` on, which are fewer
    arguments than it needs: a value that waits for the rest. */
 static Value *partial_application(Value *function, int first, int count)
@@ -515,6 +567,8 @@ static Value *partial_application(Value *function, int first, int count)
         result->c.function = function;
     } else {
         result->c = function->c;
+        /* See Value.tag. */
+        result->tag = (int)((unsigned)function->tag >> count);
     }
     for (i = 0; i < had; i++) {
         result->b.arguments[i] = function->b.arguments[i];
@@ -578,13 +632,19 @@ static Value *complete(Value *function, int first, int count)
 
 #define SLOT(index) (locals[base + (index)])
 
-/* Empties the slots that a C_EVAL says are not used after it. */
+/* Empties the slots that a C_EVAL (or an argument that is evaluated) says
+   are not used after it. */
 #define LET_GO(eval) \
     do { \
-        for (i = 0; i < (eval)->count; i++) { \
-            SLOT((eval)->slots[i]) = NULL; \
+        for (i = 0; i < (eval)->let_go_count; i++) { \
+            SLOT((eval)->let_go[i]) = NULL; \
         } \
     } while (0)
+
+/* Whether argument number `index` is one that the function always
+   evaluates: see strictness. */
+#define IS_STRICT(strict, index) \
+    ((index) < 32 && (((strict) >> (index)) & 1) != 0)
 
 /* The machine is in one of two states:
      - code != NULL: running `code`, whose slots are the locals from `base`
@@ -602,8 +662,12 @@ static Value *run(const Code *code, int base, Value *value)
     int at = 0;
     int target = 0;
     const Function *callee = NULL;
-    const Code *call;
-    const Code *eval;
+    const Code *call = NULL;
+    const Code *eval = NULL;
+    const Code *argument;
+    Value *given;
+    unsigned strict = 0;
+    int index = 0;
     Frame *frame;
     int need;
     int i;
@@ -677,6 +741,25 @@ static Value *run(const Code *code, int base, Value *value)
                 at = sp - argc;
                 target = at;
                 goto apply;
+            case F_ARGUMENT:
+                /* The arguments before this one are the locals on top. */
+                base = frame->base;
+                sp = frame->top;
+                function = frame->value;
+                index = frame->count;
+                if (frame->code->kind == C_EVAL) {
+                    eval = frame->code;
+                    call = eval->first;
+                } else {
+                    eval = NULL;
+                    call = frame->code;
+                }
+                at = sp - index;
+                locals[sp++] = value;
+                strict = strictness(function, call->count);
+                index++;
+                code = call;
+                goto arguments;
             }
         }
         switch (code->kind) {
@@ -856,13 +939,65 @@ static Value *run(const Code *code, int base, Value *value)
         default:
             die("code that cannot be called");
         }
-        for (i = 0; i < call->count; i++) {
-            const Code *argument = call->codes[i];
-            Value *given = argument->kind == C_LOCAL ? SLOT(argument->slot)
-                : argument->kind == C_CONST ? argument->u.value
-                : delay(argument, base);
+        while (function->kind == V_INDIRECTION) {
+            function = function->b.result;
+        }
+        strict = strictness(function, call->count);
+        index = 0;
+        /* fall through */
 
+    arguments:
+        /* The arguments from number `index` on. One that the function
+           always evaluates is evaluated here, where no thunk has to be
+           made for it: the call goes on when its value is there
+           (F_ARGUMENT). */
+        for (; index < call->count; index++) {
+            argument = call->codes[index];
+            if (argument->kind == C_LOCAL) {
+                given = SLOT(argument->slot);
+            } else if (argument->kind == C_CONST) {
+                given = argument->u.value;
+            } else if (argument->kind == C_CLOSURE
+                       && argument->u.function->arity == 0
+                       && IS_STRICT(strict, index)) {
+                /* What would be a thunk is run on the spot. */
+                callee = argument->u.function;
+                target = sp;
+                reserve(target + callee->slot_count);
+                for (i = 0; i < callee->capture_count; i++) {
+                    locals[target + i] = SLOT(argument->slots[i]);
+                }
+                LET_GO(argument);
+                frame = push(F_ARGUMENT, target);
+                frame->base = base;
+                frame->code = eval != NULL ? eval : call;
+                frame->count = index;
+                frame->value = function;
+                base = target;
+                goto start;
+            } else {
+                given = delay(argument, base);
+            }
+            if (given->kind >= V_THUNK && IS_STRICT(strict, index)) {
+                while (given->kind == V_INDIRECTION) {
+                    given = given->b.result;
+                }
+                if (given->kind >= V_THUNK) {
+                    LET_GO(argument);
+                    frame = push(F_ARGUMENT, sp);
+                    frame->base = base;
+                    frame->code = eval != NULL ? eval : call;
+                    frame->count = index;
+                    frame->value = function;
+                    value = given;
+                    code = NULL;
+                    break;
+                }
+            }
             locals[sp++] = given;
+        }
+        if (index < call->count) {
+            continue;
         }
         argc = call->count;
         if (eval != NULL) {
