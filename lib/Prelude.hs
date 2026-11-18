@@ -352,6 +352,10 @@ foreign import prim "numEq" numEq :: a -> a -> Bool
 
 foreign import prim "numLess" numLess :: a -> a -> Bool
 
+foreign import prim "numLessEq" numLessEq :: a -> a -> Bool
+
+foreign import prim "numCompare" numCompare :: a -> a -> Ordering
+
 -- From one built-in number type to another, or to and from Char.
 foreign import prim "numConvert" numConvert :: a -> b
 
@@ -400,8 +404,11 @@ instance Eq Int where
   (==) = numEq
 
 instance Ord Int where
-  compare a b = if numLess a b then LT else if numEq a b then EQ else GT
+  compare = numCompare
   (<) = numLess
+  (<=) = numLessEq
+  (>) a b = numLess b a
+  (>=) a b = numLessEq b a
 
 instance Num Int where
   (+) = numAdd
@@ -439,8 +446,11 @@ instance Eq Integer where
   (==) = numEq
 
 instance Ord Integer where
-  compare a b = if numLess a b then LT else if numEq a b then EQ else GT
+  compare = numCompare
   (<) = numLess
+  (<=) = numLessEq
+  (>) a b = numLess b a
+  (>=) a b = numLessEq b a
 
 instance Num Integer where
   (+) = numAdd
@@ -474,8 +484,11 @@ instance Eq Word where
   (==) = numEq
 
 instance Ord Word where
-  compare a b = if numLess a b then LT else if numEq a b then EQ else GT
+  compare = numCompare
   (<) = numLess
+  (<=) = numLessEq
+  (>) a b = numLess b a
+  (>=) a b = numLessEq b a
 
 instance Num Word where
   (+) = numAdd
@@ -548,8 +561,11 @@ instance Eq Char where
   (==) = numEq
 
 instance Ord Char where
-  compare a b = if numLess a b then LT else if numEq a b then EQ else GT
+  compare = numCompare
   (<) = numLess
+  (<=) = numLessEq
+  (>) a b = numLess b a
+  (>=) a b = numLessEq b a
 
 instance Enum Char where
   toEnum = numConvert

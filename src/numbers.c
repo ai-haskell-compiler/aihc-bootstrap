@@ -364,6 +364,58 @@ Value *builtin_numLess(Value **arguments)
     return make_bool(a < b);
 }
 
+/* numLessEq :: a -> a -> Bool */
+Value *builtin_numLessEq(Value **arguments)
+{
+    enum NumberKind kind = number_kind(arguments[0]);
+    long a;
+    long b;
+
+    if (is_float(kind)) {
+        return make_bool(float_operand(kind, arguments[1])
+                         <= float_operand(kind, arguments[2]));
+    }
+    if (kind == K_INTEGER && any_big(arguments[1], arguments[2])) {
+        return make_bool(integer_compare(arguments[1], arguments[2]) <= 0);
+    }
+    a = operand(kind, arguments[1]);
+    b = operand(kind, arguments[2]);
+    if (kind == K_WORD64) {
+        return make_bool((unsigned long)a <= (unsigned long)b);
+    }
+    return make_bool(a <= b);
+}
+
+/* numCompare :: a -> a -> Ordering
+   LT, EQ and GT are the constructors 0, 1 and 2 of Ordering. Of two
+   floating point numbers of which one is not a number, the first is
+   greater: it is neither less nor equal. */
+Value *builtin_numCompare(Value **arguments)
+{
+    enum NumberKind kind = number_kind(arguments[0]);
+    long a;
+    long b;
+
+    if (is_float(kind)) {
+        double x = float_operand(kind, arguments[1]);
+        double y = float_operand(kind, arguments[2]);
+
+        return make_con(x < y ? 0 : x == y ? 1 : 2, 0);
+    }
+    if (kind == K_INTEGER && any_big(arguments[1], arguments[2])) {
+        int order = integer_compare(arguments[1], arguments[2]);
+
+        return make_con(order < 0 ? 0 : order == 0 ? 1 : 2, 0);
+    }
+    a = operand(kind, arguments[1]);
+    b = operand(kind, arguments[2]);
+    if (kind == K_WORD64) {
+        return make_con((unsigned long)a < (unsigned long)b ? 0
+                        : a == b ? 1 : 2, 0);
+    }
+    return make_con(a < b ? 0 : a == b ? 1 : 2, 0);
+}
+
 /* numAnd, numOr, numXor :: a -> a -> a */
 static Value *bitwise(char operation, Value **arguments)
 {

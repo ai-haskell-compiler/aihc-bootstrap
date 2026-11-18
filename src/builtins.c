@@ -371,6 +371,8 @@ static const Builtin builtins[] = {
     { "numMod", 3, builtin_numMod },
     { "numEq", 3, builtin_numEq },
     { "numLess", 3, builtin_numLess },
+    { "numLessEq", 3, builtin_numLessEq },
+    { "numCompare", 3, builtin_numCompare },
     { "numAnd", 3, builtin_numAnd },
     { "numOr", 3, builtin_numOr },
     { "numXor", 3, builtin_numXor },

@@ -9,8 +9,11 @@ instance Eq Int8 where
   (==) = numEq
 
 instance Ord Int8 where
-  compare a b = if numLess a b then LT else if numEq a b then EQ else GT
+  compare = numCompare
   (<) = numLess
+  (<=) = numLessEq
+  (>) a b = numLess b a
+  (>=) a b = numLessEq b a
 
 instance Num Int8 where
   (+) = numAdd
@@ -50,8 +53,11 @@ instance Eq Int16 where
   (==) = numEq
 
 instance Ord Int16 where
-  compare a b = if numLess a b then LT else if numEq a b then EQ else GT
+  compare = numCompare
   (<) = numLess
+  (<=) = numLessEq
+  (>) a b = numLess b a
+  (>=) a b = numLessEq b a
 
 instance Num Int16 where
   (+) = numAdd
@@ -91,8 +97,11 @@ instance Eq Int32 where
   (==) = numEq
 
 instance Ord Int32 where
-  compare a b = if numLess a b then LT else if numEq a b then EQ else GT
+  compare = numCompare
   (<) = numLess
+  (<=) = numLessEq
+  (>) a b = numLess b a
+  (>=) a b = numLessEq b a
 
 instance Num Int32 where
   (+) = numAdd
@@ -132,8 +141,11 @@ instance Eq Int64 where
   (==) = numEq
 
 instance Ord Int64 where
-  compare a b = if numLess a b then LT else if numEq a b then EQ else GT
+  compare = numCompare
   (<) = numLess
+  (<=) = numLessEq
+  (>) a b = numLess b a
+  (>=) a b = numLessEq b a
 
 instance Num Int64 where
   (+) = numAdd

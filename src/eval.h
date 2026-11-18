@@ -287,6 +287,8 @@ Value *builtin_numDiv(Value **arguments);
 Value *builtin_numMod(Value **arguments);
 Value *builtin_numEq(Value **arguments);
 Value *builtin_numLess(Value **arguments);
+Value *builtin_numLessEq(Value **arguments);
+Value *builtin_numCompare(Value **arguments);
 Value *builtin_numAnd(Value **arguments);
 Value *builtin_numOr(Value **arguments);
 Value *builtin_numXor(Value **arguments);
