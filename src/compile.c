@@ -582,6 +582,19 @@ static int is_literal(const Expr *expr)
         && !has_variables(expr->function->type);
 }
 
+/* Says for each argument of the call which slot it is, or -1 if it is not
+   a variable: most are, and the machine then does not look at their code. */
+static void set_argument_slots(Code *call)
+{
+    int i;
+
+    call->slots = xmalloc((size_t)call->count * sizeof(int) + 1);
+    for (i = 0; i < call->count; i++) {
+        call->slots[i] = call->codes[i]->kind == C_LOCAL
+            ? call->codes[i]->slot : -1;
+    }
+}
+
 /* The kind of small number that the class method is used at, if its
    type is known here and is one, and the class is the Prelude's `class`;
    else -1. */
@@ -638,6 +651,7 @@ static Code *compile_primitive(Scope *scope, const Expr *head,
     code->codes = xmalloc(2 * sizeof(Code *));
     code->codes[0] = compile_delayed(scope, arguments[known[i].swapped]);
     code->codes[1] = compile_delayed(scope, arguments[!known[i].swapped]);
+    set_argument_slots(code);
     return code;
 }
 
@@ -692,6 +706,7 @@ static Code *compile_application(Scope *scope, Expr *expr)
     for (i = 0; i < count; i++) {
         call->codes[i] = compile_delayed(scope, arguments[i]);
     }
+    set_argument_slots(call);
     free(arguments);
     return code;
 }

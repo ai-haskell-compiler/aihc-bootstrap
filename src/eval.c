@@ -650,6 +650,42 @@ static Value *complete(Value *function, int first, int count)
 #define IS_STRICT(strict, index) \
     ((index) < 32 && (((strict) >> (index)) & 1) != 0)
 
+/* What the C_PRIM gives if both its numbers are there already, in slots
+   or as constants, which is most of the time. Otherwise NULL: then its
+   arguments are evaluated as those of a call are. */
+static Value *quick_primitive(const Code *code, int base)
+{
+    const Code *first = code->codes[0];
+    const Code *second = code->codes[1];
+    Value *a;
+    Value *b;
+
+    if (first->kind == C_LOCAL) {
+        a = SLOT(first->slot);
+    } else if (first->kind == C_CONST) {
+        a = first->u.value;
+    } else {
+        return NULL;
+    }
+    if (second->kind == C_LOCAL) {
+        b = SLOT(second->slot);
+    } else if (second->kind == C_CONST) {
+        b = second->u.value;
+    } else {
+        return NULL;
+    }
+    while (a->kind == V_INDIRECTION) {
+        a = a->b.result;
+    }
+    while (b->kind == V_INDIRECTION) {
+        b = b->b.result;
+    }
+    if (a->kind >= V_THUNK || b->kind >= V_THUNK) {
+        return NULL;
+    }
+    return number_primitive(code->tag, code->slot, a, b);
+}
+
 /* The machine is in one of two states:
      - code != NULL: running `code`, whose slots are the locals from `base`
        on; `sp` is where those slots end;
@@ -865,8 +901,13 @@ static Value *run(const Code *code, int base, Value *value)
             die("%s:%d: %s", code->token->file, code->token->line,
                 code->u.string);
             break;
-        case C_CALL:
         case C_PRIM:
+            value = quick_primitive(code, base);
+            if (value != NULL) {
+                break;
+            }
+            /* fall through */
+        case C_CALL:
             /* The last thing the function does: the function that is
                called takes its place. */
             call = code;
@@ -877,8 +918,15 @@ static Value *run(const Code *code, int base, Value *value)
             eval = code;
             tail = 0;
             switch (code->first->kind) {
-            case C_CALL:
             case C_PRIM:
+                value = quick_primitive(code->first, base);
+                if (value != NULL) {
+                    SLOT(code->slot) = value;
+                    code = code->next;
+                    continue;
+                }
+                /* fall through */
+            case C_CALL:
                 call = code->first;
                 goto call;
             case C_ENTER:
@@ -976,14 +1024,21 @@ static Value *run(const Code *code, int base, Value *value)
            (F_ARGUMENT). */
         for (; index < call->count; index++) {
             argument = call->codes[index];
-            if (argument->kind == C_LOCAL) {
-                given = SLOT(argument->slot);
+            if (call->slots[index] >= 0) {
+                given = SLOT(call->slots[index]);
             } else if (argument->kind == C_CONST) {
                 given = argument->u.value;
             } else if (argument->kind == C_CLOSURE
                        && argument->u.function->arity == 0
                        && IS_STRICT(strict, index)) {
                 if (argument->first != NULL) {
+                    if (argument->first->kind == C_PRIM) {
+                        given = quick_primitive(argument->first, base);
+                        if (given != NULL) {
+                            locals[sp++] = given;
+                            continue;
+                        }
+                    }
                     /* What would be a thunk of a call: the call is made
                        here, and its result is the argument. */
                     frame = push(F_ARGUMENT, sp);
@@ -1019,7 +1074,7 @@ static Value *run(const Code *code, int base, Value *value)
             } else {
                 given = delay(argument, base);
             }
-            if (given->kind >= V_THUNK && IS_STRICT(strict, index)) {
+            if (IS_STRICT(strict, index) && given->kind >= V_THUNK) {
                 while (given->kind == V_INDIRECTION) {
                     given = given->b.result;
                 }

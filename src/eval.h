@@ -104,7 +104,8 @@ enum CodeKind {
     C_STRING,    /* the list of the characters of `string` */
     C_INTEGER,   /* a literal beyond a small number: see Expr.big */
     C_CALL,      /* `first` (a C_LOCAL, C_CONST, C_GLOBAL or C_METHOD)
-                    applied to the `count` arguments `codes`. An argument
+                    applied to the `count` arguments `codes`; `slots` has
+                    the slot of each that is a C_LOCAL, else -1. An argument
                     that the function always evaluates is evaluated before
                     the call, in place if it is a call itself, and then
                     lets go of slots as a C_EVAL does. */
