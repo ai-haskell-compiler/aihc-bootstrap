@@ -13,6 +13,7 @@ import qualified Data.ByteString as B
 import Data.Int
 import Data.List.NonEmpty (NonEmpty)
 import Data.Map.Base (Map)
+import Data.Ratio (Ratio, (%))
 import qualified Data.Map.Base as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -157,6 +158,13 @@ instance (Data a, Data b, Data c) => Data (a, b, c) where
   gmapT f (a, b, c) = (f a, f b, f c)
   gmapQ f (a, b, c) = [f a, f b, f c]
   gmapM f (a, b, c) = f a >>= \a' -> f b >>= \b' -> f c >>= \c' -> return (a', b', c')
+
+-- As in GHC: the fields are the numerator and the denominator, and the
+-- fraction is made again with (%).
+instance (Data a, Integral a) => Data (Ratio a) where
+  gmapT f (a :% b) = f a % f b
+  gmapQ f (a :% b) = [f a, f b]
+  gmapM f (a :% b) = f a >>= \a' -> f b >>= \b' -> return (a' % b')
 
 instance Data a => Data (Maybe a) where
   gmapT = derivedGmapT
