@@ -96,7 +96,7 @@ static Value *new_value(enum ValueKind kind)
    makes a value for every character it reads. They are outside the
    collector's memory, and never change. */
 #define SHARED_INT_LOW (-128)
-#define SHARED_INT_HIGH 1024
+#define SHARED_INT_HIGH 65536
 #define SHARED_CHARS 256
 
 static Value shared_ints[SHARED_INT_HIGH - SHARED_INT_LOW];
