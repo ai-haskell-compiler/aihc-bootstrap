@@ -361,26 +361,29 @@ static Type *close_type(Type *type, const Code *code, int base)
     return type;
 }
 
-/* The method of a C_METHOD. Found once if its type has no variables in
-   it, as long as no instances come: find_method keeps the value in use
-   meanwhile. */
+/* The method of a C_METHOD. What was found the last time is kept, as
+   long as no instances come: code mostly runs at one type, also where
+   the type is a variable. A type without variables in it is made once,
+   so the same type is the same pointer. find_method keeps the value in
+   use meanwhile. */
 static Value *method_of(const Code *code, int base)
 {
     Code *site = (Code *)code;
+    Type *type = code->count > 0 ? close_type(code->type, code, base)
+                                 : code->type;
+    Value *method;
 
-    if (code->count > 0) {
-        return find_method(code->u.global, close_type(code->type, code, base));
+    if (code->method != NULL && code->method_type == type
+        && code->method_instances == all_instances) {
+        return code->method;
     }
-    if (code->method == NULL || code->method_instances != all_instances) {
-        Value *method = find_method(code->u.global, code->type);
-
-        if (!method_is_remembered(code->type)) {
-            return method;
-        }
+    method = find_method(code->u.global, type);
+    if (method_is_remembered(type)) {
         site->method = method;
+        site->method_type = type;
         site->method_instances = all_instances;
     }
-    return code->method;
+    return method;
 }
 
 /* ---- Values that take no work ---- */

@@ -150,9 +150,11 @@ struct Code {
     } u;
     Type *type;               /* C_TYPE, C_METHOD */
     Binding **bindings;       /* C_TYPE, C_METHOD */
-    /* C_METHOD at a type without variables: the method found, while
-       all_instances is `method_instances` (eval.c). */
+    /* C_METHOD: the method found the last time, at the type `method_type`
+       (which is `type` if that has no variables), while all_instances is
+       `method_instances` (eval.c). */
     Value *method;
+    Type *method_type;
     const void *method_instances;
     const Token *token;       /* where in the program it comes from */
     int id;                   /* compile.c: its number in its function */
