@@ -45,18 +45,26 @@ static enum NumberKind number_kind(Value *type_value)
         K_INT, K_INT, K_INTEGER, K_WORD64, K_WORD64, K_WORD32, K_WORD16,
         K_WORD8, K_INT32, K_INT16, K_INT8, K_CHAR, K_DOUBLE, K_FLOAT
     };
-    Type *type = prune(force(type_value)->b.type);
+    Value *value = FORCE(type_value);
+    Type *type;
     int i;
 
+    /* A type has one value (make_type), which remembers the answer. */
+    if (value->tag > 0) {
+        return (enum NumberKind)(value->tag - 1);
+    }
+    type = prune(value->b.type);
     if (type->kind == TY_CON) {
         TypeCon *constructor = type->constructor;
 
         if (constructor->number_kind > 0) {
+            value->tag = constructor->number_kind;
             return (enum NumberKind)(constructor->number_kind - 1);
         }
         for (i = 0; names[i] != NULL; i++) {
             if (strcmp(constructor->name, names[i]) == 0) {
                 constructor->number_kind = (int)kinds[i] + 1;
+                value->tag = constructor->number_kind;
                 return kinds[i];
             }
         }
@@ -117,7 +125,7 @@ static int is_float(enum NumberKind kind)
 
 static double float_operand(enum NumberKind kind, Value *value)
 {
-    long bits = force(value)->a.number;
+    long bits = FORCE(value)->a.number;
     double d;
     float f;
     unsigned int low = (unsigned int)bits;
@@ -159,13 +167,13 @@ static Value *make_number(enum NumberKind kind, unsigned long bits)
 static long operand(enum NumberKind kind, Value *value)
 {
     (void)kind;
-    return force(value)->a.number;
+    return FORCE(value)->a.number;
 }
 
 /* Whether either Integer is big. */
 static int any_big(Value *a, Value *b)
 {
-    return integer_is_big(force(a)) || integer_is_big(force(b));
+    return integer_is_big(FORCE(a)) || integer_is_big(FORCE(b));
 }
 
 /* a + b, a - b or a * b in *result, if it fits in a long. */
@@ -362,6 +370,132 @@ Value *builtin_numLess(Value **arguments)
         return make_bool((unsigned long)a < (unsigned long)b);
     }
     return make_bool(a < b);
+}
+
+/* numLessEq :: a -> a -> Bool */
+Value *builtin_numLessEq(Value **arguments)
+{
+    enum NumberKind kind = number_kind(arguments[0]);
+    long a;
+    long b;
+
+    if (is_float(kind)) {
+        return make_bool(float_operand(kind, arguments[1])
+                         <= float_operand(kind, arguments[2]));
+    }
+    if (kind == K_INTEGER && any_big(arguments[1], arguments[2])) {
+        return make_bool(integer_compare(arguments[1], arguments[2]) <= 0);
+    }
+    a = operand(kind, arguments[1]);
+    b = operand(kind, arguments[2]);
+    if (kind == K_WORD64) {
+        return make_bool((unsigned long)a <= (unsigned long)b);
+    }
+    return make_bool(a <= b);
+}
+
+/* numCompare :: a -> a -> Ordering
+   LT, EQ and GT are the constructors 0, 1 and 2 of Ordering. Of two
+   floating point numbers of which one is not a number, the first is
+   greater: it is neither less nor equal. */
+Value *builtin_numCompare(Value **arguments)
+{
+    enum NumberKind kind = number_kind(arguments[0]);
+    long a;
+    long b;
+
+    if (is_float(kind)) {
+        double x = float_operand(kind, arguments[1]);
+        double y = float_operand(kind, arguments[2]);
+
+        return make_con(x < y ? 0 : x == y ? 1 : 2, 0);
+    }
+    if (kind == K_INTEGER && any_big(arguments[1], arguments[2])) {
+        int order = integer_compare(arguments[1], arguments[2]);
+
+        return make_con(order < 0 ? 0 : order == 0 ? 1 : 2, 0);
+    }
+    a = operand(kind, arguments[1]);
+    b = operand(kind, arguments[2]);
+    if (kind == K_WORD64) {
+        return make_con((unsigned long)a < (unsigned long)b ? 0
+                        : a == b ? 1 : 2, 0);
+    }
+    return make_con(a < b ? 0 : a == b ? 1 : 2, 0);
+}
+
+/* ---- Arithmetic without a call ----
+
+   Most arithmetic is on small numbers of a type that is known where it
+   is written. The compiler makes that a C_PRIM (eval.h), which the
+   machine does itself: no method is looked up and no builtin is called.
+   Integer and the floating point types are not small numbers, and go
+   the long way. */
+
+int small_number_kind(Type *type)
+{
+    enum NumberKind kind;
+
+    type = prune(type);
+    if (type->kind != TY_CON) {
+        return -1;
+    }
+    if (type->constructor->number_kind == 0) {
+        /* Not asked before: number_kind fails for a type that is not a
+           number, so the names are looked at here. */
+        static const char *names[] = {
+            "Int", "Int64", "Word", "Word64", "Word32", "Word16", "Word8",
+            "Int32", "Int16", "Int8", "Char", NULL
+        };
+        int i;
+
+        for (i = 0; names[i] != NULL; i++) {
+            if (strcmp(type->constructor->name, names[i]) == 0) {
+                break;
+            }
+        }
+        if (names[i] == NULL) {
+            return -1;
+        }
+    }
+    kind = number_kind(make_type(type));
+    return kind == K_INTEGER || is_float(kind) ? -1 : (int)kind;
+}
+
+Value *number_constant(int kind, long number)
+{
+    long wrapped = wrap((enum NumberKind)kind, (unsigned long)number);
+
+    return kind == K_CHAR ? constant_char(wrapped) : constant_int(wrapped);
+}
+
+Value *number_primitive(int operation, int kind, Value *a, Value *b)
+{
+    long x = a->a.number;
+    long y = b->a.number;
+    int less = kind == K_WORD64 ? (unsigned long)x < (unsigned long)y : x < y;
+
+    switch (operation) {
+    case '+':
+        return make_number((enum NumberKind)kind,
+                           (unsigned long)x + (unsigned long)y);
+    case '-':
+        return make_number((enum NumberKind)kind,
+                           (unsigned long)x - (unsigned long)y);
+    case '*':
+        return make_number((enum NumberKind)kind,
+                           (unsigned long)x * (unsigned long)y);
+    case '=':
+        return make_bool(x == y);
+    case 'n':
+        return make_bool(x != y);
+    case '<':
+        return make_bool(less);
+    case 'l':
+        return make_bool(less || x == y);
+    default:
+        return make_con(less ? 0 : x == y ? 1 : 2, 0);
+    }
 }
 
 /* numAnd, numOr, numXor :: a -> a -> a */

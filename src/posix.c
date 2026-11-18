@@ -1,4 +1,4 @@
-/* The interpreter is C89, but C89 has no directories and cannot run a
+/* The interpreter is C99, but C99 has no directories and cannot run a
    program with its output captured. Everything that needs POSIX is in this
    file: directories, file status, the path of a file, and running a
    program. */

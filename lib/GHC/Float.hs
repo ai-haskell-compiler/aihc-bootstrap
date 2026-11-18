@@ -326,11 +326,11 @@ instance Eq Double where
   (==) = numEq
 
 instance Ord Double where
-  compare a b = if numLess a b then LT else if numEq a b then EQ else GT
+  compare = numCompare
   (<) = numLess
-  (<=) a b = numLess a b || numEq a b
+  (<=) = numLessEq
   (>) a b = numLess b a
-  (>=) a b = numLess b a || numEq a b
+  (>=) a b = numLessEq b a
 
 instance Num Double where
   (+) = numAdd
@@ -400,11 +400,11 @@ instance Eq Float where
   (==) = numEq
 
 instance Ord Float where
-  compare a b = if numLess a b then LT else if numEq a b then EQ else GT
+  compare = numCompare
   (<) = numLess
-  (<=) a b = numLess a b || numEq a b
+  (<=) = numLessEq
   (>) a b = numLess b a
-  (>=) a b = numLess b a || numEq a b
+  (>=) a b = numLessEq b a
 
 instance Num Float where
   (+) = numAdd

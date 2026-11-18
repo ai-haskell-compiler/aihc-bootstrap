@@ -40,7 +40,12 @@ struct Value {
                                field takes it away. */
     unsigned char old;      /* the collector has made it old: see
                                gc_written_value */
-    int tag;                /* V_CON: index of the constructor in its type */
+    int tag;                /* V_CON: index of the constructor in its type;
+                               V_TYPE: 1 + its kind of number, once
+                               numbers.c has worked that out;
+                               V_BUILTIN: which of its arguments the
+                               builtin always evaluates, a bit for each
+                               that is still to come (the next one first) */
     union {
         long number;            /* V_INT, V_CHAR, V_BYTES */
         int field_count;        /* V_CON */
@@ -87,7 +92,9 @@ enum CodeKind {
     C_CONST,     /* `value`, which is not in the collector's memory */
     C_GLOBAL,    /* the top-level variable `global` */
     C_CLOSURE,   /* a new closure or thunk of `function`, capturing the
-                    `count` values in `slots` */
+                    `count` values in `slots`. If the thunk would be of a
+                    call, `first` is that call (a C_CALL or C_PRIM), to
+                    run in place where no thunk is needed. */
     C_CONSTRUCT, /* a new constructor `tag` with the `count` fields `codes` */
     C_TYPE,      /* `type`, with what the `count` variables `bindings` stand
                     for taken from `slots` */
@@ -97,14 +104,24 @@ enum CodeKind {
     C_STRING,    /* the list of the characters of `string` */
     C_INTEGER,   /* a literal beyond a small number: see Expr.big */
     C_CALL,      /* `first` (a C_LOCAL, C_CONST, C_GLOBAL or C_METHOD)
-                    applied to the `count` arguments `codes` */
+                    applied to the `count` arguments `codes`; `slots` has
+                    the slot of each that is a C_LOCAL, else -1; `tag` is
+                    1 if it can be run by quick_call (eval.c), -1 if not,
+                    0 while that is not known. An argument
+                    that the function always evaluates is evaluated before
+                    the call, in place if it is a call itself, and then
+                    lets go of slots as a C_EVAL does. */
+    C_PRIM,      /* arithmetic on small numbers of one type: operation `tag`
+                    at the kind of number `slot` (numbers.c), of the two
+                    arguments `codes`, which are evaluated first. Nothing
+                    is looked up or called for it. */
     C_ENTER,     /* runs the body of `function`, which takes no parameters,
                     with the values in `slots` captured: only in a C_EVAL */
     C_EVAL,      /* evaluates `first` (a value that takes no work, a C_METHOD,
                     C_CALL or C_ENTER), puts the result in `slot`, and goes
-                    on with `next`. The `count` slots in `slots` are not
-                    used after it, and are emptied so that they keep
-                    nothing in use meanwhile. */
+                    on with `next`. The slots in `let_go` are not used
+                    after it, and are emptied so that they keep nothing
+                    in use meanwhile. */
     C_LET,       /* puts the `count` values `codes` in the slots `slots`.
                     The closures and thunks among them may capture any of
                     those slots. */
@@ -128,6 +145,8 @@ struct Code {
     Code *next;
     Code **codes;
     int *slots;
+    int *let_go;              /* C_EVAL, an argument of a C_CALL */
+    int let_go_count;
     union {
         Value *value;         /* C_CONST */
         Global *global;       /* C_GLOBAL, C_METHOD */
@@ -137,13 +156,17 @@ struct Code {
     } u;
     Type *type;               /* C_TYPE, C_METHOD */
     Binding **bindings;       /* C_TYPE, C_METHOD */
-    /* C_METHOD at a type without variables: the method found, while
-       all_instances is `method_instances` (eval.c). */
+    /* C_METHOD: the method found the last time, at the type `method_type`
+       (which is `type` if that has no variables), while all_instances is
+       `method_instances` (eval.c). */
     Value *method;
+    Type *method_type;
     const void *method_instances;
     const Token *token;       /* where in the program it comes from */
     int id;                   /* compile.c: its number in its function */
 };
+
+#define LEAF_SLOTS 8 /* the most slots a leaf function has */
 
 /* A function, or the code of a thunk (no parameters). Its locals are
    `slot_count` slots: first the parameters, then the captured variables,
@@ -152,8 +175,27 @@ struct Function {
     int arity;
     int capture_count;
     int slot_count;
-    Code *body;
+    unsigned strict; /* which parameters it always evaluates when it is
+                        called with all of them: a bit for each, the first
+                        parameter lowest. An argument for one of them is
+                        evaluated before the call, and no thunk is made
+                        for it. */
+    int is_leaf;     /* it only takes its arguments apart: its code has no
+                        call in it and makes nothing, and needs few
+                        slots. The machine runs such a function without
+                        the steps of a call (quick_call in eval.c). */
+    unsigned leaf_reads; /* is_leaf: which parameters it looks at */
+    Code *body;      /* NULL for the code of a thunk that has not been run
+                        yet: it is compiled when it first is
+                        (compile_body), from what follows */
+    Expr *source;
+    Binding **bindings; /* the variables it captures */
 };
+
+/* compile.c: compiles the code of a thunk that is about to be run for the
+   first time. Much of a program is never run, and an expression that is
+   kept for later mostly is not kept at all (see C_CALL). */
+void compile_body(Function *function);
 
 /* compile.c: the value of the top-level variable, whose definition has
    been elaborated: a closure if it is a function, else a thunk. */
@@ -181,7 +223,8 @@ Value *shared_thunk(const Function *function);
    effect when that argument arrives, and returns make_io_result. The box
    lets an action finish without evaluating its result. */
 struct Builtin {
-    const char *name;
+    const char *name; /* a name that starts with "num" says that the
+                         builtin always evaluates all its arguments */
     int arity;
     Value *(*function)(Value **arguments);
 };
@@ -217,6 +260,9 @@ char *c_string(Value *list, long *length);
 
 /* Evaluates to weak head normal form. The result is never a thunk. */
 Value *force(Value *value);
+/* The same, without a call for a value that is evaluated already: most
+   are. The kinds from V_THUNK on are the ones that are not. */
+#define FORCE(value) ((value)->kind < V_THUNK ? (value) : force(value))
 /* Applies a function to one argument and evaluates the result. */
 Value *apply(Value *function, Value *argument);
 
@@ -277,6 +323,15 @@ char *integer_show(Value *value);
 void integer_top_bits(Value *value, unsigned long *top, long *shift,
                       int *negative);
 
+/* numbers.c: the kind of number the type is, if it is a type of small
+   numbers (not Integer, not floating point), else -1; a number of that
+   kind as a value outside the collector's memory; and an operation on two
+   evaluated numbers of that kind: + - * = n(ot equal) < l(ess or equal)
+   c(ompare). */
+int small_number_kind(Type *type);
+Value *number_constant(int kind, long number);
+Value *number_primitive(int operation, int kind, Value *a, Value *b);
+
 /* numbers.c: the arithmetic builtins. */
 Value *builtin_numAdd(Value **arguments);
 Value *builtin_numSub(Value **arguments);
@@ -287,6 +342,8 @@ Value *builtin_numDiv(Value **arguments);
 Value *builtin_numMod(Value **arguments);
 Value *builtin_numEq(Value **arguments);
 Value *builtin_numLess(Value **arguments);
+Value *builtin_numLessEq(Value **arguments);
+Value *builtin_numCompare(Value **arguments);
 Value *builtin_numAnd(Value **arguments);
 Value *builtin_numOr(Value **arguments);
 Value *builtin_numXor(Value **arguments);

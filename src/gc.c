@@ -697,10 +697,35 @@ void *gc_alloc_bytes(size_t size)
     return allocate(size, CELL_BYTES);
 }
 
+/* Most of what is allocated is a small value, so this has the common case
+   of allocate without the steps a value never needs. */
 Value *gc_alloc_value(int field_count)
 {
-    return allocate(sizeof(Value) + (size_t)field_count * sizeof(Value *),
-                    CELL_VALUE);
+    size_t size = sizeof(Value) + (size_t)field_count * sizeof(Value *);
+    void **words;
+    unsigned char *state;
+    size_t cell_size;
+    size_t i;
+    int size_class;
+
+    if (size > 256 || allocated >= threshold) {
+        return allocate(size, CELL_VALUE);
+    }
+    size_class = class_of_units[(size + 15) / 16];
+    words = free_cells[size_class];
+    if (words == NULL) {
+        return allocate(size, CELL_VALUE);
+    }
+    state = words[1];
+    cell_size = class_sizes[size_class];
+    free_cells[size_class] = words[0];
+    *state = (unsigned char)(CELL_USED | CELL_VALUE);
+    add_cell(&young_cells, (char *)words, cell_size, state);
+    for (i = 0; i < size / sizeof(void *); i++) {
+        words[i] = NULL;
+    }
+    allocated += cell_size;
+    return (Value *)words;
 }
 
 /* The memory made at least `size` bytes long, keeping what is in it. `old`

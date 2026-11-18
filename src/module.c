@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define MAX_SEARCH_DIRECTORIES 64
@@ -113,16 +114,80 @@ Entity *library_entity(const char *module, enum Namespace namespace,
 
 /* ---- Looking up names ---- */
 
-Entity *find_entity(Module *module, enum Namespace namespace, const char *name)
+/* How many entities have been added to modules: see find_exported_entity. */
+static unsigned long generation = 1;
+
+static unsigned long hash_name(enum Namespace namespace, const char *name)
+{
+    unsigned long hash = 5381 + (unsigned long)namespace;
+
+    while (*name != '\0') {
+        hash = hash * 33 + (unsigned char)*name++;
+    }
+    return hash;
+}
+
+/* A module's own entities are found through a table of them, made when
+   the module is first searched and again if it has got more since. A
+   name is looked up many times for every definition that is prepared. */
+static void index_entities(Module *module)
 {
     Entity *entity;
+    int count = 0;
+    int i;
 
     for (entity = module->entities; entity != NULL; entity = entity->next) {
+        count++;
+    }
+    free(module->entity_table);
+    module->entity_table_size = 16;
+    while (module->entity_table_size < count * 2) {
+        module->entity_table_size *= 2;
+    }
+    module->entity_table =
+        xmalloc((size_t)module->entity_table_size * sizeof(Entity *));
+    for (i = 0; i < module->entity_table_size; i++) {
+        module->entity_table[i] = NULL;
+    }
+    /* Of two with the same name the one that is first in the list is
+       found, as a search of the list would. */
+    for (entity = module->entities; entity != NULL; entity = entity->next) {
+        unsigned long at = hash_name(entity->namespace, entity->name);
+
+        for (;; at++) {
+            Entity *other = module->entity_table[at % (unsigned long)module->entity_table_size];
+
+            if (other == NULL) {
+                module->entity_table[at % (unsigned long)module->entity_table_size] = entity;
+                break;
+            }
+            if (other->namespace == entity->namespace
+                && strcmp(other->name, entity->name) == 0) {
+                break;
+            }
+        }
+    }
+    module->indexed_entities = module->entities;
+}
+
+Entity *find_entity(Module *module, enum Namespace namespace, const char *name)
+{
+    unsigned long at = hash_name(namespace, name);
+
+    if (module->entity_table == NULL
+        || module->indexed_entities != module->entities) {
+        index_entities(module);
+    }
+    for (;; at++) {
+        Entity *entity = module->entity_table[at % (unsigned long)module->entity_table_size];
+
+        if (entity == NULL) {
+            return NULL;
+        }
         if (entity->namespace == namespace && strcmp(entity->name, name) == 0) {
             return entity;
         }
     }
-    return NULL;
 }
 
 static Module *imported_module(Import *import);
@@ -209,11 +274,48 @@ static Entity *find_exported_within(Module *module, enum Namespace namespace,
     return entity;
 }
 
+/* What find_exported_entity found before. The answer for a module and a
+   name does not change while no module gets a new entity: `generation`
+   counts those. */
+typedef struct Found {
+    Module *module;
+    const char *name;
+    Entity *entity;
+    unsigned long generation;
+    int namespace;
+} Found;
+
+#define FOUND_SIZE 65536
+static Found found_before[FOUND_SIZE];
+
 Entity *find_exported_entity(Module *module, enum Namespace namespace,
                              const char *name)
 {
+    Found *found = &found_before[(hash_name(namespace, name) * 31
+                                  + (unsigned long)(size_t)module / 16)
+                                 % FOUND_SIZE];
+
+    if (found->generation == generation && found->module == module
+        && found->namespace == (int)namespace
+        && strcmp(found->name, name) == 0) {
+        return found->entity;
+    }
     current_search++;
-    return find_exported_within(module, namespace, name);
+    {
+        Entity *entity = find_exported_within(module, namespace, name);
+
+        /* The search may have loaded modules: only what is found now is
+           kept. */
+        found = &found_before[(hash_name(namespace, name) * 31
+                               + (unsigned long)(size_t)module / 16)
+                              % FOUND_SIZE];
+        found->module = module;
+        found->name = name;
+        found->entity = entity;
+        found->generation = generation;
+        found->namespace = (int)namespace;
+        return entity;
+    }
 }
 
 const Fixity *find_fixity(const Module *module, const char *name)
@@ -539,6 +641,7 @@ static Entity *add_entity(Module *module, enum Namespace namespace,
     entity->parent = parent;
     entity->next = module->entities;
     module->entities = entity;
+    generation++;
     return entity;
 }
 

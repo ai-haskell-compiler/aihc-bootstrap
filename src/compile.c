@@ -283,6 +283,7 @@ static Code *compile(Scope *scope, Expr *expr);
 static Code *compile_delayed(Scope *scope, Expr *expr);
 static Code *compile_scrutinee(Scope *scope, Expr *expr);
 static void find_kills(Scope *scope, Function *function);
+static void find_strictness(const Scope *scope, Function *function);
 
 static Expr *without_annotations(Expr *expr)
 {
@@ -327,10 +328,18 @@ static Code *compile_function(Scope *outer, Expr *expr, int thunk)
     }
     free(mentioned.bindings);
     function->capture_count = count;
-    function->body = compile(&scope, expr);
-    function->slot_count = scope.slot_count;
-    find_kills(&scope, function);
-    free(scope.bindings);
+    if (thunk) {
+        /* Its code is compiled when it is first run: see compile_body. */
+        function->source = expr;
+        function->bindings = scope.bindings;
+        function->slot_count = count;
+    } else {
+        function->body = compile(&scope, expr);
+        function->slot_count = scope.slot_count;
+        find_kills(&scope, function);
+        find_strictness(&scope, function);
+        free(scope.bindings);
+    }
     free(scope.slots);
     free(scope.nodes);
     if (count == 0 && function->arity > 0) {
@@ -358,6 +367,26 @@ static Code *compile_function(Scope *outer, Expr *expr, int thunk)
     code->slots = captures;
     code->count = count;
     return code;
+}
+
+void compile_body(Function *function)
+{
+    Scope scope;
+    int i;
+
+    memset(&scope, 0, sizeof(scope));
+    for (i = 0; i < function->capture_count; i++) {
+        bind(&scope, function->bindings[i], new_slot(&scope));
+    }
+    function->body = compile(&scope, function->source);
+    function->slot_count = scope.slot_count;
+    find_kills(&scope, function);
+    free(scope.bindings);
+    free(scope.slots);
+    free(scope.nodes);
+    free(function->bindings);
+    function->bindings = NULL;
+    function->source = NULL;
 }
 
 /* The type with every link followed. Type applications are made once, so
@@ -553,14 +582,111 @@ static int is_literal(const Expr *expr)
         && !has_variables(expr->function->type);
 }
 
+/* Says for each argument of the call which slot it is, or -1 if it is not
+   a variable: most are, and the machine then does not look at their code. */
+static void set_argument_slots(Code *call)
+{
+    int i;
+
+    call->slots = xmalloc((size_t)call->count * sizeof(int) + 1);
+    for (i = 0; i < call->count; i++) {
+        call->slots[i] = call->codes[i]->kind == C_LOCAL
+            ? call->codes[i]->slot : -1;
+    }
+}
+
+/* The kind of small number that the class method is used at, if its
+   type is known here and is one, and the class is the Prelude's `class`;
+   else -1. */
+static int method_number_kind(const Expr *method, const char *class)
+{
+    const Class *of = method->global->class;
+
+    if (of->module == NULL || strcmp(of->module->name, "Prelude") != 0
+        || strcmp(of->name, class) != 0 || has_variables(method->type)) {
+        return -1;
+    }
+    return small_number_kind(method->type);
+}
+
+/* Arithmetic or a comparison of two small numbers of a type that is known
+   here, as a C_PRIM; or NULL if the call is not that. The instances of
+   the small number types define these methods as the builtins that a
+   C_PRIM does the work of (lib/Prelude.hs). */
+static Code *compile_primitive(Scope *scope, const Expr *head,
+                               Expr **arguments)
+{
+    static const struct {
+        const char *class;
+        const char *name;
+        char operation;
+        int swapped;
+    } known[] = {
+        { "Num", "+", '+', 0 }, { "Num", "-", '-', 0 }, { "Num", "*", '*', 0 },
+        { "Eq", "==", '=', 0 }, { "Eq", "/=", 'n', 0 },
+        { "Ord", "<", '<', 0 }, { "Ord", "<=", 'l', 0 },
+        { "Ord", ">", '<', 1 }, { "Ord", ">=", 'l', 1 },
+        { "Ord", "compare", 'c', 0 }
+    };
+    Code *code;
+    size_t i;
+    int kind;
+
+    for (i = 0; i < sizeof(known) / sizeof(known[0]); i++) {
+        if (strcmp(head->global->name, known[i].name) == 0) {
+            break;
+        }
+    }
+    if (i == sizeof(known) / sizeof(known[0])) {
+        return NULL;
+    }
+    kind = method_number_kind(head, known[i].class);
+    if (kind < 0) {
+        return NULL;
+    }
+    code = new_code(scope, C_PRIM, head->token);
+    code->tag = known[i].operation;
+    code->slot = kind;
+    code->count = 2;
+    code->codes = xmalloc(2 * sizeof(Code *));
+    code->codes[0] = compile_delayed(scope, arguments[known[i].swapped]);
+    code->codes[1] = compile_delayed(scope, arguments[!known[i].swapped]);
+    set_argument_slots(code);
+    return code;
+}
+
+/* A number literal at a type of small numbers that is known here: the
+   number itself. NULL for any other expression. */
+static Code *compile_small_number(Scope *scope, const Expr *expr)
+{
+    int kind;
+
+    if (!is_literal(expr) || expr->argument->big != 0
+        || strcmp(expr->function->global->name, "fromInteger") != 0) {
+        return NULL;
+    }
+    kind = method_number_kind(expr->function, "Num");
+    if (kind < 0) {
+        return NULL;
+    }
+    return new_const(scope, number_constant(kind, expr->argument->number),
+                     expr->token);
+}
+
 static Code *compile_application(Scope *scope, Expr *expr)
 {
     Expr **arguments;
     int count;
-    Expr *head = split_application(expr, &arguments, &count);
+    Expr *head;
     Code *call;
     Code *code;
     int i;
+
+    code = compile_small_number(scope, expr);
+    if (code != NULL) {
+        return code;
+    }
+    head = split_application(expr, &arguments, &count);
 
     if (is_saturated(head, count)) {
         code = head->constructor->is_newtype
@@ -568,6 +694,13 @@ static Code *compile_application(Scope *scope, Expr *expr)
             : compile_construction(scope, head, arguments, count);
         free(arguments);
         return code;
+    }
+    if (head->kind == E_METHOD && count == 2) {
+        code = compile_primitive(scope, head, arguments);
+        if (code != NULL) {
+            free(arguments);
+            return code;
+        }
     }
     call = new_code(scope, C_CALL, expr->token);
     code = call;
@@ -597,6 +730,7 @@ static Code *compile_application(Scope *scope, Expr *expr)
     for (i = 0; i < count; i++) {
         call->codes[i] = compile_delayed(scope, arguments[i]);
     }
+    set_argument_slots(call);
     free(arguments);
     return code;
 }
@@ -609,6 +743,10 @@ static Code *compile_delayed(Scope *scope, Expr *expr)
     Code *code;
 
     expr = without_annotations(expr);
+    code = compile_small_number(scope, expr);
+    if (code != NULL) {
+        return code;
+    }
     if (is_literal(expr)) {
         /* Worked out once, the first time something needs it, and not
            every time this code is run. */
@@ -663,7 +801,25 @@ static Code *compile_delayed(Scope *scope, Expr *expr)
     default:
         break;
     }
-    return compile_function(scope, expr, 1);
+    code = compile_function(scope, expr, 1);
+    if (code->kind == C_CLOSURE && expr->kind == E_APP) {
+        /* A call: also as code to run in place, for when the function it
+           is an argument of always evaluates it. */
+        Expr *head = expr;
+
+        while (head->kind == E_APP) {
+            head = without_annotations(head->function);
+        }
+        if (head->kind == E_LOCAL || head->kind == E_GLOBAL
+            || head->kind == E_METHOD) {
+            Code *call = compile_application(scope, expr);
+
+            if (call->kind == C_CALL || call->kind == C_PRIM) {
+                code->first = call;
+            }
+        }
+    }
+    return code;
 }
 
 /* Code for a C_EVAL to evaluate: a value that takes no work to get, a
@@ -700,7 +856,7 @@ static Code *compile_scrutinee(Scope *scope, Expr *expr)
         if (head->kind == E_LOCAL || head->kind == E_GLOBAL
             || head->kind == E_METHOD) {
             code = compile_application(scope, expr);
-            if (code->kind == C_CALL) {
+            if (code->kind == C_CALL || code->kind == C_PRIM) {
                 return code;
             }
         }
@@ -1546,6 +1702,11 @@ static void add_reads(Word *set, const Code *code)
             add_reads(set, code->codes[i]);
         }
         break;
+    case C_PRIM:
+        for (i = 0; i < code->count; i++) {
+            add_reads(set, code->codes[i]);
+        }
+        break;
     case C_CALL:
         add_reads(set, code->first);
         for (i = 0; i < code->count; i++) {
@@ -1682,7 +1843,48 @@ static void note_held(Analysis *analysis, const Code *code, const Word *held)
     free(after);
 }
 
-/* Gives every C_EVAL of the function the slots to empty. */
+/* Gives the arguments of the call the slots to empty when they are
+   evaluated before the call: those of `held` that neither the arguments
+   after it read nor what comes after the call, which is `needed`. An
+   argument that is a call itself (Code.first) is run in place: it lets
+   go of the same when it has its own arguments, which get theirs in
+   turn. `needed` is changed. */
+static void argument_kills(Analysis *analysis, const Function *function,
+                           const Code *call, const Word *held, Word *needed)
+{
+    int slot;
+    int k;
+
+    for (k = call->count - 1; k >= 0; k--) {
+        Code *argument = call->codes[k];
+
+        if (argument->kind == C_LOCAL || argument->kind == C_CLOSURE) {
+            argument->let_go =
+                xmalloc((size_t)function->slot_count * sizeof(int));
+            for (slot = 0; slot < function->slot_count; slot++) {
+                if (has_slot(held, slot) && !has_slot(needed, slot)) {
+                    argument->let_go[argument->let_go_count++] = slot;
+                }
+            }
+            argument->let_go = xrealloc(
+                argument->let_go,
+                (size_t)argument->let_go_count * sizeof(int) + 1);
+        }
+        if (argument->kind == C_CLOSURE && argument->first != NULL) {
+            Word *after = new_set(analysis);
+
+            argument->first->let_go = argument->let_go;
+            argument->first->let_go_count = argument->let_go_count;
+            add_set(analysis, after, needed);
+            argument_kills(analysis, function, argument->first, held, after);
+            free(after);
+        }
+        add_reads(needed, argument);
+    }
+}
+
+/* Gives every C_EVAL of the function, and every argument of its calls,
+   the slots to empty. */
 static void find_kills(Scope *scope, Function *function)
 {
     Analysis analysis;
@@ -1715,15 +1917,34 @@ static void find_kills(Scope *scope, Function *function)
             continue;
         }
         read = slots_read(&analysis, code->next);
-        code->slots = xmalloc((size_t)function->slot_count * sizeof(int));
+        code->let_go = xmalloc((size_t)function->slot_count * sizeof(int));
         for (slot = 0; slot < function->slot_count; slot++) {
             if (slot != code->slot && has_slot(analysis.held[i], slot)
                 && !has_slot(read, slot)) {
-                code->slots[code->count++] = slot;
+                code->let_go[code->let_go_count++] = slot;
             }
         }
-        code->slots = xrealloc(code->slots,
-                               (size_t)code->count * sizeof(int) + 1);
+        code->let_go = xrealloc(code->let_go, (size_t)code->let_go_count
+                                                  * sizeof(int) + 1);
+    }
+    /* The arguments of a call: one that is evaluated before the call lets
+       go of what neither the arguments after it nor the code after the
+       call reads. */
+    for (i = 0; i < scope->node_count; i++) {
+        Code *code = scope->nodes[i];
+        const Code *call = code->kind == C_EVAL ? code->first : code;
+        Word *needed;
+
+        if ((call->kind != C_CALL && call->kind != C_PRIM)
+            || analysis.held[i] == NULL) {
+            continue;
+        }
+        needed = new_set(&analysis);
+        if (code->kind == C_EVAL) {
+            add_set(&analysis, needed, slots_read(&analysis, code->next));
+        }
+        argument_kills(&analysis, function, call, analysis.held[i], needed);
+        free(needed);
     }
     for (i = 0; i < scope->node_count; i++) {
         free(analysis.read[i]);
@@ -1731,6 +1952,207 @@ static void find_kills(Scope *scope, Function *function)
     }
     free(analysis.read);
     free(analysis.held);
+}
+
+/* ---- What a function always evaluates ----
+
+   A function that always evaluates a parameter gets the argument for it
+   evaluated: the machine does that before the call, without making a
+   thunk first (C_CALL). "Always" is what can be seen in its code without
+   looking into other functions: the parameter is evaluated on every way
+   through the code, or handed to a builtin that evaluates it. */
+
+typedef struct Strictness {
+    const Function *function;
+    unsigned *known; /* by Code.id */
+    char *done;
+} Strictness;
+
+static unsigned parameter_bit(const Strictness *strictness, int slot)
+{
+    return slot < strictness->function->arity && slot < 32 ? 1u << slot : 0;
+}
+
+/* Whether the call gives a builtin that always evaluates some of its
+   arguments all of them. Those builtins only work something out: they
+   have no effect. */
+static int is_pure_builtin(const Code *call)
+{
+    const Builtin *builtin;
+
+    if (call->kind == C_PRIM) {
+        return 1;
+    }
+    if (call->first->kind != C_GLOBAL || call->first->u.global->builtin == NULL) {
+        return 0;
+    }
+    builtin = find_builtin(call->first->u.global->builtin);
+    return builtin->arity > 0 && call->count >= builtin->arity
+        && global_value(call->first->u.global)->tag != 0;
+}
+
+/* The parameters that a call evaluates before it does anything else. */
+static unsigned call_evaluates(const Strictness *strictness, const Code *call)
+{
+    unsigned set = 0;
+    unsigned strict;
+    int i;
+
+    if (call->kind == C_PRIM) {
+        strict = ~0u;
+    } else if (call->first->kind == C_LOCAL) {
+        /* It is the function that is called. */
+        return parameter_bit(strictness, call->first->slot);
+    } else if (!is_pure_builtin(call)) {
+        return 0;
+    } else {
+        strict = (unsigned)global_value(call->first->u.global)->tag;
+    }
+    for (i = 0; i < call->count && i < 32; i++) {
+        if (call->codes[i]->kind == C_LOCAL && ((strict >> i) & 1) != 0) {
+            set |= parameter_bit(strictness, call->codes[i]->slot);
+        }
+    }
+    return set;
+}
+
+/* The parameters that are evaluated whichever way the code from the node
+   on goes. */
+static unsigned always_evaluated(Strictness *strictness, const Code *code)
+{
+    unsigned set = 0;
+    int all = 1;
+    int i;
+
+    if (strictness->done[code->id]) {
+        return strictness->known[code->id];
+    }
+    switch (code->kind) {
+    case C_LOCAL:
+        set = parameter_bit(strictness, code->slot);
+        break;
+    case C_EVAL:
+        /* What the code after a call evaluates does not count, unless
+           the call is of a builtin that only works something out: a
+           call can be of an action, and what comes after an action must
+           not be evaluated before it has had its effect. */
+        if (code->first->kind == C_LOCAL) {
+            set = parameter_bit(strictness, code->first->slot)
+                | always_evaluated(strictness, code->next);
+        } else if (code->first->kind == C_CONST) {
+            set = always_evaluated(strictness, code->next);
+        } else if (code->first->kind == C_CALL
+                   || code->first->kind == C_PRIM) {
+            set = call_evaluates(strictness, code->first);
+            if (is_pure_builtin(code->first)) {
+                set |= always_evaluated(strictness, code->next);
+            }
+        }
+        break;
+    case C_LET:
+    case C_FIELDS:
+        set = always_evaluated(strictness, code->next);
+        break;
+    case C_TEST:
+    case C_TEST_CHAR:
+        set = always_evaluated(strictness, code->first)
+            & always_evaluated(strictness, code->next);
+        break;
+    case C_SWITCH:
+        set = ~0u;
+        for (i = 0; i < code->count; i++) {
+            if (code->codes[i] != NULL) {
+                set &= always_evaluated(strictness, code->codes[i]);
+            } else {
+                all = 0;
+            }
+        }
+        if (!all) {
+            set &= always_evaluated(strictness, code->next);
+        }
+        break;
+    case C_FAIL:
+        /* It does not come back. */
+        set = ~0u;
+        break;
+    case C_CALL:
+    case C_PRIM:
+        set = call_evaluates(strictness, code);
+        break;
+    default:
+        break;
+    }
+    strictness->known[code->id] = set;
+    strictness->done[code->id] = 1;
+    return set;
+}
+
+/* Whether the code from the node on only looks at values: see
+   Function.is_leaf. Notes the slots it reads in `*reads`. `budget` bounds
+   the nodes that are looked at. */
+static int is_leaf_code(const Code *code, int *budget, unsigned *reads)
+{
+    int i;
+
+    if (--*budget < 0) {
+        return 0;
+    }
+    switch (code->kind) {
+    case C_LOCAL:
+        *reads |= 1u << code->slot;
+        return 1;
+    case C_CONST:
+        return 1;
+    case C_EVAL:
+        if (code->first->kind != C_LOCAL) {
+            return 0;
+        }
+        *reads |= 1u << code->first->slot;
+        return is_leaf_code(code->next, budget, reads);
+    case C_FIELDS:
+        *reads |= 1u << code->slot;
+        return is_leaf_code(code->next, budget, reads);
+    case C_TEST:
+    case C_TEST_CHAR:
+        *reads |= 1u << code->slot;
+        return is_leaf_code(code->first, budget, reads)
+            && is_leaf_code(code->next, budget, reads);
+    case C_SWITCH:
+        *reads |= 1u << code->slot;
+        for (i = 0; i < code->count; i++) {
+            if (code->codes[i] != NULL
+                && !is_leaf_code(code->codes[i], budget, reads)) {
+                return 0;
+            }
+        }
+        return is_leaf_code(code->next, budget, reads);
+    default:
+        return 0;
+    }
+}
+
+static void find_strictness(const Scope *scope, Function *function)
+{
+    int budget = 24;
+
+    function->is_leaf = function->capture_count == 0
+        && function->slot_count <= LEAF_SLOTS
+        && is_leaf_code(function->body, &budget, &function->leaf_reads);
+    Strictness strictness;
+
+    if (function->arity == 0) {
+        return;
+    }
+    strictness.function = function;
+    strictness.known = xmalloc((size_t)scope->node_count * sizeof(unsigned));
+    strictness.done = xmalloc((size_t)scope->node_count);
+    memset(strictness.done, 0, (size_t)scope->node_count);
+    function->strict = always_evaluated(&strictness, function->body);
+    if (function->arity < 32) {
+        function->strict &= (1u << function->arity) - 1;
+    }
+    free(strictness.known);
+    free(strictness.done);
 }
 
 /* ---- Top-level variables ---- */

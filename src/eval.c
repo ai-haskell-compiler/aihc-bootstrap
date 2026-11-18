@@ -20,6 +20,9 @@ enum FrameKind {
     F_UPDATE, /* then store the result in the thunk `value` */
     F_RESUME, /* then put the result in the slot of the C_EVAL `code` and
                  go on after it, with the locals from `base` on */
+    F_ARGUMENT, /* then go on with the call `code` (a C_CALL, or the C_EVAL
+                   it is in) of `value`: the result is its argument
+                   number `count` */
     F_STOP    /* then leave run() */
 };
 
@@ -29,6 +32,7 @@ typedef struct Frame {
                   those above are no longer needed when it is reached */
     int base;
     int count;
+    int tail;  /* F_ARGUMENT: the call is the last thing its function does */
     const Code *code;
     Value *value;
 } Frame;
@@ -52,13 +56,18 @@ static Value **locals = NULL;
 static int locals_capacity = 0;
 static int sp = 0; /* how many locals are in use */
 
-static Frame *push(enum FrameKind kind, int top)
+static void grow_stack(void)
+{
+    stack_capacity = stack_capacity * 2 + 1024;
+    stack = xrealloc(stack, (size_t)stack_capacity * sizeof(Frame));
+}
+
+static inline Frame *push(enum FrameKind kind, int top)
 {
     Frame *frame;
 
     if (stack_size == stack_capacity) {
-        stack_capacity = stack_capacity * 2 + 1024;
-        stack = xrealloc(stack, (size_t)stack_capacity * sizeof(Frame));
+        grow_stack();
     }
     frame = &stack[stack_size++];
     frame->kind = kind;
@@ -70,13 +79,18 @@ static Frame *push(enum FrameKind kind, int top)
     return frame;
 }
 
+static void grow_locals(int top)
+{
+    locals_capacity = top * 2 + 1024;
+    locals = xrealloc(locals, (size_t)locals_capacity * sizeof(Value *));
+}
+
 /* Makes room for `top` locals. This may move them: nothing keeps a
    pointer into them across it. */
-static void reserve(int top)
+static inline void reserve(int top)
 {
     if (top > locals_capacity) {
-        locals_capacity = top * 2 + 1024;
-        locals = xrealloc(locals, (size_t)locals_capacity * sizeof(Value *));
+        grow_locals(top);
     }
 }
 
@@ -92,7 +106,7 @@ static Value *new_value(enum ValueKind kind)
    makes a value for every character it reads. They are outside the
    collector's memory, and never change. */
 #define SHARED_INT_LOW (-128)
-#define SHARED_INT_HIGH 1024
+#define SHARED_INT_HIGH 65536
 #define SHARED_CHARS 256
 
 static Value shared_ints[SHARED_INT_HIGH - SHARED_INT_LOW];
@@ -247,11 +261,36 @@ Value *constant_closure(const Function *function)
     return value;
 }
 
+/* Which arguments the builtin always evaluates: a bit for each. A thunk
+   that the builtin would evaluate at once is not worth making. */
+static int strict_arguments(const Builtin *builtin)
+{
+    static const char *const all[] = {
+        "bytesLength", "bytesIndex", "bytesSlice", "bytesCompare", NULL
+    };
+    int i;
+
+    if (strncmp(builtin->name, "num", 3) == 0) {
+        return ~0;
+    }
+    if (strcmp(builtin->name, "seq") == 0) {
+        /* seq :: a -> b -> b, after the two types: the first value. */
+        return 4;
+    }
+    for (i = 0; all[i] != NULL; i++) {
+        if (strcmp(builtin->name, all[i]) == 0) {
+            return ~0;
+        }
+    }
+    return 0;
+}
+
 Value *make_builtin(const Builtin *builtin)
 {
     Value *value = new_value(V_BUILTIN);
 
     value->c.builtin = builtin;
+    value->tag = strict_arguments(builtin);
     return value;
 }
 
@@ -333,26 +372,29 @@ static Type *close_type(Type *type, const Code *code, int base)
     return type;
 }
 
-/* The method of a C_METHOD. Found once if its type has no variables in
-   it, as long as no instances come: find_method keeps the value in use
-   meanwhile. */
+/* The method of a C_METHOD. What was found the last time is kept, as
+   long as no instances come: code mostly runs at one type, also where
+   the type is a variable. A type without variables in it is made once,
+   so the same type is the same pointer. find_method keeps the value in
+   use meanwhile. */
 static Value *method_of(const Code *code, int base)
 {
     Code *site = (Code *)code;
+    Type *type = code->count > 0 ? close_type(code->type, code, base)
+                                 : code->type;
+    Value *method;
 
-    if (code->count > 0) {
-        return find_method(code->u.global, close_type(code->type, code, base));
+    if (code->method != NULL && code->method_type == type
+        && code->method_instances == all_instances) {
+        return code->method;
     }
-    if (code->method == NULL || code->method_instances != all_instances) {
-        Value *method = find_method(code->u.global, code->type);
-
-        if (!method_is_remembered(code->type)) {
-            return method;
-        }
+    method = find_method(code->u.global, type);
+    if (method_is_remembered(type)) {
         site->method = method;
+        site->method_type = type;
         site->method_instances = all_instances;
     }
-    return code->method;
+    return method;
 }
 
 /* ---- Values that take no work ---- */
@@ -500,6 +542,48 @@ static int arguments_needed(const Value *function)
     return 0;
 }
 
+/* How many more arguments the function takes before it runs, or -1 if
+   the value is not an evaluated function. Sets `*strict` to which of the
+   `count` arguments it is about to be given it always evaluates: a bit
+   for each, the first lowest. Only when they are all it needs: with
+   fewer it does not run. */
+static inline int signature(const Value *function, int count,
+                            unsigned *strict)
+{
+    const Function *code;
+    int need;
+    int had;
+
+    *strict = 0;
+    switch (function->kind) {
+    case V_CLOSURE:
+        code = function->a.function;
+        if (count >= code->arity) {
+            *strict = code->strict;
+        }
+        return code->arity;
+    case V_PARTIAL:
+        code = function->c.function->a.function;
+        had = function->a.argument_count;
+        if (had + count >= code->arity) {
+            *strict = code->strict >> had;
+        }
+        return code->arity - had;
+    case V_BUILTIN:
+        need = function->c.builtin->arity - function->a.argument_count;
+        if (count >= need) {
+            *strict = (unsigned)function->tag;
+        }
+        return need;
+    case V_PARTIAL_CON:
+        return function->c.constructor->arity
+               + function->c.constructor->existential_count
+               - function->a.argument_count;
+    default:
+        return -1;
+    }
+}
+
 /* The function given the `count` locals from `first` on, which are fewer
    arguments than it needs: a value that waits for the rest. */
 static Value *partial_application(Value *function, int first, int count)
@@ -515,6 +599,8 @@ static Value *partial_application(Value *function, int first, int count)
         result->c.function = function;
     } else {
         result->c = function->c;
+        /* See Value.tag. */
+        result->tag = (int)((unsigned)function->tag >> count);
     }
     for (i = 0; i < had; i++) {
         result->b.arguments[i] = function->b.arguments[i];
@@ -578,13 +664,152 @@ static Value *complete(Value *function, int first, int count)
 
 #define SLOT(index) (locals[base + (index)])
 
-/* Empties the slots that a C_EVAL says are not used after it. */
+/* Empties the slots that a C_EVAL (or an argument that is evaluated) says
+   are not used after it. */
 #define LET_GO(eval) \
     do { \
-        for (i = 0; i < (eval)->count; i++) { \
-            SLOT((eval)->slots[i]) = NULL; \
+        for (i = 0; i < (eval)->let_go_count; i++) { \
+            SLOT((eval)->let_go[i]) = NULL; \
         } \
     } while (0)
+
+/* Whether argument number `index` is one that the function always
+   evaluates: see strictness. */
+#define IS_STRICT(strict, index) \
+    ((index) < 32 && (((strict) >> (index)) & 1) != 0)
+
+/* What the C_PRIM gives if both its numbers are there already, in slots
+   or as constants, which is most of the time. Otherwise NULL: then its
+   arguments are evaluated as those of a call are. */
+static Value *quick_primitive(const Code *code, int base)
+{
+    const Code *first = code->codes[0];
+    const Code *second = code->codes[1];
+    Value *a;
+    Value *b;
+
+    if (first->kind == C_LOCAL) {
+        a = SLOT(first->slot);
+    } else if (first->kind == C_CONST) {
+        a = first->u.value;
+    } else {
+        return NULL;
+    }
+    if (second->kind == C_LOCAL) {
+        b = SLOT(second->slot);
+    } else if (second->kind == C_CONST) {
+        b = second->u.value;
+    } else {
+        return NULL;
+    }
+    while (a->kind == V_INDIRECTION) {
+        a = a->b.result;
+    }
+    while (b->kind == V_INDIRECTION) {
+        b = b->b.result;
+    }
+    if (a->kind >= V_THUNK || b->kind >= V_THUNK) {
+        return NULL;
+    }
+    return number_primitive(code->tag, code->slot, a, b);
+}
+
+/* Whether the call can be run by quick_call: it is of a top-level
+   function that only takes its arguments apart (Function.is_leaf), with
+   all its arguments, and those the function looks at are in slots or
+   constants. Sets call->tag to the answer once the function has a value. */
+static int is_quick_call(const Code *call)
+{
+    const Function *function;
+    Value *value;
+    int quick = 1;
+    int i;
+
+    if (call->kind != C_CALL || call->first->kind != C_GLOBAL) {
+        ((Code *)call)->tag = -1;
+        return 0;
+    }
+    value = call->first->u.global->value;
+    if (value == NULL) {
+        return 0;
+    }
+    function = value->a.function;
+    if (value->kind != V_CLOSURE || !function->is_leaf
+        || function->arity != call->count) {
+        quick = 0;
+    }
+    for (i = 0; quick && i < call->count; i++) {
+        if (((function->leaf_reads >> i) & 1) != 0 && call->slots[i] < 0
+            && call->codes[i]->kind != C_CONST) {
+            quick = 0;
+        }
+    }
+    ((Code *)call)->tag = quick ? 1 : -1;
+    return quick;
+}
+
+/* What a call that is_quick_call gives: the function is run right here,
+   on slots of its own, without the steps of a call. NULL if the function
+   needs a value evaluated that is not: then the call is made as any
+   other. The result may be a thunk. */
+static Value *quick_call(const Code *call, int base)
+{
+    Value *slots[LEAF_SLOTS];
+    const Function *function = call->first->u.global->value->a.function;
+    const Code *code;
+    Value *value;
+    int i;
+
+    for (i = 0; i < call->count; i++) {
+        slots[i] = call->slots[i] >= 0 ? SLOT(call->slots[i])
+            : call->codes[i]->kind == C_CONST ? call->codes[i]->u.value
+            : NULL;
+    }
+    for (code = function->body;;) {
+        switch (code->kind) {
+        case C_LOCAL:
+            return slots[code->slot];
+        case C_CONST:
+            return code->u.value;
+        case C_EVAL:
+            value = slots[code->first->slot];
+            while (value->kind == V_INDIRECTION) {
+                value = value->b.result;
+            }
+            if (value->kind >= V_THUNK) {
+                return NULL;
+            }
+            slots[code->slot] = value;
+            code = code->next;
+            break;
+        case C_FIELDS:
+            value = slots[code->slot];
+            for (i = 0; i < code->count; i++) {
+                slots[code->tag + i] = value->b.fields[code->slots[i]];
+            }
+            code = code->next;
+            break;
+        case C_TEST:
+            code = slots[code->slot]->tag == code->tag ? code->first
+                                                       : code->next;
+            break;
+        case C_TEST_CHAR:
+            code = slots[code->slot]->a.number == code->tag ? code->first
+                                                            : code->next;
+            break;
+        case C_SWITCH:
+            code = code->codes[slots[code->slot]->tag] != NULL
+                ? code->codes[slots[code->slot]->tag] : code->next;
+            break;
+        default:
+            return NULL;
+        }
+    }
+}
+
+/* Whether to try quick_call for the call. */
+#define IS_QUICK(call) \
+    ((call)->tag > 0 || ((call)->tag == 0 && is_quick_call(call)))
 
 /* The machine is in one of two states:
      - code != NULL: running `code`, whose slots are the locals from `base`
@@ -602,8 +827,13 @@ static Value *run(const Code *code, int base, Value *value)
     int at = 0;
     int target = 0;
     const Function *callee = NULL;
-    const Code *call;
-    const Code *eval;
+    const Code *call = NULL;
+    const Code *eval = NULL;
+    const Code *argument;
+    Value *given;
+    unsigned strict = 0;
+    int index = 0;
+    int tail = 0; /* the call is the last thing the function does */
     Frame *frame;
     int need;
     int i;
@@ -615,6 +845,9 @@ static Value *run(const Code *code, int base, Value *value)
                 /* Its code runs above the locals that the top frame still
                    needs. */
                 callee = value->a.function;
+                if (callee->body == NULL) {
+                    compile_body((Function *)callee);
+                }
                 target = stack[stack_size - 1].top;
                 reserve(target + callee->slot_count);
                 for (i = 0; i < callee->capture_count; i++) {
@@ -677,6 +910,30 @@ static Value *run(const Code *code, int base, Value *value)
                 at = sp - argc;
                 target = at;
                 goto apply;
+            case F_ARGUMENT:
+                /* The arguments before this one are the locals on top. */
+                base = frame->base;
+                sp = frame->top;
+                function = frame->value;
+                index = frame->count;
+                if (frame->code->kind == C_EVAL) {
+                    eval = frame->code;
+                    call = eval->first;
+                } else {
+                    eval = NULL;
+                    call = frame->code;
+                }
+                tail = frame->tail;
+                at = sp - index;
+                locals[sp++] = value;
+                if (function == NULL) {
+                    strict = ~0u;
+                } else {
+                    need = signature(function, call->count, &strict);
+                }
+                index++;
+                code = call;
+                goto arguments;
             }
         }
         switch (code->kind) {
@@ -772,20 +1029,52 @@ static Value *run(const Code *code, int base, Value *value)
             die("%s:%d: %s", code->token->file, code->token->line,
                 code->u.string);
             break;
+        case C_PRIM:
+            value = quick_primitive(code, base);
+            if (value != NULL) {
+                break;
+            }
+            /* fall through */
         case C_CALL:
+            if (code->kind == C_CALL && IS_QUICK(code)) {
+                value = quick_call(code, base);
+                if (value != NULL) {
+                    break;
+                }
+            }
             /* The last thing the function does: the function that is
                called takes its place. */
             call = code;
             eval = NULL;
+            tail = 1;
             goto call;
         case C_EVAL:
             eval = code;
+            tail = 0;
             switch (code->first->kind) {
+            case C_PRIM:
+                value = quick_primitive(code->first, base);
+                if (value != NULL) {
+                    SLOT(code->slot) = value;
+                    code = code->next;
+                    continue;
+                }
+                /* fall through */
             case C_CALL:
+                if (code->first->kind == C_CALL && IS_QUICK(code->first)) {
+                    value = quick_call(code->first, base);
+                    if (value != NULL) {
+                        /* As a value that takes no work, below. */
+                        break;
+                    }
+                }
                 call = code->first;
                 goto call;
             case C_ENTER:
                 callee = code->first->u.function;
+                if (callee->body == NULL) {
+                    compile_body((Function *)callee);
+                }
                 target = sp;
                 reserve(target + callee->slot_count);
                 for (i = 0; i < callee->capture_count; i++) {
@@ -838,6 +1127,12 @@ static Value *run(const Code *code, int base, Value *value)
         /* The arguments go above the locals that are in use. */
         at = sp;
         reserve(at + call->count);
+        if (call->kind == C_PRIM) {
+            function = NULL;
+            strict = ~0u;
+            index = 0;
+            goto arguments;
+        }
         switch (call->first->kind) {
         case C_LOCAL:
             function = SLOT(call->first->slot);
@@ -856,13 +1151,122 @@ static Value *run(const Code *code, int base, Value *value)
         default:
             die("code that cannot be called");
         }
-        for (i = 0; i < call->count; i++) {
-            const Code *argument = call->codes[i];
-            Value *given = argument->kind == C_LOCAL ? SLOT(argument->slot)
-                : argument->kind == C_CONST ? argument->u.value
-                : delay(argument, base);
+        while (function->kind == V_INDIRECTION) {
+            function = function->b.result;
+        }
+        need = signature(function, call->count, &strict);
+        index = 0;
+        /* fall through */
 
+    arguments:
+        /* The arguments from number `index` on. One that the function
+           always evaluates is evaluated here, where no thunk has to be
+           made for it: the call goes on when its value is there
+           (F_ARGUMENT). */
+        for (; index < call->count; index++) {
+            argument = call->codes[index];
+            if (call->slots[index] >= 0) {
+                given = SLOT(call->slots[index]);
+            } else if (argument->kind == C_CONST) {
+                given = argument->u.value;
+            } else if (argument->kind == C_CLOSURE
+                       && argument->u.function->arity == 0
+                       && IS_STRICT(strict, index)) {
+                if (argument->first != NULL) {
+                    given = argument->first->kind == C_PRIM
+                        ? quick_primitive(argument->first, base)
+                        : IS_QUICK(argument->first)
+                            ? quick_call(argument->first, base) : NULL;
+                    if (given != NULL) {
+                        /* The result of a call may be a thunk. */
+                        while (given->kind == V_INDIRECTION) {
+                            given = given->b.result;
+                        }
+                        if (given->kind < V_THUNK) {
+                            locals[sp++] = given;
+                            continue;
+                        }
+                        LET_GO(argument);
+                        frame = push(F_ARGUMENT, sp);
+                        frame->base = base;
+                        frame->code = eval != NULL ? eval : call;
+                        frame->count = index;
+                        frame->value = function;
+                        frame->tail = tail;
+                        value = given;
+                        code = NULL;
+                        break;
+                    }
+                    /* What would be a thunk of a call: the call is made
+                       here, and its result is the argument. */
+                    frame = push(F_ARGUMENT, sp);
+                    frame->base = base;
+                    frame->code = eval != NULL ? eval : call;
+                    frame->count = index;
+                    frame->value = function;
+                    frame->tail = tail;
+                    call = argument->first;
+                    eval = NULL;
+                    tail = 0;
+                    goto call;
+                }
+                /* What would be a thunk is run on the spot. */
+                callee = argument->u.function;
+                if (callee->body == NULL) {
+                    compile_body((Function *)callee);
+                }
+                target = sp;
+                reserve(target + callee->slot_count);
+                for (i = 0; i < callee->capture_count; i++) {
+                    locals[target + i] = SLOT(argument->slots[i]);
+                }
+                LET_GO(argument);
+                frame = push(F_ARGUMENT, target);
+                frame->base = base;
+                frame->code = eval != NULL ? eval : call;
+                frame->count = index;
+                frame->value = function;
+                frame->tail = tail;
+                base = target;
+                goto start;
+            } else {
+                given = delay(argument, base);
+            }
+            if (IS_STRICT(strict, index) && given->kind >= V_THUNK) {
+                while (given->kind == V_INDIRECTION) {
+                    given = given->b.result;
+                }
+                if (given->kind >= V_THUNK) {
+                    LET_GO(argument);
+                    frame = push(F_ARGUMENT, sp);
+                    frame->base = base;
+                    frame->code = eval != NULL ? eval : call;
+                    frame->count = index;
+                    frame->value = function;
+                    frame->tail = tail;
+                    value = given;
+                    code = NULL;
+                    break;
+                }
+            }
             locals[sp++] = given;
+        }
+        if (index < call->count) {
+            continue;
+        }
+        if (function == NULL) {
+            /* A C_PRIM: both numbers are there. */
+            value = number_primitive(call->tag, call->slot, locals[at],
+                                     locals[at + 1]);
+            sp = at;
+            if (eval != NULL) {
+                LET_GO(eval);
+                SLOT(eval->slot) = value;
+                code = eval->next;
+            } else {
+                code = NULL;
+            }
+            continue;
         }
         argc = call->count;
         if (eval != NULL) {
@@ -872,8 +1276,16 @@ static Value *run(const Code *code, int base, Value *value)
             frame->base = base;
             frame->code = eval;
             target = at;
-        } else {
+        } else if (tail) {
             target = base;
+        } else {
+            /* An argument that is run in place: its result goes to the
+               call it is an argument of (F_ARGUMENT). */
+            LET_GO(call);
+            target = at;
+        }
+        if (need >= 0) {
+            goto known;
         }
         /* fall through */
 
@@ -895,6 +1307,9 @@ static Value *run(const Code *code, int base, Value *value)
             continue;
         }
         need = arguments_needed(function);
+        /* fall through */
+
+    known:
         if (argc < need) {
             value = partial_application(function, at, argc);
             code = NULL;
@@ -937,8 +1352,30 @@ static Value *run(const Code *code, int base, Value *value)
             callee = function->a.function;
             reserve(target + callee->slot_count);
             if (at != target) {
-                memmove(locals + target, locals + at,
-                        (size_t)argc * sizeof(Value *));
+                /* A few pointers, moved down: a call of memmove costs
+                   more than moving them. */
+                Value **to = locals + target;
+                Value **from = locals + at;
+
+                if (argc <= 4) {
+                    Value *first = from[0];
+                    Value *second = argc > 1 ? from[1] : NULL;
+                    Value *third = argc > 2 ? from[2] : NULL;
+                    Value *fourth = argc > 3 ? from[3] : NULL;
+
+                    to[0] = first;
+                    if (argc > 1) {
+                        to[1] = second;
+                    }
+                    if (argc > 2) {
+                        to[2] = third;
+                    }
+                    if (argc > 3) {
+                        to[3] = fourth;
+                    }
+                } else {
+                    memmove(to, from, (size_t)argc * sizeof(Value *));
+                }
             }
             for (i = 0; i < callee->capture_count; i++) {
                 locals[target + callee->arity + i] = function->b.fields[i];
@@ -954,9 +1391,26 @@ static Value *run(const Code *code, int base, Value *value)
     start:
         /* The locals of `callee` start at `base`, with its parameters and
            what it captured in place. */
-        for (i = callee->arity + callee->capture_count;
-             i < callee->slot_count; i++) {
-            locals[base + i] = NULL;
+        {
+            /* Mostly a slot or two: again not worth a call. */
+            Value **slot = locals + base + callee->arity
+                           + callee->capture_count;
+            int count = callee->slot_count - callee->arity
+                        - callee->capture_count;
+
+            if (count <= 3) {
+                if (count > 0) {
+                    slot[0] = NULL;
+                }
+                if (count > 1) {
+                    slot[1] = NULL;
+                }
+                if (count > 2) {
+                    slot[2] = NULL;
+                }
+            } else {
+                memset(slot, 0, (size_t)count * sizeof(Value *));
+            }
         }
         sp = base + callee->slot_count;
         code = callee->body;

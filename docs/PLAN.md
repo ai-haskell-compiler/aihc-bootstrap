@@ -195,7 +195,7 @@ file I/O, clocks and `System.Environment` are builtins. AIHC uses 18
 directory functions and runs external tools with `readProcessWithExitCode`
 and `createProcess`.
 
-This needs POSIX: ISO C89 has no directories, no `realpath` and no way to
+This needs POSIX: ISO C99 has no directories, no `realpath` and no way to
 capture the output of a process. See "Decisions".
 
 ## Phase 5: concurrency
@@ -486,7 +486,7 @@ Still missing, as the survey shows them:
 
 Made:
 
-- **POSIX is allowed.** The interpreter stays C89 as a language and may call
+- **POSIX is allowed.** The interpreter stays C99 as a language and may call
   POSIX functions (`opendir`, `mkdir`, `realpath`, `fork`, `execvp`, `pipe`,
   `waitpid`). They are kept in one file, apart from the rest.
 
