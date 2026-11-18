@@ -56,13 +56,18 @@ static Value **locals = NULL;
 static int locals_capacity = 0;
 static int sp = 0; /* how many locals are in use */
 
-static Frame *push(enum FrameKind kind, int top)
+static void grow_stack(void)
+{
+    stack_capacity = stack_capacity * 2 + 1024;
+    stack = xrealloc(stack, (size_t)stack_capacity * sizeof(Frame));
+}
+
+static inline Frame *push(enum FrameKind kind, int top)
 {
     Frame *frame;
 
     if (stack_size == stack_capacity) {
-        stack_capacity = stack_capacity * 2 + 1024;
-        stack = xrealloc(stack, (size_t)stack_capacity * sizeof(Frame));
+        grow_stack();
     }
     frame = &stack[stack_size++];
     frame->kind = kind;
@@ -74,13 +79,18 @@ static Frame *push(enum FrameKind kind, int top)
     return frame;
 }
 
+static void grow_locals(int top)
+{
+    locals_capacity = top * 2 + 1024;
+    locals = xrealloc(locals, (size_t)locals_capacity * sizeof(Value *));
+}
+
 /* Makes room for `top` locals. This may move them: nothing keeps a
    pointer into them across it. */
-static void reserve(int top)
+static inline void reserve(int top)
 {
     if (top > locals_capacity) {
-        locals_capacity = top * 2 + 1024;
-        locals = xrealloc(locals, (size_t)locals_capacity * sizeof(Value *));
+        grow_locals(top);
     }
 }
 
@@ -532,27 +542,45 @@ static int arguments_needed(const Value *function)
     return 0;
 }
 
-/* Which of the `count` arguments the function is about to be given it
-   always evaluates: a bit for each, the first lowest. Only when they are
-   all it needs: with fewer it does not run. */
-static unsigned strictness(const Value *function, int count)
+/* How many more arguments the function takes before it runs, or -1 if
+   the value is not an evaluated function. Sets `*strict` to which of the
+   `count` arguments it is about to be given it always evaluates: a bit
+   for each, the first lowest. Only when they are all it needs: with
+   fewer it does not run. */
+static inline int signature(const Value *function, int count,
+                            unsigned *strict)
 {
+    const Function *code;
+    int need;
     int had;
 
+    *strict = 0;
     switch (function->kind) {
     case V_CLOSURE:
-        return count >= function->a.function->arity
-            ? function->a.function->strict : 0;
+        code = function->a.function;
+        if (count >= code->arity) {
+            *strict = code->strict;
+        }
+        return code->arity;
     case V_PARTIAL:
+        code = function->c.function->a.function;
         had = function->a.argument_count;
-        return had + count >= function->c.function->a.function->arity
-            ? function->c.function->a.function->strict >> had : 0;
+        if (had + count >= code->arity) {
+            *strict = code->strict >> had;
+        }
+        return code->arity - had;
     case V_BUILTIN:
-        return function->a.argument_count + count
-                >= function->c.builtin->arity
-            ? (unsigned)function->tag : 0;
+        need = function->c.builtin->arity - function->a.argument_count;
+        if (count >= need) {
+            *strict = (unsigned)function->tag;
+        }
+        return need;
+    case V_PARTIAL_CON:
+        return function->c.constructor->arity
+               + function->c.constructor->existential_count
+               - function->a.argument_count;
     default:
-        return 0;
+        return -1;
     }
 }
 
@@ -801,8 +829,11 @@ static Value *run(const Code *code, int base, Value *value)
                 tail = frame->tail;
                 at = sp - index;
                 locals[sp++] = value;
-                strict = function == NULL ? ~0u
-                                          : strictness(function, call->count);
+                if (function == NULL) {
+                    strict = ~0u;
+                } else {
+                    need = signature(function, call->count, &strict);
+                }
                 index++;
                 code = call;
                 goto arguments;
@@ -1013,7 +1044,7 @@ static Value *run(const Code *code, int base, Value *value)
         while (function->kind == V_INDIRECTION) {
             function = function->b.result;
         }
-        strict = strictness(function, call->count);
+        need = signature(function, call->count, &strict);
         index = 0;
         /* fall through */
 
@@ -1126,6 +1157,9 @@ static Value *run(const Code *code, int base, Value *value)
             LET_GO(call);
             target = at;
         }
+        if (need >= 0) {
+            goto known;
+        }
         /* fall through */
 
     apply:
@@ -1146,6 +1180,9 @@ static Value *run(const Code *code, int base, Value *value)
             continue;
         }
         need = arguments_needed(function);
+        /* fall through */
+
+    known:
         if (argc < need) {
             value = partial_application(function, at, argc);
             code = NULL;
