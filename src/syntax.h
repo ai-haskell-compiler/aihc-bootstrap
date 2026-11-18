@@ -479,6 +479,9 @@ struct Module {
     const char *name;
     Token *tokens;
     Entity *entities;
+    Entity **entity_table;    /* module.c: the entities by name, as they */
+    int entity_table_size;    /* were when `indexed_entities` was the */
+    Entity *indexed_entities; /* first of them */
     Fixity *fixities;
     Import *imports;
     int reexport_count;     /* module M (module A, module B) where */
