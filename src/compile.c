@@ -555,6 +555,65 @@ static int is_literal(const Expr *expr)
         && !has_variables(expr->function->type);
 }
 
+/* The kind of small number that the class method is used at, if its
+   type is known here and is one, and the class is the Prelude's `class`;
+   else -1. */
+static int method_number_kind(const Expr *method, const char *class)
+{
+    const Class *of = method->global->class;
+
+    if (of->module == NULL || strcmp(of->module->name, "Prelude") != 0
+        || strcmp(of->name, class) != 0 || has_variables(method->type)) {
+        return -1;
+    }
+    return small_number_kind(method->type);
+}
+
+/* Arithmetic or a comparison of two small numbers of a type that is known
+   here, as a C_PRIM; or NULL if the call is not that. The instances of
+   the small number types define these methods as the builtins that a
+   C_PRIM does the work of (lib/Prelude.hs). */
+static Code *compile_primitive(Scope *scope, const Expr *head,
+                               Expr **arguments)
+{
+    static const struct {
+        const char *class;
+        const char *name;
+        char operation;
+        int swapped;
+    } known[] = {
+        { "Num", "+", '+', 0 }, { "Num", "-", '-', 0 }, { "Num", "*", '*', 0 },
+        { "Eq", "==", '=', 0 }, { "Eq", "/=", 'n', 0 },
+        { "Ord", "<", '<', 0 }, { "Ord", "<=", 'l', 0 },
+        { "Ord", ">", '<', 1 }, { "Ord", ">=", 'l', 1 },
+        { "Ord", "compare", 'c', 0 }
+    };
+    Code *code;
+    size_t i;
+    int kind;
+
+    for (i = 0; i < sizeof(known) / sizeof(known[0]); i++) {
+        if (strcmp(head->global->name, known[i].name) == 0) {
+            break;
+        }
+    }
+    if (i == sizeof(known) / sizeof(known[0])) {
+        return NULL;
+    }
+    kind = method_number_kind(head, known[i].class);
+    if (kind < 0) {
+        return NULL;
+    }
+    code = new_code(scope, C_PRIM, head->token);
+    code->tag = known[i].operation;
+    code->slot = kind;
+    code->count = 2;
+    code->codes = xmalloc(2 * sizeof(Code *));
+    code->codes[0] = compile_delayed(scope, arguments[known[i].swapped]);
+    code->codes[1] = compile_delayed(scope, arguments[!known[i].swapped]);
+    return code;
+}
+
 static Code *compile_application(Scope *scope, Expr *expr)
 {
     Expr **arguments;
@@ -570,6 +629,13 @@ static Code *compile_application(Scope *scope, Expr *expr)
             : compile_construction(scope, head, arguments, count);
         free(arguments);
         return code;
+    }
+    if (head->kind == E_METHOD && count == 2) {
+        code = compile_primitive(scope, head, arguments);
+        if (code != NULL) {
+            free(arguments);
+            return code;
+        }
     }
     call = new_code(scope, C_CALL, expr->token);
     code = call;
@@ -611,6 +677,16 @@ static Code *compile_delayed(Scope *scope, Expr *expr)
     Code *code;
 
     expr = without_annotations(expr);
+    if (is_literal(expr) && expr->argument->big == 0
+        && strcmp(expr->function->global->name, "fromInteger") == 0
+        && method_number_kind(expr->function, "Num") >= 0) {
+        /* A small number: it is known here. */
+        return new_const(scope,
+                         number_constant(
+                             method_number_kind(expr->function, "Num"),
+                             expr->argument->number),
+                         expr->token);
+    }
     if (is_literal(expr)) {
         /* Worked out once, the first time something needs it, and not
            every time this code is run. */
@@ -702,7 +778,7 @@ static Code *compile_scrutinee(Scope *scope, Expr *expr)
         if (head->kind == E_LOCAL || head->kind == E_GLOBAL
             || head->kind == E_METHOD) {
             code = compile_application(scope, expr);
-            if (code->kind == C_CALL) {
+            if (code->kind == C_CALL || code->kind == C_PRIM) {
                 return code;
             }
         }
@@ -1548,6 +1624,11 @@ static void add_reads(Word *set, const Code *code)
             add_reads(set, code->codes[i]);
         }
         break;
+    case C_PRIM:
+        for (i = 0; i < code->count; i++) {
+            add_reads(set, code->codes[i]);
+        }
+        break;
     case C_CALL:
         add_reads(set, code->first);
         for (i = 0; i < code->count; i++) {
@@ -1737,7 +1818,8 @@ static void find_kills(Scope *scope, Function *function)
         Word *needed;
         int k;
 
-        if (call->kind != C_CALL || analysis.held[i] == NULL) {
+        if ((call->kind != C_CALL && call->kind != C_PRIM)
+            || analysis.held[i] == NULL) {
             continue;
         }
         needed = new_set(&analysis);
@@ -1798,6 +1880,9 @@ static int is_pure_builtin(const Code *call)
 {
     const Builtin *builtin;
 
+    if (call->kind == C_PRIM) {
+        return 1;
+    }
     if (call->first->kind != C_GLOBAL || call->first->u.global->builtin == NULL) {
         return 0;
     }
@@ -1813,14 +1898,16 @@ static unsigned call_evaluates(const Strictness *strictness, const Code *call)
     unsigned strict;
     int i;
 
-    if (call->first->kind == C_LOCAL) {
+    if (call->kind == C_PRIM) {
+        strict = ~0u;
+    } else if (call->first->kind == C_LOCAL) {
         /* It is the function that is called. */
         return parameter_bit(strictness, call->first->slot);
-    }
-    if (!is_pure_builtin(call)) {
+    } else if (!is_pure_builtin(call)) {
         return 0;
+    } else {
+        strict = (unsigned)global_value(call->first->u.global)->tag;
     }
-    strict = (unsigned)global_value(call->first->u.global)->tag;
     for (i = 0; i < call->count && i < 32; i++) {
         if (call->codes[i]->kind == C_LOCAL && ((strict >> i) & 1) != 0) {
             set |= parameter_bit(strictness, call->codes[i]->slot);
@@ -1854,7 +1941,8 @@ static unsigned always_evaluated(Strictness *strictness, const Code *code)
                 | always_evaluated(strictness, code->next);
         } else if (code->first->kind == C_CONST) {
             set = always_evaluated(strictness, code->next);
-        } else if (code->first->kind == C_CALL) {
+        } else if (code->first->kind == C_CALL
+                   || code->first->kind == C_PRIM) {
             set = call_evaluates(strictness, code->first);
             if (is_pure_builtin(code->first)) {
                 set |= always_evaluated(strictness, code->next);
@@ -1888,6 +1976,7 @@ static unsigned always_evaluated(Strictness *strictness, const Code *code)
         set = ~0u;
         break;
     case C_CALL:
+    case C_PRIM:
         set = call_evaluates(strictness, code);
         break;
     default:

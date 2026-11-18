@@ -427,42 +427,46 @@ Value *builtin_numCompare(Value **arguments)
 /* ---- Arithmetic without a call ----
 
    Most arithmetic is on small numbers of a type that is known where it
-   is written. The machine does that itself (C_PRIM in eval.h): no method
-   is looked up and no builtin is called. Integer and the floating point
-   types are not small numbers, and go the long way. */
+   is written. The compiler makes that a C_PRIM (eval.h), which the
+   machine does itself: no method is looked up and no builtin is called.
+   Integer and the floating point types are not small numbers, and go
+   the long way. */
 
-int is_number_primitive(const Builtin *builtin, Value *type, int *operation,
-                        int *kind)
+int small_number_kind(Type *type)
 {
-    static const struct {
-        Value *(*function)(Value **arguments);
-        char operation;
-    } known[] = {
-        { builtin_numAdd, '+' }, { builtin_numSub, '-' },
-        { builtin_numMul, '*' }, { builtin_numEq, '=' },
-        { builtin_numLess, '<' }, { builtin_numLessEq, 'l' },
-        { builtin_numCompare, 'c' }
-    };
-    enum NumberKind number;
-    size_t i;
+    enum NumberKind kind;
 
-    for (i = 0; i < sizeof(known) / sizeof(known[0]); i++) {
-        if (builtin->function == known[i].function) {
-            if (type->kind != V_TYPE
-                || prune(type->b.type)->kind != TY_CON
-                || prune(type->b.type)->constructor->number_kind == 0) {
-                return 0;
+    type = prune(type);
+    if (type->kind != TY_CON) {
+        return -1;
+    }
+    if (type->constructor->number_kind == 0) {
+        /* Not asked before: number_kind fails for a type that is not a
+           number, so the names are looked at here. */
+        static const char *names[] = {
+            "Int", "Int64", "Word", "Word64", "Word32", "Word16", "Word8",
+            "Int32", "Int16", "Int8", "Char", NULL
+        };
+        int i;
+
+        for (i = 0; names[i] != NULL; i++) {
+            if (strcmp(type->constructor->name, names[i]) == 0) {
+                break;
             }
-            number = number_kind(type);
-            if (number == K_INTEGER || is_float(number)) {
-                return 0;
-            }
-            *operation = known[i].operation;
-            *kind = (int)number;
-            return 1;
+        }
+        if (names[i] == NULL) {
+            return -1;
         }
     }
-    return 0;
+    kind = number_kind(make_type(type));
+    return kind == K_INTEGER || is_float(kind) ? -1 : (int)kind;
+}
+
+Value *number_constant(int kind, long number)
+{
+    long wrapped = wrap((enum NumberKind)kind, (unsigned long)number);
+
+    return kind == K_CHAR ? constant_char(wrapped) : constant_int(wrapped);
 }
 
 Value *number_primitive(int operation, int kind, Value *a, Value *b)
@@ -483,6 +487,8 @@ Value *number_primitive(int operation, int kind, Value *a, Value *b)
                            (unsigned long)x * (unsigned long)y);
     case '=':
         return make_bool(x == y);
+    case 'n':
+        return make_bool(x != y);
     case '<':
         return make_bool(less);
     case 'l':

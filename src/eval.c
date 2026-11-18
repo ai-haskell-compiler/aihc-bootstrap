@@ -951,28 +951,7 @@ static Value *run(const Code *code, int base, Value *value)
         while (function->kind == V_INDIRECTION) {
             function = function->b.result;
         }
-        if (function->kind == V_BUILTIN && call->tag == 0 && call->count == 2
-            && function->a.argument_count == 1
-            && call->first->kind == C_METHOD && call->first->method != NULL) {
-            /* A method at a type that is known here, which is a builtin
-               that has its type: if it is arithmetic on small numbers,
-               this call is a C_PRIM from now on. Otherwise it is not
-               asked again. */
-            Code *site = (Code *)call;
-            int operation;
-            int kind;
-
-            site->tag = -1;
-            if (is_number_primitive(function->c.builtin,
-                                    function->b.arguments[0], &operation,
-                                    &kind)) {
-                site->kind = C_PRIM;
-                site->tag = operation;
-                site->slot = kind;
-                function = NULL;
-            }
-        }
-        strict = function == NULL ? ~0u : strictness(function, call->count);
+        strict = strictness(function, call->count);
         index = 0;
         /* fall through */
 
