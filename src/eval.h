@@ -41,6 +41,8 @@ struct Value {
     unsigned char old;      /* the collector has made it old: see
                                gc_written_value */
     int tag;                /* V_CON: index of the constructor in its type;
+                               V_TYPE: 1 + its kind of number, once
+                               numbers.c has worked that out;
                                V_BUILTIN: which of its arguments the
                                builtin always evaluates, a bit for each
                                that is still to come (the next one first) */
@@ -230,6 +232,9 @@ char *c_string(Value *list, long *length);
 
 /* Evaluates to weak head normal form. The result is never a thunk. */
 Value *force(Value *value);
+/* The same, without a call for a value that is evaluated already: most
+   are. The kinds from V_THUNK on are the ones that are not. */
+#define FORCE(value) ((value)->kind < V_THUNK ? (value) : force(value))
 /* Applies a function to one argument and evaluates the result. */
 Value *apply(Value *function, Value *argument);
 

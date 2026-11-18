@@ -45,18 +45,26 @@ static enum NumberKind number_kind(Value *type_value)
         K_INT, K_INT, K_INTEGER, K_WORD64, K_WORD64, K_WORD32, K_WORD16,
         K_WORD8, K_INT32, K_INT16, K_INT8, K_CHAR, K_DOUBLE, K_FLOAT
     };
-    Type *type = prune(force(type_value)->b.type);
+    Value *value = FORCE(type_value);
+    Type *type;
     int i;
 
+    /* A type has one value (make_type), which remembers the answer. */
+    if (value->tag > 0) {
+        return (enum NumberKind)(value->tag - 1);
+    }
+    type = prune(value->b.type);
     if (type->kind == TY_CON) {
         TypeCon *constructor = type->constructor;
 
         if (constructor->number_kind > 0) {
+            value->tag = constructor->number_kind;
             return (enum NumberKind)(constructor->number_kind - 1);
         }
         for (i = 0; names[i] != NULL; i++) {
             if (strcmp(constructor->name, names[i]) == 0) {
                 constructor->number_kind = (int)kinds[i] + 1;
+                value->tag = constructor->number_kind;
                 return kinds[i];
             }
         }
@@ -117,7 +125,7 @@ static int is_float(enum NumberKind kind)
 
 static double float_operand(enum NumberKind kind, Value *value)
 {
-    long bits = force(value)->a.number;
+    long bits = FORCE(value)->a.number;
     double d;
     float f;
     unsigned int low = (unsigned int)bits;
@@ -159,13 +167,13 @@ static Value *make_number(enum NumberKind kind, unsigned long bits)
 static long operand(enum NumberKind kind, Value *value)
 {
     (void)kind;
-    return force(value)->a.number;
+    return FORCE(value)->a.number;
 }
 
 /* Whether either Integer is big. */
 static int any_big(Value *a, Value *b)
 {
-    return integer_is_big(force(a)) || integer_is_big(force(b));
+    return integer_is_big(FORCE(a)) || integer_is_big(FORCE(b));
 }
 
 /* a + b, a - b or a * b in *result, if it fits in a long. */
