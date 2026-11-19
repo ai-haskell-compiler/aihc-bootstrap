@@ -491,10 +491,14 @@ static void resolve_synonym_update(Module *module, const Scope *scope,
 
 /* Rewrites e { f = a } in place to
 
+       case e of C v1 v2 v3 -> C v1 a v3
+
+   or, if several constructors have the fields, to
+
        let u = a in case e of
          C v1 v2 v3 -> C v1 u v3      (for each constructor with the fields)
 
-   The let keeps `a` in one place when there are several constructors. */
+   where the let keeps `a` in one place. */
 static void resolve_record_update(Module *module, const Scope *scope, Expr *expr)
 {
     Entity *entity = lookup_entity(module, NS_VARIABLE, expr->field_qualifier,
@@ -503,6 +507,7 @@ static void resolve_record_update(Module *module, const Scope *scope, Expr *expr
     Expr *let = new_simple_expr(E_LET, expr->token);
     Expr *match = new_simple_expr(E_CASE, expr->token);
     Alternative **last = &match->alternatives;
+    int shared = 0;
     int c;
     int i;
     int j;
@@ -529,6 +534,22 @@ static void resolve_record_update(Module *module, const Scope *scope, Expr *expr
             record_field_value(module, scope, expr, expr->field_names[j]);
     }
 
+    /* The new values are each written once, so they are bound by a let if
+       several constructors have the fields. If only one has them, they go
+       straight into its alternative: a field whose type has a forall
+       needs its value where the constructor is applied to it, since that
+       is where it is made a function of the type variables (infer.c). */
+    for (c = 0; c < type->constructor_count; c++) {
+        int has_all = 1;
+
+        for (j = 0; j < expr->field_count; j++) {
+            if (field_index(type->constructors[c], expr->field_names[j]) < 0) {
+                has_all = 0;
+            }
+        }
+        shared += has_all;
+    }
+    shared = shared > 1;
     for (c = 0; c < type->constructor_count; c++) {
         Constructor *constructor = type->constructors[c];
         Alternative *alternative;
@@ -561,7 +582,11 @@ static void resolve_record_update(Module *module, const Scope *scope, Expr *expr
             value->local = pattern->arguments[i]->variable;
             for (j = 0; j < expr->field_count; j++) {
                 if (field_index(constructor, expr->field_names[j]) == i) {
-                    value->local = let->bindings[j];
+                    if (shared) {
+                        value->local = let->bindings[j];
+                    } else {
+                        value = let->values[j];
+                    }
                 }
             }
             body = new_simple_application(body, value);
@@ -576,7 +601,7 @@ static void resolve_record_update(Module *module, const Scope *scope, Expr *expr
     if (match->alternatives == NULL) {
         unresolved(module, expr->token, expr->field_names[0]);
     }
-    *expr = *let;
+    *expr = shared ? *let : *match;
 }
 
 /* Resolves the definitions of an E_LET and returns the scope extended with

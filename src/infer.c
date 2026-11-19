@@ -614,7 +614,7 @@ static void generalize_function(Binding *binding, int count,
         add_type_parameters(*binding->definition, count, variables);
 }
 
-static void give_parameter_types(Expr *expr, Type *type);
+static void give_parameter_types(Expr *expr, Type *type, int is_local);
 
 static void infer_binding(Inference *inference, Binding *binding)
 {
@@ -630,10 +630,33 @@ static void infer_binding(Inference *inference, Binding *binding)
     }
     binding->state = BINDING_INFERRING;
     if (binding->scheme != NULL) {
-        /* It has a signature. */
-        give_parameter_types(*binding->definition, binding->scheme->type);
+        /* It has a signature. If that starts with a forall, its type
+           variables are in scope in the definition, as those of a
+           top-level signature are: go :: forall value. ... can say
+           eqT @value. */
+        Binding **outer_variables = inference->variables;
+        int outer_count = inference->variable_count;
+
+        if (token_is(&inference->module->tokens[binding->signature_start],
+                     T_VARID, "forall")) {
+            int own = binding->scheme->variable_count;
+
+            inference->variables =
+                xmalloc((size_t)(outer_count + own) * sizeof(Binding *) + 1);
+            for (i = 0; i < outer_count; i++) {
+                inference->variables[i] = outer_variables[i];
+            }
+            for (i = 0; i < own; i++) {
+                inference->variables[outer_count + i] =
+                    binding->scheme->variables[i];
+            }
+            inference->variable_count = outer_count + own;
+        }
+        give_parameter_types(*binding->definition, binding->scheme->type, 1);
         unify(infer(inference, *binding->definition), binding->scheme->type,
               token);
+        inference->variables = outer_variables;
+        inference->variable_count = outer_count;
         *binding->definition = add_type_parameters(
             *binding->definition, binding->scheme->variable_count,
             binding->scheme->variables);
@@ -814,13 +837,25 @@ static void infer_alternative(Inference *inference, Alternative *alternative,
     givens = outer_givens;
 }
 
+/* Notes in an expression that is a case (maybe after lets) that its type
+   is known to be `type`. */
+static void expect_type(Expr *expr, Type *type)
+{
+    while (expr->kind == E_LET && expr->body != NULL) {
+        expr = expr->body;
+    }
+    if (expr->kind == E_CASE) {
+        expr->type = type;
+    }
+}
+
 /* Where there is a signature, the parameters get their types from it
    before the definition is inferred. For a parameter with a forall type
    that is what lets every use of it give it types of its own. For the
    others it means that a type variable of the signature is known as such
    from the start, which a match on Refl relies on (see the given types
    above). */
-static void give_parameter_types(Expr *expr, Type *type)
+static void give_parameter_types(Expr *expr, Type *type, int is_local)
 {
     Type *parameter;
     Type *result;
@@ -830,6 +865,15 @@ static void give_parameter_types(Expr *expr, Type *type)
         expr->local->type = prune(parameter);
         expr = expr->body;
         type = result;
+    }
+    /* If what a local function gives is a case, the signature also says
+       what type the case has, which is noted in the case for when it is
+       inferred. Otherwise its first alternative would decide: after a
+       match on Refl that is a type where a type variable was shown to be
+       another type (see the given types above), which the alternatives
+       after it do not have. */
+    if (is_local) {
+        expect_type(expr, type);
     }
 }
 
@@ -949,6 +993,23 @@ static Type *infer(Inference *inference, Expr *expr)
     case E_CASE:
         type = infer(inference, expr->scrutinee);
         result = fresh(inference);
+        if (expr->type != NULL) {
+            /* A signature says what it is: see give_parameter_types. The
+               same goes for an alternative that is a case in turn. */
+            const Guard *guard;
+
+            unify(result, expr->type, expr->token);
+            for (alternative = expr->alternatives; alternative != NULL;
+                 alternative = alternative->next) {
+                if (alternative->body != NULL) {
+                    expect_type(alternative->body, expr->type);
+                }
+                for (guard = alternative->guards; guard != NULL;
+                     guard = guard->next) {
+                    expect_type(guard->body, expr->type);
+                }
+            }
+        }
         for (alternative = expr->alternatives; alternative != NULL;
              alternative = alternative->next) {
             infer_alternative(inference, alternative, type, result);
@@ -1017,7 +1078,7 @@ Expr *infer_global(Global *global, Expr *expr)
         }
     }
     if (scheme != NULL) {
-        give_parameter_types(expr, scheme->type);
+        give_parameter_types(expr, scheme->type, 0);
     }
     type = infer(&inference, expr);
     if (scheme != NULL) {
