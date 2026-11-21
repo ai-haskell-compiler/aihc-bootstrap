@@ -47,6 +47,32 @@ records where each declaration is. A declaration is parsed, resolved and typed
 the first time its value is needed. Code that AIHC never runs is never looked
 at, so unused features in dependencies do not have to be implemented.
 
+## Bootstrapping AIHC
+
+```sh
+git submodule update --init
+make bootstrap
+```
+
+This builds AIHC with AIHC in the interpreter and leaves the compiler in
+`build/bootstrap/aihc`. `scripts/bootstrap.py` does the work:
+
+- The packages are those of `bootstrap/plan.tsv`: AIHC's own plan for its
+  executable with every optional feature off, 91 packages. The sources of
+  the 76 from Hackage are fetched and checked against the SHA-256 in the
+  plan.
+- Each package is built by an AIHC of its own, without optimisation
+  (`-O 0`), as soon as the packages it needs are done. `--jobs N` sets how
+  many run at once; one can need 5 GB.
+- A run that is started again goes on after the packages that are done.
+  The logs are in `build/bootstrap/logs`.
+
+All of it is about 6 hours of processor time. The longest chain of
+packages that need each other is 3.4 hours, of which AIHC's own library is
+1.6. The compiler that comes out is, byte for byte, the one a native AIHC
+builds from the same sources at the same paths, and so is every object
+file on the way.
+
 ## Type classes without dictionaries
 
 Types are passed at run time. The type pass (`src/infer.c`) does not look for
@@ -92,6 +118,9 @@ are therefore never looked at.
 | `lib/` | The interpreter's own base library, in Haskell, and small replacements for third-party packages (`lib/Options/Applicative.hs`) |
 | `glue/` | What Cabal would generate for AIHC (`Paths_aihc`) |
 | `vendor/` | AIHC and its libraries `aihc-parser`, `aihc-cpp` and `aihc-cabal-syntax`: submodules, each pinned to a commit |
+| `bootstrap/plan.tsv` | The packages AIHC is made of, in the order they are built, with the hashes of their sources |
+| `scripts/run-aihc.sh` | Runs AIHC in the interpreter |
+| `scripts/bootstrap.py` | Builds AIHC with it |
 | `tests/` | `NAME.hs` with the expected output in `NAME.stdout` |
 
 ## Tests
