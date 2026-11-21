@@ -9,7 +9,7 @@ build/aihc-bootstrap: $(SOURCES) $(HEADERS) Makefile
 	mkdir -p build
 	$(CC) $(CFLAGS) -o $@ $(SOURCES) -lm -lpthread
 
-.PHONY: test test-gc survey clean
+.PHONY: test test-gc survey bootstrap clean
 
 test: build/aihc-bootstrap
 	sh tests/run.sh
@@ -22,6 +22,10 @@ test-gc: build/aihc-bootstrap
 # What AIHC needs that the interpreter does not have yet (src/survey.c).
 survey: build/aihc-bootstrap
 	AIHC_BOOTSTRAP_FLAGS=--survey sh scripts/run-aihc.sh
+
+# AIHC, built by AIHC in the interpreter (scripts/bootstrap.py).
+bootstrap: build/aihc-bootstrap
+	python3 scripts/bootstrap.py
 
 clean:
 	rm -rf build

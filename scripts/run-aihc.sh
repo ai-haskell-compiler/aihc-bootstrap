@@ -19,7 +19,11 @@ set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 aihc=$(cd "${AIHC:-$here/vendor/aihc}" && pwd)
 mkdir -p "$here/build/aihc-work"
-ln -sfn "$aihc/core-libs" "$here/build/aihc-work/core-libs"
+# Not made again if it is there: of two AIHCs that start together, one
+# would find the other's link in its way.
+if [ "$(readlink "$here/build/aihc-work/core-libs" || true)" != "$aihc/core-libs" ]; then
+    ln -sfn "$aihc/core-libs" "$here/build/aihc-work/core-libs"
+fi
 cd "$here/build/aihc-work"
 directories="
 $here/lib
