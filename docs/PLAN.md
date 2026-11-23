@@ -286,8 +286,8 @@ Three things have to be the same for the files to be:
 - **The sources of AIHC.** The interpreter runs the sources in `vendor/`.
   The AIHC to compare with has to be built from the same commits:
   `cabal build aihc` in `vendor/aihc`, which takes the three libraries at
-  the versions that `vendor/` pins (`aihc-parser` 5.0.0.0, `aihc-cpp`
-  2.0.0.0, `aihc-cabal-syntax` 2.0.0.0). Point it at the data files of the
+  the versions that `vendor/` pins (`aihc-parser` 6.0.0.0, `aihc-cpp`
+  2.0.0.1, `aihc-cabal-syntax` 2.0.0.0). Point it at the data files of the
   submodule with `aihc_datadir`.
 - **The compiler's identity.** AIHC puts a hash of its own executable into
   the hash of every package. Set `AIHC_COMPILER_IDENTITY` to the same
