@@ -76,6 +76,12 @@ openTempFile directory template = processId >>= \process -> attempt process (0 :
 openBinaryTempFile :: FilePath -> String -> IO (FilePath, Handle)
 openBinaryTempFile = openTempFile
 
+openTempFileWithDefaultPermissions :: FilePath -> String -> IO (FilePath, Handle)
+openTempFileWithDefaultPermissions = openTempFile
+
+openBinaryTempFileWithDefaultPermissions :: FilePath -> String -> IO (FilePath, Handle)
+openBinaryTempFileWithDefaultPermissions = openTempFile
+
 -- ---- Writing ----
 
 hPutStr :: Handle -> String -> IO ()
@@ -106,6 +112,10 @@ hSetBinaryMode _ _ = pure ()
 
 hIsEOF :: Handle -> IO Bool
 hIsEOF (Handle handle) = handleIsEOF handle
+
+-- AIHC asks only to decide whether to be interactive.
+hIsTerminalDevice :: Handle -> IO Bool
+hIsTerminalDevice _ = pure False
 
 isEOF :: IO Bool
 isEOF = hIsEOF stdin

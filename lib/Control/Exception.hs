@@ -48,6 +48,16 @@ catch action handler = catchAny action (\exception -> case fromException excepti
 try :: Exception e => IO a -> IO (Either e a)
 try action = catch (fmap Right action) (\e -> pure (Left e))
 
+tryJust :: Exception e => (e -> Maybe b) -> IO a -> IO (Either b a)
+tryJust select action = catch (fmap Right action) (\e -> case select e of
+  Just b -> pure (Left b)
+  Nothing -> throwIO e)
+
+catchJust :: Exception e => (e -> Maybe b) -> IO a -> (b -> IO a) -> IO a
+catchJust select action handler = catch action (\e -> case select e of
+  Just b -> handler b
+  Nothing -> throwIO e)
+
 foreign import prim "raise" raise :: SomeException -> a
 
 foreign import prim "catchAny" catchAny :: IO a -> (SomeException -> IO a) -> IO a
