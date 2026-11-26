@@ -71,11 +71,13 @@ This builds AIHC with AIHC in the interpreter and leaves the compiler in
 - A run that is started again goes on after the packages that are done.
   The logs are in `build/bootstrap/logs`.
 
-All of it is about 6 hours of processor time. The longest chain of
-packages that need each other is 3.4 hours, of which AIHC's own library is
-1.6. The compiler that comes out is, byte for byte, the one a native AIHC
-builds from the same sources at the same paths, and so is every object
-file on the way.
+All of it is about 4 hours of processor time. The longest chain of
+packages that need each other is 3 hours, of which AIHC's own library and
+executable are 1.1. The compiler that comes out is, byte for byte, the one
+that the released AIHC 0.3.0 builds from the same plan
+(`--runner path/to/aihc --out build/native`), and so is every object file
+on the way. Only the build metadata differs: timestamps, and hashes of
+command lines that hold the output directory.
 
 ## Type classes without dictionaries
 
