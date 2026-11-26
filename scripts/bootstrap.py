@@ -16,6 +16,12 @@ The interpreted AIHC does not talk to Hackage. So the sources are fetched
 here, checked against the plan, and put in one directory, the workspace,
 which AIHC is told to take its packages from.
 
+A .hsc file goes through hsc2hs. That is hsc2hs from Hackage, run in the
+interpreter as well (scripts/hsc2hs.sh): its sources are first put through
+the C preprocessor, which the interpreter does not have. No other source
+preprocessor is needed, and none is used, so that no program that GHC
+built takes part.
+
 Everything goes to DIR (build/bootstrap): the workspace, the store of built
 packages, the logs, results.tsv with the time and memory of every package,
 and the compiler, DIR/aihc. A run that is started again goes on after the
@@ -33,6 +39,14 @@ import urllib.request
 
 HACKAGE = 'https://hackage.haskell.org/package/'
 CONSTRAINTS = ['--constraint', 'aihc -hackage', '--constraint', 'aihc -pretty-ui']
+# hsc2hs from Hackage: the release, and the SHA-256 of its archive.
+HSC2HS = ('hsc2hs-0.68.10', '6f4e34d788fe2ca7091ee0a10307ee8a7c060a1ba890f2bffad16a7d4d5cef76')
+# What the C preprocessor is told about the platform when it reads hsc2hs.
+# Its conditions only ask for a recent base and process, and for Windows.
+HSC2HS_CPP = ['-E', '-P', '-w', '-undef', '-traditional', '-x', 'c',
+              '-DMIN_VERSION_base(a,b,c)=1', '-DMIN_VERSION_process(a,b,c)=1',
+              '-D__GLASGOW_HASKELL__=912',
+              '-D%s_HOST_OS' % ('darwin' if sys.platform == 'darwin' else 'linux')]
 # These three are built with the first package that needs them.
 WITH_THE_FIRST = ('aihc-rts', 'aihc-prim', 'aihc-base')
 
@@ -90,6 +104,32 @@ def prepare_workspace():
         os.rename(unpacked, directory)
 
 
+def prepare_hsc2hs():
+    release, sha256 = HSC2HS
+    directory = out + '/tools/' + release
+    if os.path.isdir(directory + '/pp'):
+        return directory
+    print('fetching ' + release, flush=True)
+    data = fetch(HACKAGE + release + '/' + release + '.tar.gz', sha256)
+    shutil.rmtree(out + '/tools', ignore_errors=True)
+    os.makedirs(out + '/tools')
+    with open(out + '/tools/' + release + '.tar.gz', 'wb') as file:
+        file.write(data)
+    with tarfile.open(out + '/tools/' + release + '.tar.gz') as tar:
+        for member in tar.getmembers():
+            if not (member.name + '/').startswith(release + '/') or '..' in member.name.split('/'):
+                sys.exit('%s has a file outside %s' % (release, release))
+        tar.extractall(out + '/tools')
+    for root, _, files in os.walk(directory + '/src'):
+        for file in files:
+            if file.endswith('.hs'):
+                source = os.path.join(root, file)
+                target = directory + '/pp' + source[len(directory + '/src'):]
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                subprocess.run(['cc'] + HSC2HS_CPP + [source, '-o', target], check=True)
+    return directory
+
+
 def command(name):
     _, _, kind, where, _, _, _ = info[name]
     if name == 'aihc-stage1':
@@ -125,7 +165,11 @@ def build():
                 state[fields[0]] = 'done'
     os.makedirs(out + '/logs', exist_ok=True)
     results = open(out + '/results.tsv', 'a')
-    environment = dict(os.environ, AIHC_COMPILER_IDENTITY='bootstrap')
+    missing = here + '/scripts/missing-tool.sh'
+    environment = dict(os.environ, AIHC_COMPILER_IDENTITY='bootstrap',
+                       AIHC_HSC2HS=here + '/scripts/hsc2hs.sh',
+                       HSC2HS_SOURCES=prepare_hsc2hs(),
+                       AIHC_ALEX=missing, AIHC_HAPPY=missing, AIHC_C2HS=missing)
     running = {}
     start = time.time()
 

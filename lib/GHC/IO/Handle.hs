@@ -1,4 +1,4 @@
-module GHC.IO.Handle where
+module GHC.IO.Handle (module GHC.IO.Handle, Handle) where
 
 -- A second handle for the same file. AIHC uses it to give the output of
 -- its test runs to several programs, which the interpreter never does.

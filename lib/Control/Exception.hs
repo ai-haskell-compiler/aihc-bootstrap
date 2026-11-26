@@ -58,6 +58,10 @@ catchJust select action handler = catch action (\e -> case select e of
   Just b -> handler b
   Nothing -> throwIO e)
 
+-- As GHC compiles it with optimisation: the condition is not checked.
+assert :: Bool -> a -> a
+assert _ a = a
+
 foreign import prim "raise" raise :: SomeException -> a
 
 foreign import prim "catchAny" catchAny :: IO a -> (SomeException -> IO a) -> IO a

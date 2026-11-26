@@ -926,28 +926,8 @@ static void add_field(Constructor *constructor, const char *name, int start,
     constructor->arity++;
 }
 
-/* The end of the field type that starts at `start`: one token, or a group
-   in brackets. */
-static int field_end(const Token *tokens, int start, int end)
-{
-    int depth = 0;
-    int i;
-
-    for (i = start; i < end; i++) {
-        if (is_open_bracket(&tokens[i])) {
-            depth++;
-        } else if (is_close_bracket(&tokens[i])) {
-            depth--;
-        }
-        if (depth == 0) {
-            return i + 1;
-        }
-    }
-    return end;
-}
-
-/* A constructor written between its two fields: a :| [a]. Returns NULL if
-   that is not what is at `*position`. */
+/* A constructor written between its two fields: a :| [a] or a :< Seq a.
+   Returns NULL if that is not what is at `*position`. */
 static Constructor *read_infix_constructor(Module *module,
                                            Constructor *constructor,
                                            int *position, int end)
@@ -969,7 +949,27 @@ static Constructor *read_infix_constructor(Module *module,
                          && tokens[i].kind != T_CONID)) {
             return NULL;
         }
-        stop = field_end(tokens, i, end);
+        /* Each side is a whole type, as in  a :< Seq a : the left one
+           ends at the operator, the right one at the next constructor. */
+        if (side == 0) {
+            int depth = 0;
+
+            for (stop = i; stop < end; stop++) {
+                if (is_open_bracket(&tokens[stop])) {
+                    depth++;
+                } else if (is_close_bracket(&tokens[stop])) {
+                    depth--;
+                } else if (depth == 0 && tokens[stop].kind == T_VARSYM
+                           && tokens[stop].text[0] == ':') {
+                    break;
+                }
+            }
+        } else {
+            stop = find_reserved(tokens, i, end, "|");
+            if (find_reserved(tokens, i, stop, "deriving") < stop) {
+                stop = find_reserved(tokens, i, stop, "deriving");
+            }
+        }
         add_field(constructor, NULL, i, stop, strict);
         i = stop;
         if (side == 0) {
@@ -1583,8 +1583,52 @@ static void add_declaration(Module *module, int start, int end)
     }
 }
 
+/* The end of the top-level declaration that starts at `start`: the next
+   token that is first on its line in the column of the declarations and
+   not inside explicit braces, as the `}` of a record that ends in the
+   first column is. A `;` also ends a declaration, as in
+       isSymbol '!' = True; isSymbol '#' = True
+   but only while no layout block (of let, where, do, case) has opened in
+   the declaration: inside one, a `;` separates the block's items. *next
+   is where the following declaration starts. */
+static int declaration_end(const Token *tokens, int start, int end,
+                           int column, int *next)
+{
+    static const char *const openers[] = {"let", "where", "do", "case", NULL};
+    int braces = 0;
+    int blocks = 0;
+    int i;
+
+    for (i = start; i < end; i++) {
+        if (i > start && braces == 0 && tokens[i].col == column
+            && tokens[i].line != tokens[i - 1].line) {
+            break;
+        }
+        if (token_is(&tokens[i], T_SPECIAL, "{")) {
+            braces++;
+        } else if (token_is(&tokens[i], T_SPECIAL, "}")) {
+            braces--;
+        } else if (token_is(&tokens[i], T_SPECIAL, ";") && braces == 0
+                   && !blocks) {
+            *next = i + 1;
+            return i;
+        } else if (tokens[i].kind == T_RESERVED) {
+            int k;
+
+            for (k = 0; openers[k] != NULL; k++) {
+                if (strcmp(tokens[i].text, openers[k]) == 0) {
+                    blocks = 1;
+                }
+            }
+        }
+    }
+    *next = i;
+    return i;
+}
+
 /* The layout rule for the top level: a token that is first on its line and
-   in the same column as the first declaration starts a new declaration. */
+   in the same column as the first declaration starts a new declaration
+   (see declaration_end). */
 static void split_declarations(Module *module, int position)
 {
     const Token *tokens = module->tokens;
@@ -1598,9 +1642,12 @@ static void split_declarations(Module *module, int position)
         end++;
     }
     while (position < end) {
-        int next = item_end(tokens, position, end, column);
+        int next;
+        int last = declaration_end(tokens, position, end, column, &next);
 
-        add_declaration(module, position, next);
+        if (last > position) {
+            add_declaration(module, position, last);
+        }
         position = next;
     }
 }

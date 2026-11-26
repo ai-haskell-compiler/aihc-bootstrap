@@ -58,9 +58,13 @@ This builds AIHC with AIHC in the interpreter and leaves the compiler in
 `build/bootstrap/aihc`. `scripts/bootstrap.py` does the work:
 
 - The packages are those of `bootstrap/plan.tsv`: AIHC's own plan for its
-  executable with every optional feature off, 91 packages. The sources of
-  the 76 from Hackage are fetched and checked against the SHA-256 in the
+  executable with every optional feature off, 56 packages. The sources of
+  the 45 from Hackage are fetched and checked against the SHA-256 in the
   plan.
+- A `.hsc` file goes through hsc2hs from Hackage, run in the interpreter
+  too (`scripts/hsc2hs.sh`), after the C preprocessor has read its
+  sources. No other source preprocessor is needed or used, so no program
+  that GHC built takes part.
 - Each package is built by an AIHC of its own, without optimisation
   (`-O 0`), as soon as the packages it needs are done. `--jobs N` sets how
   many run at once; one can need 5 GB.
