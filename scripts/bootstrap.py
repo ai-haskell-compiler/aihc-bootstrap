@@ -18,7 +18,8 @@ which AIHC is told to take its packages from.
 
 A .hsc file goes through hsc2hs. That is hsc2hs from Hackage, run in the
 interpreter as well (scripts/hsc2hs.sh): its sources are first put through
-the C preprocessor, which the interpreter does not have. No other source
+the C preprocessor, which the interpreter does not have. AIHC_HSC2HS can
+name another hsc2hs instead. No other source
 preprocessor is needed, and none is used, so that no program that GHC
 built takes part.
 
@@ -167,9 +168,11 @@ def build():
     results = open(out + '/results.tsv', 'a')
     missing = here + '/scripts/missing-tool.sh'
     environment = dict(os.environ, AIHC_COMPILER_IDENTITY='bootstrap',
-                       AIHC_HSC2HS=here + '/scripts/hsc2hs.sh',
-                       HSC2HS_SOURCES=prepare_hsc2hs(),
                        AIHC_ALEX=missing, AIHC_HAPPY=missing, AIHC_C2HS=missing)
+    # An hsc2hs that AIHC_HSC2HS names is used instead of the interpreted one.
+    if not environment.get('AIHC_HSC2HS'):
+        environment['AIHC_HSC2HS'] = here + '/scripts/hsc2hs.sh'
+        environment['HSC2HS_SOURCES'] = prepare_hsc2hs()
     running = {}
     start = time.time()
 
