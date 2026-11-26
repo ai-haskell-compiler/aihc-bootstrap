@@ -10,7 +10,7 @@ module Data.Map.Base where
 
 import Control.DeepSeq (NFData)
 import Data.Set (Set (..))
-import Prelude hiding (filter, foldr, lookup, map, null)
+import Prelude hiding (filter, foldl', foldr, lookup, map, null)
 import qualified Prelude as P
 
 infixl 9 !
@@ -136,13 +136,13 @@ alter f key m = case f (lookup key m) of
   Just value -> insert key value m
 
 fromList :: Ord k => [(k, a)] -> Map k a
-fromList = foldl' (\m (k, a) -> insert k a m) empty
+fromList = P.foldl' (\m (k, a) -> insert k a m) empty
 
 fromListWith :: Ord k => (a -> a -> a) -> [(k, a)] -> Map k a
 fromListWith f = fromListWithKey (\_ new old -> f new old)
 
 fromListWithKey :: Ord k => (k -> a -> a -> a) -> [(k, a)] -> Map k a
-fromListWithKey f = foldl' (\m (k, a) -> insertWithKey f k a m) empty
+fromListWithKey f = P.foldl' (\m (k, a) -> insertWithKey f k a m) empty
 
 fromAscList :: Ord k => [(k, a)] -> Map k a
 fromAscList = fromList
@@ -269,6 +269,9 @@ foldr f = foldrWithKey (\_ a rest -> f a rest)
 foldl :: (b -> a -> b) -> b -> Map k a -> b
 foldl f = foldlWithKey (\total _ a -> f total a)
 
+foldl' :: (b -> a -> b) -> b -> Map k a -> b
+foldl' f start m = P.foldl' f start (elems m)
+
 foldr' :: (a -> b -> b) -> b -> Map k a -> b
 foldr' = foldr
 
@@ -363,7 +366,7 @@ unionWith f = unionWithKey (\_ a b -> f a b)
 unionWithKey :: Ord k => (k -> a -> a -> a) -> Map k a -> Map k a -> Map k a
 unionWithKey f left right = foldlWithKey (\m k a -> insertWithKey f k a m) right left
 
-unions :: Ord k => [Map k a] -> Map k a
+unions :: (Foldable f, Ord k) => f (Map k a) -> Map k a
 unions = P.foldl' union empty
 
 unionsWith :: Ord k => (a -> a -> a) -> [Map k a] -> Map k a
