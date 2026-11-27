@@ -1,0 +1,57 @@
+# How long each package of bootstrap/plan.tsv took in the interpreter: the
+# package, wall seconds, processor seconds. From one run of AIHC 0.3.0 on an
+# Apple M4 Pro with --jobs 7. scripts/bootstrap-tui.py estimates the
+# time left from it; it does not change the build.
+aihc-internal	1444	1435.36
+primes	18	16.57
+system-cxx-std-lib	1	0.22
+groups	21	19.69
+parser-combinators	30	28.92
+deepseq	31	30.50
+vector-stream	42	41.42
+array	77	75.66
+integer-logarithms	20	18.94
+colour	109	107.96
+stm	33	32.09
+ansi-terminal-types	36	35.07
+ansi-terminal	21	20.69
+transformers	154	153.02
+transformers-compat	48	47.08
+mtl	62	60.99
+aihc-template-haskell	421	418.21
+exceptions	118	116.34
+primitive	210	207.95
+time	247	244.53
+bytestring	307	305.20
+cryptohash-sha256	23	22.58
+os-string	78	76.23
+filepath	85	83.17
+containers	545	543.01
+commutative-semigroups	19	17.84
+vector	399	396.42
+binary	77	75.20
+unix	210	187.23
+file-io	32	31.22
+directory	67	64.55
+process	53	50.22
+text	338	335.96
+hashable	59	56.97
+aihc-cpp	88	86.85
+case-insensitive	29	27.89
+prettyprinter	94	92.82
+scientific	59	57.41
+prettyprinter-ansi-terminal	32	31.40
+unordered-containers	148	147.48
+optparse-applicative	107	105.48
+async	45	44.73
+monoid-subclasses	313	311.43
+monoidmap-internal	32	31.75
+monoidmap	45	44.78
+megaparsec	543	541.31
+aihc-cabal-syntax	146	145.14
+aihc-hackage	111	109.69
+aihc-parser	1595	1592.03
+aihc-package-plan	229	227.13
+aihc-resolve	584	582.00
+aihc-tc	1505	1501.55
+aihc-stage1	3833	3825.59

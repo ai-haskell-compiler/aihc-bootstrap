@@ -70,6 +70,10 @@ This builds AIHC with AIHC in the interpreter and leaves the compiler in
   many run at once; one can need 5 GB.
 - A run that is started again goes on after the packages that are done.
   The logs are in `build/bootstrap/logs`.
+- `python3 scripts/bootstrap-tui.py` shows how far a run has come and how
+  long it has left, from the files the run writes and the times of an
+  earlier run in `bootstrap/timings.tsv`. It can be started and quit at
+  any time; `--once` prints the state once instead.
 
 All of it is about 4 hours of processor time. The longest chain of
 packages that need each other is 3 hours, of which AIHC's own library and
