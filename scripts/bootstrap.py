@@ -24,11 +24,13 @@ preprocessor is needed, and none is used, so that no program that GHC
 built takes part.
 
 Everything goes to DIR (build/bootstrap): the workspace, the store of built
-packages, the logs, results.tsv with the time and memory of every package,
-and the compiler, DIR/aihc. A run that is started again goes on after the
+packages, the logs, results.tsv with when each package started and how long
+it took, and the compiler, DIR/aihc. scripts/bootstrap-tui.py shows the
+progress of a run from these files. A run that is started again goes on after the
 packages that are done. The runner (sh scripts/run-aihc.sh) is the command
 that AIHC's arguments are given to."""
 import hashlib
+import json
 import os
 import shlex
 import shutil
@@ -166,6 +168,10 @@ def build():
                 state[fields[0]] = 'done'
     os.makedirs(out + '/logs', exist_ok=True)
     results = open(out + '/results.tsv', 'a')
+    # Which process runs the build, so that scripts/bootstrap-tui.py can
+    # tell a running build from one that stopped.
+    with open(out + '/run.json', 'w') as file:
+        json.dump({'pid': os.getpid(), 'jobs': jobs, 'started': time.time()}, file)
     missing = here + '/scripts/missing-tool.sh'
     environment = dict(os.environ, AIHC_COMPILER_IDENTITY='bootstrap',
                        AIHC_ALEX=missing, AIHC_HAPPY=missing, AIHC_C2HS=missing)
@@ -206,9 +212,18 @@ def build():
                 record(name, [])
             elif all(state.get(d) == 'done' for d in needs[name]):
                 log = open(out + '/logs/' + name + '.log', 'w')
-                running[name] = (subprocess.Popen(command(name), cwd=here, env=environment,
+                # An AIHC that knows the variable writes its progress events
+                # there, one JSON object a line (scripts/bootstrap-tui.py).
+                events = out + '/logs/' + name + '.events.jsonl'
+                if os.path.exists(events):
+                    os.remove(events)
+                began = time.time()
+                results.write('%s\tstarted\t%.0f\n' % (name, began))
+                results.flush()
+                running[name] = (subprocess.Popen(command(name), cwd=here,
+                                                  env=dict(environment, AIHC_PROGRESS_EVENTS=events),
                                                   stdout=log, stderr=subprocess.STDOUT),
-                                 time.time(), log)
+                                 began, log)
         if not running and all(name in state for name in todo):
             break
         time.sleep(1)
