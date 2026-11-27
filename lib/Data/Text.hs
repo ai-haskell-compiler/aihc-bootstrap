@@ -212,6 +212,13 @@ concatMap f text = concat (P.map f (unpack text))
 replicate :: Int -> Text -> Text
 replicate n text = concat (P.replicate n text)
 
+-- The text with the character added in front until it is n long.
+justifyRight :: Int -> Char -> Text -> Text
+justifyRight n c text = append (pack (P.replicate (n - length text) c)) text
+
+justifyLeft :: Int -> Char -> Text -> Text
+justifyLeft n c text = append text (pack (P.replicate (n - length text) c))
+
 -- ---- Folds ----
 
 foldl' :: (a -> Char -> a) -> a -> Text -> a

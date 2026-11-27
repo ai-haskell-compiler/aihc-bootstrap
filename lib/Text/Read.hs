@@ -15,9 +15,14 @@ class Read a where
   -- what is left of the string. The Int is the precedence of the context,
   -- as for showsPrec.
   readsPrec :: Int -> ReadS a
+  readsPrec = readPrec_to_S readPrec
 
   readList :: ReadS [a]
   readList = readBracketed
+
+  -- An instance gives readsPrec or readPrec.
+  readPrec :: ReadPrec a
+  readPrec = readS_to_Prec readsPrec
 
 reads :: Read a => ReadS a
 reads = readsPrec 0
@@ -177,3 +182,64 @@ word name string = [rest | rest <- expect name string, not (continues rest)]
     continues rest = case rest of
       c : _ -> isDigit c || c == '_' || c == '\'' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
       [] -> False
+
+-- ---- ReadPrec ----
+
+-- A reader that knows the precedence of its context, as in base. It is
+-- only a wrapper of readsPrec here.
+newtype ReadPrec a = ReadPrec (Int -> ReadS a)
+
+readPrec_to_S :: ReadPrec a -> Int -> ReadS a
+readPrec_to_S (ReadPrec reader) = reader
+
+readS_to_Prec :: (Int -> ReadS a) -> ReadPrec a
+readS_to_Prec = ReadPrec
+
+instance Functor ReadPrec where
+  fmap f (ReadPrec reader) = ReadPrec (\precedence string -> [(f a, rest) | (a, rest) <- reader precedence string])
+
+instance Applicative ReadPrec where
+  pure a = ReadPrec (\_ string -> [(a, string)])
+  (<*>) f a = f >>= \g -> fmap g a
+
+instance Monad ReadPrec where
+  (>>=) (ReadPrec reader) next = ReadPrec (\precedence string ->
+    [result | (a, rest) <- reader precedence string, result <- readPrec_to_S (next a) precedence rest])
+
+instance MonadFail ReadPrec where
+  fail _ = ReadPrec (\_ _ -> [])
+
+-- The reader in a context of the given precedence: nothing if the context
+-- binds tighter.
+prec :: Int -> ReadPrec a -> ReadPrec a
+prec n (ReadPrec reader) = ReadPrec (\precedence string -> if precedence <= n then reader n string else [])
+
+-- The reader one level of precedence up, for an argument.
+step :: ReadPrec a -> ReadPrec a
+step (ReadPrec reader) = ReadPrec (\precedence string -> reader (precedence + 1) string)
+
+reset :: ReadPrec a -> ReadPrec a
+reset (ReadPrec reader) = ReadPrec (\_ string -> reader 0 string)
+
+-- The reader, or the reader inside any number of parentheses, where the
+-- context does not matter any more.
+parens :: ReadPrec a -> ReadPrec a
+parens (ReadPrec reader) = ReadPrec (\precedence string ->
+  reader precedence string ++ optionalParens (reader 0) string)
+
+-- Only what AIHC's instances look for: names, and single characters of
+-- punctuation or runs of symbol characters.
+data Lexeme = Ident String | Punc String | Symbol String
+  deriving (Eq, Show)
+
+lexP :: ReadPrec Lexeme
+lexP = ReadPrec (\_ string -> case skipSpaces string of
+  c : rest
+    | isIdentStart c -> let (name, rest') = span isIdentPart rest in [(Ident (c : name), rest')]
+    | c `elem` "()[]{},;`" -> [(Punc [c], rest)]
+    | c `elem` symbols -> let (more, rest') = span (`elem` symbols) rest in [(Symbol (c : more), rest')]
+  _ -> [])
+  where
+    isIdentStart c = c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+    isIdentPart c = isIdentStart c || isDigit c || c == '\''
+    symbols = "!#$%&*+./<=>?@\\^|-~:"

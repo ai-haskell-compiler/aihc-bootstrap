@@ -9,7 +9,7 @@ module Options.Applicative where
 --   pass two takes positional arguments from what is left.
 
 import System.Environment (getArgs)
-import System.Exit (exitFailure, exitSuccess)
+import System.Exit (ExitCode (..), exitFailure, exitSuccess)
 import System.IO (hPutStrLn, stderr)
 
 -- The outcome of running a parser on a list of arguments.
@@ -360,6 +360,27 @@ runInfo (ParserInfo (Parser items first) headerText description) arguments =
         then Failed ("Invalid option `" ++ extra ++ "'")
         else Failed ("Invalid argument `" ++ extra ++ "'")
     result -> result
+
+-- What execParserPure gives. A failure is the message alone.
+data ParserResult a = Success a | Failure ParserFailure | CompletionInvoked ()
+
+newtype ParserFailure = ParserFailure String
+
+data ParserPrefs = ParserPrefs
+
+defaultPrefs :: ParserPrefs
+defaultPrefs = ParserPrefs
+
+-- The message, and the exit code (1 for an error, 0 for help).
+renderFailure :: ParserFailure -> String -> (String, ExitCode)
+renderFailure (ParserFailure message) _ = (message, if null message then ExitSuccess else ExitFailure 1)
+
+execParserPure :: ParserPrefs -> ParserInfo a -> [String] -> ParserResult a
+execParserPure _ info arguments = case runInfo info arguments of
+  Parsed _ a _ -> Success a
+  HelpText text -> Failure (ParserFailure text)
+  HelpRequested -> Failure (ParserFailure "")
+  Failed message -> Failure (ParserFailure message)
 
 execParser :: ParserInfo a -> IO a
 execParser info = getArgs >>= (\arguments -> case runInfo info arguments of

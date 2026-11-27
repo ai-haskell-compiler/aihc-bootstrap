@@ -36,8 +36,8 @@ lists what is unsupported, most frequent first. Its first lines are the
 measure of progress:
 
 ```text
-modules loaded:        381
-definitions prepared:  13324 of 13334
+modules loaded:        395
+definitions prepared:  14838 of 14841
 ```
 
 The order of the library work is in [docs/PLAN.md](docs/PLAN.md).
@@ -58,20 +58,26 @@ This builds AIHC with AIHC in the interpreter and leaves the compiler in
 `build/bootstrap/aihc`. `scripts/bootstrap.py` does the work:
 
 - The packages are those of `bootstrap/plan.tsv`: AIHC's own plan for its
-  executable with every optional feature off, 91 packages. The sources of
-  the 76 from Hackage are fetched and checked against the SHA-256 in the
+  executable with every optional feature off, 56 packages. The sources of
+  the 45 from Hackage are fetched and checked against the SHA-256 in the
   plan.
+- A `.hsc` file goes through hsc2hs from Hackage, run in the interpreter
+  too (`scripts/hsc2hs.sh`), after the C preprocessor has read its
+  sources. No other source preprocessor is needed or used, so no program
+  that GHC built takes part.
 - Each package is built by an AIHC of its own, without optimisation
   (`-O 0`), as soon as the packages it needs are done. `--jobs N` sets how
   many run at once; one can need 5 GB.
 - A run that is started again goes on after the packages that are done.
   The logs are in `build/bootstrap/logs`.
 
-All of it is about 6 hours of processor time. The longest chain of
-packages that need each other is 3.4 hours, of which AIHC's own library is
-1.6. The compiler that comes out is, byte for byte, the one a native AIHC
-builds from the same sources at the same paths, and so is every object
-file on the way.
+All of it is about 4 hours of processor time. The longest chain of
+packages that need each other is 3 hours, of which AIHC's own library and
+executable are 1.1. The compiler that comes out is, byte for byte, the one
+that the released AIHC 0.3.0 builds from the same plan
+(`--runner path/to/aihc --out build/native`), and so is every object file
+on the way. Only the build metadata differs: timestamps, and hashes of
+command lines that hold the output directory.
 
 ## Type classes without dictionaries
 

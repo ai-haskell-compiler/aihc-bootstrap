@@ -140,9 +140,14 @@ static int next_item(Parser *parser, Block *block)
         found = parser->position < parser->end;
     } else if (token_is(peek(parser), T_RESERVED, "where")
                || token_is(peek(parser), T_RESERVED, "then")
-               || token_is(peek(parser), T_RESERVED, "else")) {
+               || token_is(peek(parser), T_RESERVED, "else")
+               || token_is(peek(parser), T_RESERVED, "in")) {
         /* These never start an item, whatever column they are in: they
-           belong to something around the block. */
+           belong to something around the block. An `in` in the column of
+           a let's bindings ends them:
+               let x = case y of
+                       ...
+               in x */
         found = 0;
     } else if (peek(parser)->kind == T_VARSYM
                && strcmp(peek(parser)->text, "-") != 0

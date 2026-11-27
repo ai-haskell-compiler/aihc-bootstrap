@@ -104,9 +104,8 @@ minimumBy order = foldl1 (\a b -> case order a b of
   GT -> b
   _ -> a)
 
-find :: (a -> Bool) -> [a] -> Maybe a
-find _ [] = Nothing
-find wanted (a : rest) = if wanted a then Just a else find wanted rest
+find :: Foldable t => (a -> Bool) -> t a -> Maybe a
+find wanted = foldr (\a rest -> if wanted a then Just a else rest) Nothing
 
 elemIndex :: Eq a => a -> [a] -> Maybe Int
 elemIndex a = findIndex (== a)

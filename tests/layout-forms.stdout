@@ -1,0 +1,6 @@
+1 then Just 2
+empty
+c3
+[True,True,False]
+[("x","1")]
+[("y","")]

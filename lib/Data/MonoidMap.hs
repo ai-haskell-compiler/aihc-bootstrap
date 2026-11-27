@@ -12,6 +12,7 @@ import Data.Map.Base (Map)
 import qualified Data.Map.Base as Map
 import Data.Monoid.Null (MonoidNull)
 import qualified Data.Monoid.Null as Null
+import Data.Semigroup.Cancellative (Reductive (..))
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Prelude hiding (filter, map, null)
@@ -144,3 +145,11 @@ append = unionWith (<>)
 
 minus :: (Ord k, MonoidNull v, Group v) => MonoidMap k v -> MonoidMap k v -> MonoidMap k v
 minus = unionWith (~~)
+
+-- Whether each value of the first map is a part of the value of the
+-- second at the same key, as monoidmap 0.2 says.
+isSubmapOf :: (Ord k, Monoid v, Reductive v) => MonoidMap k v -> MonoidMap k v -> Bool
+isSubmapOf = isSubmapOfBy (\v1 v2 -> maybe False (const True) (v2 </> v1))
+
+isSubmapOfBy :: (Ord k, Monoid v1, Monoid v2) => (v1 -> v2 -> Bool) -> MonoidMap k v1 -> MonoidMap k v2 -> Bool
+isSubmapOfBy leq m1 m2 = all (\k -> get k m1 `leq` get k m2) (Set.toList (nonNullKeys m1))

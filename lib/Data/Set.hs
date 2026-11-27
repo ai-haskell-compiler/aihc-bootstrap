@@ -68,7 +68,7 @@ foldl f start set = P.foldl f start (toAscList set)
 union :: Ord a => Set a -> Set a -> Set a
 union (Set left) (Set right) = Set (M.union left right)
 
-unions :: Ord a => [Set a] -> Set a
+unions :: (Foldable f, Ord a) => f (Set a) -> Set a
 unions = P.foldl' union empty
 
 difference :: Ord a => Set a -> Set a -> Set a
